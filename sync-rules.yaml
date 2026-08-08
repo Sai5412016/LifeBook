@@ -1,0 +1,39 @@
+# LifeBook PowerSync Sync Rules (Master-Spec §6.1).
+# Paste this into your PowerSync instance → "Sync Rules".
+#
+# Two buckets:
+#   household_data — everything scoped to the households the user belongs to.
+#   user_data      — the user's own preferences (per-user, not per-household).
+#
+# request.user_id() is the authenticated Supabase user id (JWT `sub`).
+# Note vs Spec §6.1: `households` and `user_preferences` were missing there and
+# are added here so both actually sync.
+
+bucket_definitions:
+  household_data:
+    parameters: >
+      SELECT household_id FROM household_members
+      WHERE user_id = request.user_id() AND deleted_at IS NULL
+    data:
+      - SELECT * FROM households          WHERE id = bucket.household_id
+      - SELECT * FROM household_members   WHERE household_id = bucket.household_id
+      - SELECT * FROM children            WHERE household_id = bucket.household_id
+      - SELECT * FROM feeds               WHERE household_id = bucket.household_id
+      - SELECT * FROM sleeps              WHERE household_id = bucket.household_id
+      - SELECT * FROM diapers             WHERE household_id = bucket.household_id
+      - SELECT * FROM pumping_sessions    WHERE household_id = bucket.household_id
+      - SELECT * FROM milk_stash          WHERE household_id = bucket.household_id
+      - SELECT * FROM medications         WHERE household_id = bucket.household_id
+      - SELECT * FROM growth_measurements WHERE household_id = bucket.household_id
+      - SELECT * FROM temperatures        WHERE household_id = bucket.household_id
+      - SELECT * FROM vaccinations        WHERE household_id = bucket.household_id
+      - SELECT * FROM solid_foods         WHERE household_id = bucket.household_id
+      - SELECT * FROM milestones          WHERE household_id = bucket.household_id
+      - SELECT * FROM notes               WHERE household_id = bucket.household_id
+      - SELECT * FROM photos              WHERE household_id = bucket.household_id
+      - SELECT * FROM reminders           WHERE household_id = bucket.household_id
+
+  user_data:
+    parameters: SELECT request.user_id() AS user_id
+    data:
+      - SELECT * FROM user_preferences WHERE user_id = bucket.user_id

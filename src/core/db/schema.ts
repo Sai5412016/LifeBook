@@ -1,0 +1,288 @@
+/**
+ * core/db/schema.ts — PowerSync AppSchema (Master-Spec §5).
+ *
+ * Notes on the PowerSync client schema model:
+ * - The `id` column (TEXT PK) is IMPLICIT — PowerSync adds it to every table.
+ *   We generate it client-side as UUIDv7 (see core/db + repositories).
+ * - Column types are only TEXT | INTEGER | REAL. Booleans are stored as INTEGER 0/1.
+ * - The client schema does NOT enforce NOT NULL, CHECK, DEFAULT or FOREIGN KEY.
+ *   Those invariants are enforced at write time in each feature repository.
+ * - Indexes are simple column lists (ascending). Partial indexes (WHERE …) from
+ *   Spec §5.6 are not expressible here; queries always filter `deleted_at IS NULL`.
+ *
+ * Spec deviations (documented, not silent — see project instructions):
+ * - `needs_review` (INTEGER) added to `feeds`, `sleeps`, `pumping_sessions`.
+ *   Spec §6.2 requires it for the running-timer conflict resolution but §5.3 omitted it.
+ * - The `timeline` UNION view (Spec §5.7) is not a Table; it is created via raw SQL
+ *   after DB init (handled in core/db/queries, later step).
+ */
+
+import { column, Schema, Table } from '@powersync/react-native';
+
+/**
+ * Standard columns present in EVERY event table (Spec §5.1), minus the implicit `id`.
+ * Spread into each event table definition below.
+ */
+const eventColumns = {
+  household_id: column.text,
+  child_id: column.text,
+  occurred_at: column.text, // ISO-8601, always UTC
+  tz: column.text, // IANA zone at capture time
+  local_date: column.text, // YYYY-MM-DD in `tz`, DST-safe day grouping
+  created_by: column.text, // user id
+  created_at: column.text, // UTC
+  updated_at: column.text, // UTC, Last-Write-Wins basis
+  deleted_at: column.text, // soft delete (NULL = alive)
+  source_device_id: column.text,
+  note: column.text,
+};
+
+/* ────────────────────────────── Stammdaten (§5.2) ────────────────────────────── */
+
+const households = new Table({
+  name: column.text,
+  created_at: column.text,
+  updated_at: column.text,
+  deleted_at: column.text,
+});
+
+const household_members = new Table({
+  household_id: column.text,
+  user_id: column.text,
+  display_name: column.text,
+  role: column.text, // owner | caregiver | viewer
+  joined_at: column.text,
+  updated_at: column.text,
+  deleted_at: column.text,
+});
+
+const children = new Table({
+  household_id: column.text,
+  first_name: column.text,
+  birth_at: column.text, // UTC
+  birth_tz: column.text, // IANA, for exact age calculation
+  birth_weight_g: column.integer,
+  birth_length_mm: column.integer,
+  birth_head_circumference_mm: column.integer,
+  avatar_photo_id: column.text,
+  sort_index: column.integer,
+  created_at: column.text,
+  updated_at: column.text,
+  deleted_at: column.text,
+});
+
+/* ────────────────────────────── Event-Tabellen (§5.3) ────────────────────────────── */
+
+const feeds = new Table(
+  {
+    ...eventColumns,
+    feed_type: column.text, // breast_left | breast_right | breast_both | bottle_breastmilk | bottle_formula
+    amount_ml: column.integer,
+    duration_left_s: column.integer,
+    duration_right_s: column.integer,
+    ended_at: column.text,
+    is_running: column.integer, // 0 | 1
+    needs_review: column.integer, // 0 | 1 — set by timer conflict resolution (§6.2)
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'], running: ['child_id', 'is_running'] } },
+);
+
+const sleeps = new Table(
+  {
+    ...eventColumns,
+    ended_at: column.text,
+    quality: column.integer, // 1..5
+    location: column.text, // crib | stroller | carrier | bed | car
+    is_running: column.integer,
+    needs_review: column.integer,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'], running: ['child_id', 'is_running'] } },
+);
+
+const diapers = new Table(
+  {
+    ...eventColumns,
+    kind: column.text, // wet | dirty | mixed | dry
+    consistency: column.text,
+    color: column.text,
+    leaked: column.integer, // 0 | 1
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const pumping_sessions = new Table(
+  {
+    ...eventColumns,
+    side: column.text, // left | right | both
+    amount_ml: column.integer,
+    duration_s: column.integer,
+    is_running: column.integer,
+    needs_review: column.integer,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'], running: ['child_id', 'is_running'] } },
+);
+
+const milk_stash = new Table(
+  {
+    ...eventColumns,
+    expressed_at: column.text,
+    amount_ml: column.integer,
+    storage: column.text, // fridge | freezer
+    use_by_at: column.text, // purely arithmetic — NO safety statement (MDR)
+    consumed_at: column.text,
+    discarded_at: column.text,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const medications = new Table(
+  {
+    ...eventColumns,
+    name: column.text,
+    dose_amount: column.real,
+    dose_unit: column.text, // ml | mg | drops | suppository
+    route: column.text,
+    reason: column.text,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const growth_measurements = new Table(
+  {
+    ...eventColumns,
+    weight_g: column.integer,
+    length_mm: column.integer,
+    head_circumference_mm: column.integer,
+    measured_source: column.text, // home | doctor
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const temperatures = new Table(
+  {
+    ...eventColumns,
+    value_c: column.real,
+    method: column.text, // axillary | rectal | ear | forehead | oral
+    symptoms: column.text,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const vaccinations = new Table(
+  {
+    ...eventColumns,
+    vaccine_name: column.text,
+    dose_number: column.integer,
+    batch_lot: column.text,
+    provider: column.text,
+    next_due_at: column.text,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const solid_foods = new Table(
+  {
+    ...eventColumns,
+    food_name: column.text,
+    is_first_time: column.integer, // 0 | 1
+    amount_desc: column.text,
+    reaction: column.text, // none | mild | strong
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const milestones = new Table(
+  {
+    ...eventColumns,
+    milestone_key: column.text,
+    achieved_at: column.text,
+    photo_id: column.text,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+const notes = new Table(
+  {
+    ...eventColumns,
+    title: column.text,
+  },
+  { indexes: { child_time: ['child_id', 'occurred_at'] } },
+);
+
+/* ────────────────────────────── Fotos (§5.4) ────────────────────────────── */
+
+const photos = new Table(
+  {
+    ...eventColumns, // occurred_at = capture time (from EXIF)
+    source: column.text, // device_gallery | imported
+    media_store_id: column.text, // Android MediaStore reference (unstable!)
+    local_uri: column.text,
+    content_hash: column.text, // SHA-256 of first 1 MB + file size
+    captured_at: column.text, // from EXIF, may be NULL
+    age_days: column.integer, // computed against children.birth_at
+    width: column.integer,
+    height: column.integer,
+    mime: column.text,
+    gps_lat: column.real, // ONLY on explicit opt-in
+    gps_lng: column.real,
+    thumb_key: column.text, // R2 object key
+    thumb_uploaded_at: column.text,
+    availability: column.text, // available | missing
+    tags: column.text, // JSON array, generated on-device
+    ocr_text: column.text, // V2
+  },
+  { indexes: { child_day: ['child_id', 'local_date'], hash: ['content_hash'] } },
+);
+
+/* ────────────────────────────── Erinnerungen & Einstellungen (§5.5) ────────────────────────────── */
+
+const reminders = new Table({
+  ...eventColumns,
+  title: column.text,
+  description: column.text,
+  trigger_age_days: column.integer, // age-based …
+  trigger_at: column.text, // … or absolute
+  repeat_rule: column.text, // RRULE (RFC 5545)
+  enabled: column.integer, // 0 | 1
+  last_fired_at: column.text,
+});
+
+const user_preferences = new Table({
+  user_id: column.text,
+  unit_volume: column.text, // ml | oz
+  unit_weight: column.text, // g | lb_oz
+  unit_length: column.text, // cm | in
+  unit_temp: column.text, // c | f
+  theme: column.text, // system | light | dark | night
+  dashboard_layout: column.text, // JSON
+  updated_at: column.text,
+});
+
+/* ────────────────────────────── Schema ────────────────────────────── */
+
+export const AppSchema = new Schema({
+  households,
+  household_members,
+  children,
+  feeds,
+  sleeps,
+  diapers,
+  pumping_sessions,
+  milk_stash,
+  medications,
+  growth_measurements,
+  temperatures,
+  vaccinations,
+  solid_foods,
+  milestones,
+  notes,
+  photos,
+  reminders,
+  user_preferences,
+});
+
+/**
+ * Row types for typed queries, e.g. `Database['feeds']`.
+ * Every row additionally has the implicit `id: string`.
+ */
+export type Database = (typeof AppSchema)['types'];
