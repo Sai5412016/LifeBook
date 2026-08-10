@@ -6,21 +6,72 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { CrashScreen } from '@/components/diagnostics/crash-screen';
+import { EnvErrorScreen } from '@/components/diagnostics/env-error-screen';
 import { ThemedView } from '@/components/themed-view';
 import { startAuthListener, useAuth } from '@/core/auth/session-store';
 import { connectPowerSync, openDatabase } from '@/core/db';
+import { GlobalErrorBoundary } from '@/core/diagnostics/error-boundary';
+import { installGlobalErrorHandler, useGlobalCrash } from '@/core/diagnostics/crash-reporter';
+import { guardImport, guardImportAsync, useImportErrors } from '@/core/diagnostics/import-error-store';
+import { checkEnv } from '@/core/env';
 import { useHasHousehold } from '@/features/household/repository';
 
-SplashScreen.preventAutoHideAsync();
+// As early as this module can manage it — before anything else in the app
+// runs — so an unhandled JS error anywhere shows CrashScreen instead of
+// silently killing the app (see core/diagnostics/crash-reporter.ts).
+//
+// Both calls below run at MODULE scope, which means they run the instant
+// something imports this file — before installGlobalErrorHandler() itself
+// has even returned. guardImport/guardImportAsync (from the dependency-free
+// import-error-store) are what stand in for it here: neither call can be
+// deferred to a later function (installGlobalErrorHandler must run before
+// anything else can throw; preventAutoHideAsync must run before the splash
+// screen auto-hides), so each is wrapped instead of moved.
+guardImport('_layout: installGlobalErrorHandler', installGlobalErrorHandler);
+guardImportAsync('_layout: SplashScreen.preventAutoHideAsync', () =>
+  SplashScreen.preventAutoHideAsync(),
+);
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const importErrors = useImportErrors();
+  const crash = useGlobalCrash();
+  const firstImportError = importErrors[0] ?? null;
+
+  // Checked on every render, not just once: cheap, pure, and a misconfigured
+  // build should never get further than this even after a Fast Refresh.
+  const envCheck = crash || firstImportError ? null : checkEnv();
+
+  // Import-time failures are checked first: they happened before the app had
+  // any chance to reach the other two checks, so they are the most likely
+  // explanation if the screen is blank.
+  if (firstImportError) {
+    return (
+      <CrashScreen
+        title={`Fehler beim Start (${firstImportError.source})`}
+        message={firstImportError.message}
+        stack={firstImportError.stack}
+      />
+    );
+  }
+
+  if (crash) {
+    return <CrashScreen message={crash.message} stack={crash.stack} />;
+  }
+
+  if (envCheck && !envCheck.ok) {
+    return <EnvErrorScreen missing={envCheck.missing} />;
+  }
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <DbAndAuthGate>
-        <NavigationGate />
-      </DbAndAuthGate>
+      <GlobalErrorBoundary>
+        <AnimatedSplashOverlay />
+        <DbAndAuthGate>
+          <NavigationGate />
+        </DbAndAuthGate>
+      </GlobalErrorBoundary>
     </ThemeProvider>
   );
 }

@@ -153,8 +153,22 @@ export async function createThumbnail(sourceUri: string): Promise<string> {
  * us to know which one it was. So every picked file is staged into the app's
  * document directory (which the OS does not purge) and deleted again the moment
  * its original is confirmed uploaded. Net device storage cost afterwards: zero.
+ *
+ * Built lazily, on first use, rather than as a module-level `const`: `new
+ * Directory(...)` and `Paths.document` call into native code, and ANY native
+ * call at module scope runs the instant something imports this file — before
+ * the root layout has had a chance to catch and display a failure. A crash
+ * there is invisible on a release build (no red screen, no log), which is
+ * exactly the failure mode this file must not risk.
  */
-const stagingDirectory = new Directory(Paths.document, 'photos-pending');
+let stagingDirectory: Directory | null = null;
+
+function getStagingDirectory(): Directory {
+  if (!stagingDirectory) {
+    stagingDirectory = new Directory(Paths.document, 'photos-pending');
+  }
+  return stagingDirectory;
+}
 
 /**
  * Copy a picked file into persistent staging and return the new URI.
@@ -165,11 +179,12 @@ export async function stagePickedPhoto(
   photoId: string,
   extension: string,
 ): Promise<string> {
-  if (!stagingDirectory.info().exists) {
-    stagingDirectory.create({ intermediates: true });
+  const directory = getStagingDirectory();
+  if (!directory.info().exists) {
+    directory.create({ intermediates: true });
   }
 
-  const destination = new File(stagingDirectory, `${photoId}.${extension}`);
+  const destination = new File(directory, `${photoId}.${extension}`);
   if (destination.info().exists) {
     destination.delete();
   }
@@ -194,5 +209,9 @@ export function deleteQuietly(uri: string | null | undefined): void {
   }
 }
 
-/** Cache directory this feature writes into. Exposed for diagnostics. */
-export const photoCacheDirectory = Paths.cache.uri;
+/**
+ * Cache directory this feature writes into. Exposed for diagnostics.
+ * A function, not a `const`, for the same reason as `getStagingDirectory`
+ * above — `Paths.cache` must not resolve at module scope.
+ */
+export const photoCacheDirectory = (): string => Paths.cache.uri;

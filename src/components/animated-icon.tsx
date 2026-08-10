@@ -5,7 +5,6 @@ import { Dimensions, StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
 const DURATION = 600;
 
 export function AnimatedSplashOverlay() {
@@ -59,51 +58,80 @@ export function AnimatedSplashOverlay() {
   );
 }
 
-const keyframe = new Keyframe({
-  0: {
-    transform: [{ scale: INITIAL_SCALE_FACTOR }],
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
+/**
+ * The three Keyframes below (plus the scale factor derived from
+ * `Dimensions.get`) used to be built as module-level `const`s. `Dimensions.get`
+ * and `new Keyframe(...)` both call into native/reanimated internals, and ANY
+ * call at module scope runs the instant something imports this file — before
+ * the root layout has installed its crash handler or rendered its error
+ * boundary. Building them lazily, on first use, keeps that risk out of the
+ * import chain entirely; each is cached after the first call so behaviour
+ * (one shared instance) stays the same as before.
+ */
+let scaleKeyframe: InstanceType<typeof Keyframe> | null = null;
+function getScaleKeyframe(): InstanceType<typeof Keyframe> {
+  if (!scaleKeyframe) {
+    const initialScaleFactor = Dimensions.get('screen').height / 90;
+    scaleKeyframe = new Keyframe({
+      0: {
+        transform: [{ scale: initialScaleFactor }],
+      },
+      100: {
+        transform: [{ scale: 1 }],
+        easing: Easing.elastic(0.7),
+      },
+    });
+  }
+  return scaleKeyframe;
+}
 
-const logoKeyframe = new Keyframe({
-  0: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-  },
-  40: {
-    transform: [{ scale: 1.3 }],
-    opacity: 0,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
-    opacity: 1,
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
+let logoKeyframe: InstanceType<typeof Keyframe> | null = null;
+function getLogoKeyframe(): InstanceType<typeof Keyframe> {
+  if (!logoKeyframe) {
+    logoKeyframe = new Keyframe({
+      0: {
+        transform: [{ scale: 1.3 }],
+        opacity: 0,
+      },
+      40: {
+        transform: [{ scale: 1.3 }],
+        opacity: 0,
+        easing: Easing.elastic(0.7),
+      },
+      100: {
+        opacity: 1,
+        transform: [{ scale: 1 }],
+        easing: Easing.elastic(0.7),
+      },
+    });
+  }
+  return logoKeyframe;
+}
 
-const glowKeyframe = new Keyframe({
-  0: {
-    transform: [{ rotateZ: '0deg' }],
-  },
-  100: {
-    transform: [{ rotateZ: '7200deg' }],
-  },
-});
+let glowKeyframe: InstanceType<typeof Keyframe> | null = null;
+function getGlowKeyframe(): InstanceType<typeof Keyframe> {
+  if (!glowKeyframe) {
+    glowKeyframe = new Keyframe({
+      0: {
+        transform: [{ rotateZ: '0deg' }],
+      },
+      100: {
+        transform: [{ rotateZ: '7200deg' }],
+      },
+    });
+  }
+  return glowKeyframe;
+}
 
 export function AnimatedIcon() {
   return (
     <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
+      <Animated.View entering={getGlowKeyframe().duration(60 * 1000 * 4)} style={styles.glow}>
         <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
       </Animated.View>
 
-      <Animated.View entering={keyframe.duration(DURATION)} style={styles.background} />
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
+      <Animated.View entering={getScaleKeyframe().duration(DURATION)} style={styles.background} />
+      <Animated.View style={styles.imageContainer} entering={getLogoKeyframe().duration(DURATION)}>
         <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
       </Animated.View>
     </View>
