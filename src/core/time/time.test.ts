@@ -1,7 +1,69 @@
 import { describe, it, expect } from 'vitest';
-import { toLocalDate, toDashboardDate, ageInDays } from './index';
+import {
+  toLocalDate,
+  toDashboardDate,
+  ageInDays,
+  exifWallClockToUtcIso,
+  formatDayLabel,
+} from './index';
 
 const BERLIN = 'Europe/Berlin';
+
+describe('formatDayLabel', () => {
+  it('renders a German weekday and month', () => {
+    expect(formatDayLabel('2026-08-05')).toBe('Mittwoch, 5. August 2026');
+  });
+
+  it('does not shift the day at the start of the month', () => {
+    expect(formatDayLabel('2026-01-01')).toBe('Donnerstag, 1. Januar 2026');
+  });
+
+  it('passes malformed input through untouched instead of inventing a date', () => {
+    expect(formatDayLabel('nope')).toBe('nope');
+  });
+});
+
+describe('exifWallClockToUtcIso (EXIF has no timezone)', () => {
+  it('summer: 14:30 wall clock in Berlin is 12:30 UTC (+02:00)', () => {
+    expect(exifWallClockToUtcIso('2026:08:05 14:30:00', BERLIN)).toBe(
+      '2026-08-05T12:30:00.000Z',
+    );
+  });
+
+  it('winter: the same wall clock is 13:30 UTC (+01:00)', () => {
+    expect(exifWallClockToUtcIso('2026:01:05 14:30:00', BERLIN)).toBe(
+      '2026-01-05T13:30:00.000Z',
+    );
+  });
+
+  it('a late-evening photo keeps its own local day, not the UTC one', () => {
+    const utc = exifWallClockToUtcIso('2026:08:05 23:30:00', BERLIN);
+    expect(utc).toBe('2026-08-05T21:30:00.000Z');
+    // The whole point: grouping must still land on the 5th.
+    expect(toLocalDate(utc!, BERLIN)).toBe('2026-08-05');
+  });
+
+  it('accepts the ISO-style separator some cameras write', () => {
+    expect(exifWallClockToUtcIso('2026:08:05T14:30:00', BERLIN)).toBe(
+      '2026-08-05T12:30:00.000Z',
+    );
+  });
+
+  it.each([
+    [null, 'missing tag'],
+    [undefined, 'missing tag'],
+    ['', 'empty'],
+    ['not a date', 'garbage'],
+    ['2026-08-05 14:30:00', 'dashes instead of EXIF colons'],
+    ['0000:00:00 00:00:00', 'the placeholder some cameras write'],
+  ])('returns null for %s (%s)', (raw: string | null | undefined, _why: string) => {
+    expect(exifWallClockToUtcIso(raw, BERLIN)).toBeNull();
+  });
+
+  it('returns null for an unknown timezone rather than a wrong instant', () => {
+    expect(exifWallClockToUtcIso('2026:08:05 14:30:00', 'Mars/Olympus')).toBeNull();
+  });
+});
 
 describe('toLocalDate (DST-safe local calendar date)', () => {
   it('summer (+02:00): 22:30Z rolls into next local day', () => {

@@ -8,6 +8,13 @@
     "scheme": "lifebook",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/fb2b4376-fcf6-41ab-98e2-99b14c9438b5",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.lifebook.app",
@@ -51,6 +58,14 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "LifeBook öffnet deine Fotoauswahl, damit du Bilder für die Chronik deines Kindes auswählen kannst.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "LifeBook greift auf deine Galerie zu, um ausgewählte Fotos in die Timeline deines Kindes aufzunehmen.",
@@ -81,7 +96,6 @@
       "eas": {
         "projectId": "fb2b4376-fcf6-41ab-98e2-99b14c9438b5"
       }
-    },
-    "owner": "fledderman"
+    }
   }
 }

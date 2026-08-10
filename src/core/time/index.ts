@@ -15,13 +15,72 @@
  */
 
 import { differenceInCalendarDays, parseISO, subHours } from 'date-fns';
-import { formatInTimeZone } from 'date-fns-tz';
+import { de } from 'date-fns/locale';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 
 /** Current instant as ISO-8601 UTC. */
 export const nowUtcIso = (): string => new Date().toISOString();
 
+/**
+ * Parse an EXIF capture timestamp into ISO-8601 UTC.
+ *
+ * EXIF writes `YYYY:MM:DD HH:MM:SS` with NO timezone — it is the wall clock the
+ * camera showed. We interpret it in `tz`, which is correct for the overwhelmingly
+ * common case (photos taken where the family lives) and wrong only for pictures
+ * imported after travelling. That beats the alternative of treating the wall
+ * clock as UTC, which would shift every German summer photo by two hours and put
+ * late-evening pictures on the wrong day.
+ *
+ * Returns null for a missing, malformed or impossible timestamp so callers can
+ * fall back to another date rather than storing a bogus instant.
+ */
+export const exifWallClockToUtcIso = (
+  raw: string | null | undefined,
+  tz: string,
+): string | null => {
+  if (typeof raw !== 'string') {
+    return null;
+  }
+
+  const match = raw.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day, hour, minute, second] = match;
+
+  try {
+    const instant = fromZonedTime(
+      `${year}-${month}-${day}T${hour}:${minute}:${second}`,
+      tz,
+    );
+    return Number.isNaN(instant.getTime()) ? null : instant.toISOString();
+  } catch {
+    // Unknown IANA zone id — no sensible instant can be derived.
+    return null;
+  }
+};
+
 /** Any Date → ISO-8601 UTC string. */
 export const toUtcIso = (date: Date): string => date.toISOString();
+
+/**
+ * German day heading for a stored `local_date` (YYYY-MM-DD), e.g.
+ * "Mittwoch, 5. August 2026".
+ *
+ * Takes the already-localised date string rather than an instant, so no timezone
+ * maths happens here and the label can never disagree with the grouping.
+ */
+export const formatDayLabel = (localDate: string): string => {
+  const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return localDate;
+  }
+  const [, year, month, day] = match;
+  // Constructed at UTC noon and formatted in UTC: no offset can shift the day.
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  return formatInTimeZone(date, 'UTC', 'EEEE, d. MMMM yyyy', { locale: de });
+};
 
 /**
  * Derive the DST-safe local calendar date (YYYY-MM-DD) of a UTC instant in `tz`.

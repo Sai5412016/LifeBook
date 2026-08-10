@@ -1,0 +1,30 @@
+# Bei jedem Push auf main ein Funkupdate an alle installierten Apps.
+#
+# Bewusst minimal gehalten: nur der dokumentierte `update`-Job, keine
+# selbstgebauten Schritte. Weniger Teile, weniger das kaputtgehen kann.
+#
+# WICHTIG — was dieser Ablauf NICHT kann:
+# Ein Funkupdate liefert nur JavaScript, Texte, Layout und Bilder aus. Kommt ein
+# natives Modul dazu (neue Expo-Bibliothek, geänderte Berechtigungen, neue Expo-
+# Version), braucht es weiterhin einen echten Build:
+#
+#   eas build --profile preview --platform android
+#
+# Die Einstellung "runtimeVersion: fingerprint" in app.json sorgt dafür, dass ein
+# Update in so einem Fall NICHT an alte Installationen geht. Lieber kein Update
+# als eine App, die auf dem Handy abstürzt.
+
+name: Funkupdate veröffentlichen
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  funkupdate:
+    name: Update an installierte Apps senden
+    type: update
+    params:
+      platform: android
+      branch: preview
+      message: Automatisches Update aus main

@@ -223,15 +223,28 @@ const photos = new Table(
     width: column.integer,
     height: column.integer,
     mime: column.text,
-    gps_lat: column.real, // ONLY on explicit opt-in
+    gps_lat: column.real, // ONLY on explicit opt-in — stripped before upload by default
     gps_lng: column.real,
-    thumb_key: column.text, // R2 object key
+    bytes: column.integer, // original file size, part of the dedupe identity
+    // Storage keys in the private `photos` bucket. Path layout is
+    // {household_id}/{photo_id}/… — the first segment is what the storage
+    // access rules match on, so it must never change shape.
+    thumb_key: column.text, // {household_id}/{photo_id}/thumb.webp
     thumb_uploaded_at: column.text,
+    original_key: column.text, // {household_id}/{photo_id}/orig.{ext}
+    original_uploaded_at: column.text, // NULL = upload still pending
     availability: column.text, // available | missing
     tags: column.text, // JSON array, generated on-device
     ocr_text: column.text, // V2
   },
-  { indexes: { child_day: ['child_id', 'local_date'], hash: ['content_hash'] } },
+  {
+    indexes: {
+      child_day: ['child_id', 'local_date'],
+      hash: ['content_hash'],
+      // Drives the upload queue: "which photos still need pushing?"
+      pending_upload: ['household_id', 'original_uploaded_at'],
+    },
+  },
 );
 
 /* ────────────────────────────── Erinnerungen & Einstellungen (§5.5) ────────────────────────────── */
