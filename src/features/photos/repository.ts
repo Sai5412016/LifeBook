@@ -205,6 +205,19 @@ export function usePhotoSections(childId: string | undefined): {
   return { sections: groupPhotosByDay(data ?? []), isLoading };
 }
 
+/** Reactive single photo by id, for the fullscreen viewer. Undefined while loading or once deleted. */
+export function usePhotoById(photoId: string | undefined): {
+  photo: PhotoRow | undefined;
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useQuery<PhotoRow>(
+    `SELECT ${PHOTO_COLUMNS} FROM photos WHERE id = ? AND deleted_at IS NULL`,
+    [photoId ?? ''],
+  );
+
+  return { photo: data?.[0], isLoading };
+}
+
 /** Reactive count of photos still waiting to be uploaded. */
 export function usePendingUploadCount(): number {
   const { data } = useQuery<{ n: number }>(

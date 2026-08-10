@@ -8,6 +8,7 @@ import {
   extensionForMime,
   formatAgeLabel,
   groupPhotosByDay,
+  resolveFullscreenUri,
 } from './identity';
 
 const hash = (n: string) => composeContentHash(`sha-${n}`, 1000);
@@ -90,6 +91,32 @@ describe('formatAgeLabel', () => {
     [800, '2 Jahre'],
   ])('formats %s as "%s"', (days, expected) => {
     expect(formatAgeLabel(days)).toBe(expected);
+  });
+});
+
+describe('resolveFullscreenUri', () => {
+  it('prefers the local staged file over a signed URL', () => {
+    const photo = { local_uri: 'file:///staged.jpg', original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([['hh1/p1/orig.jpg', 'https://signed/orig.jpg']]);
+
+    expect(resolveFullscreenUri(photo, signedUrls)).toBe('file:///staged.jpg');
+  });
+
+  it('falls back to the signed URL of the original once the local file is gone', () => {
+    const photo = { local_uri: null, original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([['hh1/p1/orig.jpg', 'https://signed/orig.jpg']]);
+
+    expect(resolveFullscreenUri(photo, signedUrls)).toBe('https://signed/orig.jpg');
+  });
+
+  it('returns undefined when the signed URL has not resolved yet', () => {
+    const photo = { local_uri: null, original_key: 'hh1/p1/orig.jpg' };
+
+    expect(resolveFullscreenUri(photo, new Map())).toBeUndefined();
+  });
+
+  it('returns undefined when there is neither a local file nor an original key', () => {
+    expect(resolveFullscreenUri({ local_uri: null, original_key: null }, new Map())).toBeUndefined();
   });
 });
 

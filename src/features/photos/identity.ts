@@ -142,6 +142,30 @@ export function formatAgeLabel(ageDays: number | null | undefined): string {
   return years === 1 ? '1 Jahr' : `${years} Jahre`;
 }
 
+type FullscreenPhotoKeys = {
+  local_uri: string | null;
+  original_key: string | null;
+};
+
+/**
+ * Which URI the fullscreen viewer should show: the local staged file while it
+ * still exists on this device (instant, no network round trip), otherwise the
+ * signed URL for the original in object storage. Mirrors the same preference
+ * the grid tiles use for their thumbnail, just against `original_key`.
+ */
+export function resolveFullscreenUri(
+  photo: FullscreenPhotoKeys,
+  signedUrls: ReadonlyMap<string, string>,
+): string | undefined {
+  if (photo.local_uri) {
+    return photo.local_uri;
+  }
+  if (!photo.original_key) {
+    return undefined;
+  }
+  return signedUrls.get(photo.original_key);
+}
+
 type GroupablePhoto = {
   local_date: string;
   occurred_at: string;
