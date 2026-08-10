@@ -12,6 +12,7 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -214,16 +215,18 @@ function PhotoTile({
   const uri = photo.local_uri ?? signedUrl;
 
   return (
-    <ThemedView type="backgroundElement" style={[styles.tile, { width: size, height: size }]}>
-      {uri ? (
-        <Image
-          source={{ uri }}
-          style={styles.tileImage}
-          contentFit="cover"
-          transition={120}
-        />
-      ) : null}
-    </ThemedView>
+    <Pressable onPress={() => router.push(`/foto/${photo.id}`)}>
+      <ThemedView type="backgroundElement" style={[styles.tile, { width: size, height: size }]}>
+        {uri ? (
+          <Image
+            source={{ uri }}
+            style={styles.tileImage}
+            contentFit="cover"
+            transition={120}
+          />
+        ) : null}
+      </ThemedView>
+    </Pressable>
   );
 }
 

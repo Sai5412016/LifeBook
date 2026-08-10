@@ -114,6 +114,28 @@ eas update --branch preview -m "Beschreibung"  # Funkupdate ohne neuen Build
 Änderungen an Zugriffsregeln oder Datenbanklogik zusätzlich gegen die echte
 Datenbank prüfen, nicht nur nachdenken — genau das hat Fallstrick 1 aufgedeckt.
 
+## Berichtsformat — am Ende JEDER Aufgabe ausgeben
+
+```
+== BERICHT ==
+BRANCH: <Zweigname oder "main">
+STATUS: fertig | blockiert | rückfrage
+TSC: ok | fehler: <erste Meldung>
+TESTS: <n> bestanden, <n> fehlgeschlagen
+DATEIEN:
+- <pfad> — <ein Satz, was sich geändert hat>
+ABWEICHUNGEN:
+- <was anders gemacht wurde als vorgegeben, und warum — "keine" wenn nichts>
+OFFEN:
+- <was ungelöst ist, was auf dem Gerät geprüft werden muss — "nichts" wenn nichts>
+```
+
+**ABWEICHUNGEN ist der wichtigste Teil.** War eine Vorgabe fachlich falsch oder
+nicht umsetzbar, wird der bessere Weg gegangen und hier begründet — nicht
+stillschweigend der untauglichen Vorgabe gefolgt. Genau dieses stille Befolgen
+ist der teuerste Fehler: Er fällt erst auf, wenn niemand mehr nachvollziehen
+kann, warum etwas so gebaut wurde.
+
 ## Kommunikation mit dem Auftraggeber
 
 Er ist technisch versiert, aber kein ausgebildeter Entwickler. Anleitungen ohne
