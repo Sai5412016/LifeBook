@@ -85,6 +85,29 @@ ist. Ohne diesen Schritt zeigen Datenbankeinträge irgendwann ins Leere.
 Updates nicht mehr an alte Installationen. Nach jedem neuen nativen Modul ist ein
 neuer Build zwingend.
 
+### 6. Expo-Pakete niemals mit `npm install` und geratener Version
+
+Beobachteter Absturz (2026-08-10): `expo-image-picker` stand auf `~17.0.0` (SDK-54-
+Reihe), während jedes andere Expo-Paket auf der 57er-Reihe stand. Ergebnis:
+
+```
+NoClassDefFoundError: expo.modules.kotlin.types.AnyTypeProvider
+at expo.modules.imagepicker.ImagePickerModule.definition(ImagePickerModule.kt:323)
+```
+
+Das ist ein **nativer** Absturz beim App-Start, bevor JavaScript überhaupt
+läuft — also bevor `installGlobalErrorHandler()`, die `ErrorBoundary` oder
+irgendein anderer Fehlerbildschirm aus diesem Projekt greifen kann. Die
+gesamte Diagnosefähigkeit aus JavaScript ist hier wirkungslos.
+
+→ Expo-Pakete immer mit `npx expo install <paket>` hinzufügen, nie mit
+`npm install <paket>` und einer geratenen oder von einem Tutorial kopierten
+Versionsnummer. `expo install` wählt die zur installierten SDK-Reihe passende
+Version. In dieser Sandbox ist `api.expo.dev` per Netzwerkrichtlinie
+gesperrt — dann `EXPO_OFFLINE=1 npx expo install <paket>` verwenden, das
+greift auf die mit dem Paket `expo` ausgelieferte
+`expo/bundledNativeModules.json` zurück statt auf den Netzwerkaufruf.
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste
