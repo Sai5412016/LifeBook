@@ -6,21 +6,47 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { CrashScreen } from '@/components/diagnostics/crash-screen';
+import { EnvErrorScreen } from '@/components/diagnostics/env-error-screen';
 import { ThemedView } from '@/components/themed-view';
 import { startAuthListener, useAuth } from '@/core/auth/session-store';
 import { connectPowerSync, openDatabase } from '@/core/db';
+import { GlobalErrorBoundary } from '@/core/diagnostics/error-boundary';
+import { installGlobalErrorHandler, useGlobalCrash } from '@/core/diagnostics/crash-reporter';
+import { checkEnv } from '@/core/env';
 import { useHasHousehold } from '@/features/household/repository';
+
+// As early as this module can manage it — before anything else in the app
+// runs — so an unhandled JS error anywhere shows CrashScreen instead of
+// silently killing the app (see core/diagnostics/crash-reporter.ts).
+installGlobalErrorHandler();
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+  const crash = useGlobalCrash();
+
+  // Checked on every render, not just once: cheap, pure, and a misconfigured
+  // build should never get further than this even after a Fast Refresh.
+  const envCheck = crash ? null : checkEnv();
+
+  if (crash) {
+    return <CrashScreen message={crash.message} stack={crash.stack} />;
+  }
+
+  if (envCheck && !envCheck.ok) {
+    return <EnvErrorScreen missing={envCheck.missing} />;
+  }
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />
-      <DbAndAuthGate>
-        <NavigationGate />
-      </DbAndAuthGate>
+      <GlobalErrorBoundary>
+        <DbAndAuthGate>
+          <NavigationGate />
+        </DbAndAuthGate>
+      </GlobalErrorBoundary>
     </ThemeProvider>
   );
 }
