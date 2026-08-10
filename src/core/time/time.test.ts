@@ -5,6 +5,7 @@ import {
   ageInDays,
   exifWallClockToUtcIso,
   formatDayLabel,
+  formatTimeLabel,
   secondsBetween,
 } from './index';
 
@@ -90,6 +91,20 @@ describe('toDashboardDate (06:00 local day boundary)', () => {
   it('05:59 local still belongs to the previous day', () => {
     // Berlin summer 05:59 on Aug 9 == 03:59Z
     expect(toDashboardDate('2026-08-09T03:59:00Z', BERLIN)).toBe('2026-08-08');
+  });
+});
+
+describe('formatTimeLabel', () => {
+  it('formats the local wall-clock time in summer (+02:00)', () => {
+    expect(formatTimeLabel('2026-08-08T12:32:00Z', BERLIN)).toBe('14:32');
+  });
+
+  it('formats the local wall-clock time in winter (+01:00)', () => {
+    expect(formatTimeLabel('2026-01-08T12:32:00Z', BERLIN)).toBe('13:32');
+  });
+
+  it('pads single-digit hours and minutes', () => {
+    expect(formatTimeLabel('2026-08-08T04:05:00Z', BERLIN)).toBe('06:05');
   });
 });
 

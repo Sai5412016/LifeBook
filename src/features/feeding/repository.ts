@@ -19,13 +19,19 @@
  * `needs_review = 1` — never deleted, so a parent can correct it later.
  */
 
-import { useQuery } from '@powersync/react-native';
+import { usePowerSync, useQuery } from '@powersync/react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { useEffect } from 'react';
 
 import { newId } from '@/core/db/ids';
 import { nowUtcIso, toLocalDate } from '@/core/time';
 
-import { elapsedSeconds, resolveBreastFeedType, resolveRunningConflicts } from './timer';
+import {
+  elapsedSeconds,
+  hasUnresolvedRunningConflict,
+  resolveBreastFeedType,
+  resolveRunningConflicts,
+} from './timer';
 import type { FeedConflictCandidate } from './timer';
 import type { BottleKind, FeedRow, FeedSide, FeedType } from './types';
 
@@ -49,9 +55,19 @@ async function loadFeedById(
 }
 
 /**
- * Resolves any existing multi-device conflict for a child BEFORE a new (or
- * resumed) timer starts running, so a device never creates a second
- * `is_running = 1` row on top of one still unresolved from sync.
+ * Resolves any existing multi-device conflict for a child: called
+ * explicitly before a new (or resumed) timer starts running, AND reactively
+ * by `useRunningFeed` on every update of the running-feeds query, so a
+ * second timer that only arrived via sync doesn't sit there unresolved until
+ * somebody happens to press Start again.
+ *
+ * `hasUnresolvedRunningConflict` (pure, tested in ./timer) is the gate: an
+ * already-consistent state (0 or 1 running feeds) returns before any query
+ * result is even considered for a write. That guarantee has to live in pure,
+ * testable code — `@powersync/react-native` cannot be imported under Vitest
+ * (confirmed: it fails to resolve outside a bundler), so this function
+ * itself cannot be unit-tested directly; trusting the tested pure gate is
+ * what makes "no write for an already-resolved state" verifiable at all.
  */
 async function applyRunningConflictResolution(
   db: AbstractPowerSyncDatabase,
@@ -65,7 +81,7 @@ async function applyRunningConflictResolution(
     [childId],
   );
 
-  if (running.length < 2) {
+  if (!hasUnresolvedRunningConflict(running)) {
     return;
   }
 
@@ -235,6 +251,48 @@ export async function endFeed(db: AbstractPowerSyncDatabase, feedId: string): Pr
   );
 }
 
+/**
+ * Clears a feed's review flag without changing anything else — "the
+ * conflict is fine as recorded, just stop asking".
+ */
+export async function acknowledgeReviewFlag(
+  db: AbstractPowerSyncDatabase,
+  feedId: string,
+): Promise<void> {
+  await db.execute('UPDATE feeds SET needs_review = 0, updated_at = ? WHERE id = ?', [
+    nowUtcIso(),
+    feedId,
+  ]);
+}
+
+/**
+ * Corrects a flagged feed's per-side durations (a parent fixing what
+ * conflict resolution banked) and clears the review flag. Recomputes
+ * `feed_type` from the corrected split for a breastfeed; leaves a bottle
+ * feed's type untouched.
+ */
+export async function correctFeedDurations(
+  db: AbstractPowerSyncDatabase,
+  feedId: string,
+  input: { durationLeftS: number; durationRightS: number },
+): Promise<void> {
+  const feed = await loadFeedById(db, feedId);
+  if (!feed) {
+    return;
+  }
+
+  const feedType = feed.feed_type.startsWith('breast_')
+    ? resolveBreastFeedType(input.durationLeftS, input.durationRightS)
+    : feed.feed_type;
+
+  await db.execute(
+    `UPDATE feeds
+        SET duration_left_s = ?, duration_right_s = ?, feed_type = ?, needs_review = 0, updated_at = ?
+      WHERE id = ?`,
+    [input.durationLeftS, input.durationRightS, feedType, nowUtcIso(), feedId],
+  );
+}
+
 export type LogBottleInput = {
   householdId: string;
   childId: string;
@@ -284,14 +342,59 @@ export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleI
   );
 }
 
-/** Reactive: the feed currently running for a child, if any. */
+/**
+ * Reactive: the feed currently running for a child, if any.
+ *
+ * Also the reactive half of running-timer conflict resolution: every time
+ * this query's result changes (a manual action on this device, or a row
+ * arriving from sync), it checks whether more than one feed is running and,
+ * if so, resolves it — see `applyRunningConflictResolution`. The ordering
+ * here (earliest `occurred_at`, tied-broken by `id`) matches
+ * `resolveRunningConflicts`'s winner exactly, so the row returned as `feed`
+ * is correct even in the brief window before an unresolved conflict's write
+ * has landed.
+ */
 export function useRunningFeed(childId: string | undefined): {
+  feed: FeedRow | undefined;
+  isLoading: boolean;
+} {
+  const db = usePowerSync();
+  const { data, isLoading } = useQuery<FeedRow>(
+    `SELECT ${FEED_COLUMNS} FROM feeds
+      WHERE child_id = ? AND deleted_at IS NULL AND is_running = 1
+      ORDER BY occurred_at ASC, id ASC`,
+    [childId ?? ''],
+  );
+
+  useEffect(() => {
+    if (!childId || !hasUnresolvedRunningConflict(data)) {
+      return;
+    }
+    applyRunningConflictResolution(db, childId, nowUtcIso()).catch((error) => {
+      console.error('[LifeBook] Timer-Konflikt konnte nicht aufgelöst werden', error);
+    });
+  }, [db, childId, data]);
+
+  return { feed: data?.[0], isLoading };
+}
+
+/**
+ * Reactive: the feed session still open (started, not yet ended) for a
+ * child — running OR paused. `ended_at IS NULL` alone distinguishes this
+ * from both a finished breastfeed and a bottle feed (`logBottle` sets
+ * `ended_at` immediately, since there is no timer to keep open). This is
+ * what a screen uses to decide "show the timer controls" vs "show the three
+ * start buttons" — `useRunningFeed` above answers a narrower question (is
+ * something *actively ticking*, for conflict resolution), which a paused
+ * feed deliberately does not match.
+ */
+export function useOpenFeed(childId: string | undefined): {
   feed: FeedRow | undefined;
   isLoading: boolean;
 } {
   const { data, isLoading } = useQuery<FeedRow>(
     `SELECT ${FEED_COLUMNS} FROM feeds
-      WHERE child_id = ? AND deleted_at IS NULL AND is_running = 1
+      WHERE child_id = ? AND deleted_at IS NULL AND ended_at IS NULL
       ORDER BY occurred_at ASC, id ASC
       LIMIT 1`,
     [childId ?? ''],
@@ -326,4 +429,15 @@ export function useFeedsOfDay(
     [childId ?? '', localDate ?? ''],
   );
   return { feeds: data ?? [], isLoading };
+}
+
+/** Reactive: feeds still flagged from a running-timer conflict, newest first. */
+export function useFeedsNeedingReview(childId: string | undefined): FeedRow[] {
+  const { data } = useQuery<FeedRow>(
+    `SELECT ${FEED_COLUMNS} FROM feeds
+      WHERE child_id = ? AND deleted_at IS NULL AND needs_review = 1
+      ORDER BY occurred_at DESC`,
+    [childId ?? ''],
+  );
+  return data ?? [];
 }

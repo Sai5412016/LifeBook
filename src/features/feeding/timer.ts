@@ -67,6 +67,23 @@ export type ConflictResolution = {
 };
 
 /**
+ * True when `feeds` (all rows currently `is_running = 1` for one child)
+ * actually need conflict resolution — i.e. more than one is running.
+ *
+ * This is the gate a reactive caller (`useRunningFeed`) checks BEFORE
+ * calling `resolveRunningConflicts` and writing anything: two devices that
+ * independently notice the same already-resolved state (0 or 1 running
+ * feeds) and write anyway would keep bumping `updated_at` back and forth
+ * through sync — a state that is already consistent must never produce a
+ * write. Kept as its own tiny pure function (rather than inlining
+ * `feeds.length > 1` at the call site) so that guarantee has one definition
+ * and one test, shared by every caller.
+ */
+export function hasUnresolvedRunningConflict(feeds: readonly unknown[]): boolean {
+  return feeds.length > 1;
+}
+
+/**
  * Picks which of several simultaneously "running" feeds for one child is
  * allowed to keep running, and finalizes the rest.
  *
@@ -157,4 +174,59 @@ export function resolveBreastFeedType(durationLeftS: number, durationRightS: num
     return 'breast_both';
   }
   return durationRightS > durationLeftS ? 'breast_right' : 'breast_left';
+}
+
+/**
+ * Live "MM:SS" clock for a running segment, e.g. "04:32" — distinct from
+ * `formatDuration`'s rounded-to-the-minute "18 min": a ticking countdown
+ * needs the seconds, a finished feed's summary doesn't. Minutes are not
+ * capped at 59 (a 2-hour segment reads "120:00"); the runaway warning is the
+ * dedicated signal for "this has gone on too long", not the clock format.
+ * Negative input floors to "00:00".
+ */
+export function formatClock(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+/** German label for a `feed_type`, e.g. "Stillen links" or "Fläschchen (Nahrung)". */
+export function describeFeedType(feedType: FeedType): string {
+  switch (feedType) {
+    case 'breast_left':
+      return 'Stillen links';
+    case 'breast_right':
+      return 'Stillen rechts';
+    case 'breast_both':
+      return 'Stillen beidseitig';
+    case 'bottle_breastmilk':
+      return 'Fläschchen (Muttermilch)';
+    case 'bottle_formula':
+      return 'Fläschchen (Nahrung)';
+  }
+}
+
+/** The subset of a feed row `describeFeedAmount` needs. */
+export type FeedAmountSummary = {
+  feed_type: FeedType;
+  duration_left_s: number | null;
+  duration_right_s: number | null;
+  amount_ml: number | null;
+};
+
+/**
+ * Human amount/duration summary for a feed — "links, 18 min", "beidseitig,
+ * 25 min", or "120 ml" for a bottle. Shared by the "last feed" status line
+ * and the day's feed list, so both read the same way.
+ */
+export function describeFeedAmount(feed: FeedAmountSummary): string {
+  if (feed.feed_type === 'bottle_breastmilk' || feed.feed_type === 'bottle_formula') {
+    return `${feed.amount_ml ?? 0} ml`;
+  }
+
+  const totalLabel = formatDuration((feed.duration_left_s ?? 0) + (feed.duration_right_s ?? 0));
+  const sideLabel =
+    feed.feed_type === 'breast_right' ? 'rechts' : feed.feed_type === 'breast_left' ? 'links' : 'beidseitig';
+  return `${sideLabel}, ${totalLabel}`;
 }

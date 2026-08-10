@@ -82,6 +82,10 @@ export const formatDayLabel = (localDate: string): string => {
   return formatInTimeZone(date, 'UTC', 'EEEE, d. MMMM yyyy', { locale: de });
 };
 
+/** Wall-clock time of a UTC instant in `tz`, e.g. "14:32" — for event-list rows. */
+export const formatTimeLabel = (occurredAtUtcIso: string, tz: string): string =>
+  formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'HH:mm');
+
 /**
  * Derive the DST-safe local calendar date (YYYY-MM-DD) of a UTC instant in `tz`.
  * Use this to fill `local_date` at insert time.

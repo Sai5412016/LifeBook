@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeFeedAmount,
+  describeFeedType,
   elapsedSeconds,
+  formatClock,
   formatDuration,
   formatSinceLastFeed,
+  hasUnresolvedRunningConflict,
   isRunaway,
   resolveBreastFeedType,
   resolveRunningConflicts,
@@ -73,21 +77,21 @@ describe('elapsedSeconds', () => {
   });
 });
 
-describe('resolveRunningConflicts', () => {
-  const candidate = (
-    id: string,
-    occurred_at: string,
-    overrides: Partial<FeedConflictCandidate> = {},
-  ): FeedConflictCandidate => ({
-    id,
-    occurred_at,
-    duration_left_s: 0,
-    duration_right_s: 0,
-    running_side: 'left',
-    running_since: occurred_at,
-    ...overrides,
-  });
+const candidate = (
+  id: string,
+  occurred_at: string,
+  overrides: Partial<FeedConflictCandidate> = {},
+): FeedConflictCandidate => ({
+  id,
+  occurred_at,
+  duration_left_s: 0,
+  duration_right_s: 0,
+  running_side: 'left',
+  running_since: occurred_at,
+  ...overrides,
+});
 
+describe('resolveRunningConflicts', () => {
   it('reports no winner and no losers for an empty list', () => {
     expect(resolveRunningConflicts([], '2026-08-08T12:00:00Z')).toEqual({
       winnerId: null,
@@ -143,6 +147,31 @@ describe('resolveRunningConflicts', () => {
     const result = resolveRunningConflicts(feeds, '2026-08-08T13:00:00Z');
     expect(result.winnerId).toBe('a');
     expect(result.losers.map((l) => l.id).sort()).toEqual(['b', 'c']);
+  });
+});
+
+describe('hasUnresolvedRunningConflict — the reactive write gate', () => {
+  it('is false for no running feeds — an already-resolved state must never trigger a write', () => {
+    expect(hasUnresolvedRunningConflict([])).toBe(false);
+  });
+
+  it('is false for exactly one running feed — also already resolved, no write', () => {
+    expect(hasUnresolvedRunningConflict([candidate('a', '2026-08-08T10:00:00Z')])).toBe(false);
+  });
+
+  it('is true for two or more running feeds — a write is needed', () => {
+    expect(
+      hasUnresolvedRunningConflict([
+        candidate('a', '2026-08-08T10:00:00Z'),
+        candidate('b', '2026-08-08T11:00:00Z'),
+      ]),
+    ).toBe(true);
+  });
+
+  it('agrees with resolveRunningConflicts on when there is nothing to write', () => {
+    const resolvedState = [candidate('only-one-left', '2026-08-08T10:00:00Z')];
+    expect(hasUnresolvedRunningConflict(resolvedState)).toBe(false);
+    expect(resolveRunningConflicts(resolvedState, '2026-08-08T12:00:00Z').losers).toEqual([]);
   });
 });
 
@@ -226,5 +255,91 @@ describe('resolveBreastFeedType', () => {
 
   it('falls back to breast_left when both sides are still zero', () => {
     expect(resolveBreastFeedType(0, 0)).toBe('breast_left');
+  });
+});
+
+describe('formatClock', () => {
+  it.each([
+    [0, '00:00'],
+    [5, '00:05'],
+    [272, '04:32'],
+    [3599, '59:59'],
+    [3600, '60:00'],
+    [7325, '122:05'],
+  ])('formats %i seconds as "%s"', (seconds, expected) => {
+    expect(formatClock(seconds)).toBe(expected);
+  });
+
+  it('floors a negative value to "00:00" instead of showing negative time', () => {
+    expect(formatClock(-5)).toBe('00:00');
+  });
+});
+
+describe('describeFeedType', () => {
+  it.each([
+    ['breast_left', 'Stillen links'],
+    ['breast_right', 'Stillen rechts'],
+    ['breast_both', 'Stillen beidseitig'],
+    ['bottle_breastmilk', 'Fläschchen (Muttermilch)'],
+    ['bottle_formula', 'Fläschchen (Nahrung)'],
+  ] as const)('describes %s as "%s"', (feedType, expected) => {
+    expect(describeFeedType(feedType)).toBe(expected);
+  });
+});
+
+describe('describeFeedAmount', () => {
+  it('describes a left breastfeed', () => {
+    expect(
+      describeFeedAmount({
+        feed_type: 'breast_left',
+        duration_left_s: 1080,
+        duration_right_s: 0,
+        amount_ml: null,
+      }),
+    ).toBe('links, 18 min');
+  });
+
+  it('describes a right breastfeed', () => {
+    expect(
+      describeFeedAmount({
+        feed_type: 'breast_right',
+        duration_left_s: 0,
+        duration_right_s: 300,
+        amount_ml: null,
+      }),
+    ).toBe('rechts, 5 min');
+  });
+
+  it('describes a two-sided breastfeed with the combined total', () => {
+    expect(
+      describeFeedAmount({
+        feed_type: 'breast_both',
+        duration_left_s: 600,
+        duration_right_s: 900,
+        amount_ml: null,
+      }),
+    ).toBe('beidseitig, 25 min');
+  });
+
+  it('describes a bottle feed by amount, not duration', () => {
+    expect(
+      describeFeedAmount({
+        feed_type: 'bottle_formula',
+        duration_left_s: null,
+        duration_right_s: null,
+        amount_ml: 120,
+      }),
+    ).toBe('120 ml');
+  });
+
+  it('treats a missing amount as 0 ml rather than throwing', () => {
+    expect(
+      describeFeedAmount({
+        feed_type: 'bottle_breastmilk',
+        duration_left_s: null,
+        duration_right_s: null,
+        amount_ml: null,
+      }),
+    ).toBe('0 ml');
   });
 });
