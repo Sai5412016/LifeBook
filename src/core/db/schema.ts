@@ -102,6 +102,8 @@ function buildAppSchema() {
       ended_at: column.text,
       is_running: column.integer, // 0 | 1
       needs_review: column.integer, // 0 | 1 — set by timer conflict resolution (§6.2)
+      running_side: column.text, // left | right — which side the CURRENT live segment counts toward
+      running_since: column.text, // ISO-8601 UTC — start of the current live segment, NULL while paused/stopped
     },
     { indexes: { child_time: ['child_id', 'occurred_at'], running: ['child_id', 'is_running'] } },
   );

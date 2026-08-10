@@ -5,6 +5,7 @@ import {
   ageInDays,
   exifWallClockToUtcIso,
   formatDayLabel,
+  secondsBetween,
 } from './index';
 
 const BERLIN = 'Europe/Berlin';
@@ -89,6 +90,26 @@ describe('toDashboardDate (06:00 local day boundary)', () => {
   it('05:59 local still belongs to the previous day', () => {
     // Berlin summer 05:59 on Aug 9 == 03:59Z
     expect(toDashboardDate('2026-08-09T03:59:00Z', BERLIN)).toBe('2026-08-08');
+  });
+});
+
+describe('secondsBetween', () => {
+  it('counts whole seconds forward', () => {
+    expect(secondsBetween('2026-08-08T12:00:00Z', '2026-08-08T12:05:30Z')).toBe(330);
+  });
+
+  it('is negative when `to` is earlier than `from`', () => {
+    expect(secondsBetween('2026-08-08T12:05:00Z', '2026-08-08T12:00:00Z')).toBe(-300);
+  });
+
+  it('is 0 for identical instants', () => {
+    expect(secondsBetween('2026-08-08T12:00:00Z', '2026-08-08T12:00:00Z')).toBe(0);
+  });
+
+  it('is unaffected by a DST transition landing between the two instants', () => {
+    // Europe/Berlin springs forward on 2026-03-29, but both inputs are UTC —
+    // the wall-clock jump must not change the real elapsed duration.
+    expect(secondsBetween('2026-03-29T00:00:00Z', '2026-03-29T02:00:00Z')).toBe(7200);
   });
 });
 
