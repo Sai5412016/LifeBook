@@ -19,9 +19,16 @@ import * as Crypto from 'expo-crypto';
 
 const KEY_NAME = 'lifebook_db_key_v1';
 
-const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
-  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-};
+/**
+ * A function, not a module-level `const`: `SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY`
+ * reads a constant off the native SecureStore module, and any native access at
+ * module scope runs the instant something imports this file — before the root
+ * layout's crash handler exists to catch it. Deferred to first call instead,
+ * which happens well after app start, inside `getOrCreateDbKey`.
+ */
+function getSecureStoreOptions(): SecureStore.SecureStoreOptions {
+  return { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+}
 
 const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -31,12 +38,13 @@ const bytesToHex = (bytes: Uint8Array): string =>
  * call. Never returns null — throws if secure storage is unavailable.
  */
 export async function getOrCreateDbKey(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(KEY_NAME, SECURE_STORE_OPTIONS);
+  const options = getSecureStoreOptions();
+  const existing = await SecureStore.getItemAsync(KEY_NAME, options);
   if (existing) {
     return existing;
   }
   const bytes = await Crypto.getRandomBytesAsync(32);
   const key = bytesToHex(bytes);
-  await SecureStore.setItemAsync(KEY_NAME, key, SECURE_STORE_OPTIONS);
+  await SecureStore.setItemAsync(KEY_NAME, key, options);
   return key;
 }

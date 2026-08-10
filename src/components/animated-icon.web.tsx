@@ -9,63 +9,87 @@ export function AnimatedSplashOverlay() {
   return null;
 }
 
-const keyframe = new Keyframe({
-  0: {
-    transform: [{ scale: 0 }],
-  },
-  60: {
-    transform: [{ scale: 1.2 }],
-    easing: Easing.elastic(1.2),
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(1.2),
-  },
-});
+/**
+ * Built lazily, on first use, rather than as module-level `const`s — see the
+ * matching comment in ./animated-icon.tsx for why `new Keyframe(...)` at
+ * module scope is a startup risk. Each is cached after the first call so
+ * behaviour (one shared instance) stays the same as before.
+ */
+let keyframe: InstanceType<typeof Keyframe> | null = null;
+function getKeyframe(): InstanceType<typeof Keyframe> {
+  if (!keyframe) {
+    keyframe = new Keyframe({
+      0: {
+        transform: [{ scale: 0 }],
+      },
+      60: {
+        transform: [{ scale: 1.2 }],
+        easing: Easing.elastic(1.2),
+      },
+      100: {
+        transform: [{ scale: 1 }],
+        easing: Easing.elastic(1.2),
+      },
+    });
+  }
+  return keyframe;
+}
 
-const logoKeyframe = new Keyframe({
-  0: {
-    opacity: 0,
-  },
-  60: {
-    transform: [{ scale: 1.2 }],
-    opacity: 0,
-    easing: Easing.elastic(1.2),
-  },
-  100: {
-    transform: [{ scale: 1 }],
-    opacity: 1,
-    easing: Easing.elastic(1.2),
-  },
-});
+let logoKeyframe: InstanceType<typeof Keyframe> | null = null;
+function getLogoKeyframe(): InstanceType<typeof Keyframe> {
+  if (!logoKeyframe) {
+    logoKeyframe = new Keyframe({
+      0: {
+        opacity: 0,
+      },
+      60: {
+        transform: [{ scale: 1.2 }],
+        opacity: 0,
+        easing: Easing.elastic(1.2),
+      },
+      100: {
+        transform: [{ scale: 1 }],
+        opacity: 1,
+        easing: Easing.elastic(1.2),
+      },
+    });
+  }
+  return logoKeyframe;
+}
 
-const glowKeyframe = new Keyframe({
-  0: {
-    transform: [{ rotateZ: '-180deg' }, { scale: 0.8 }],
-    opacity: 0,
-  },
-  [DURATION / 1000]: {
-    transform: [{ rotateZ: '0deg' }, { scale: 1 }],
-    opacity: 1,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
-    transform: [{ rotateZ: '7200deg' }],
-  },
-});
+let glowKeyframe: InstanceType<typeof Keyframe> | null = null;
+function getGlowKeyframe(): InstanceType<typeof Keyframe> {
+  if (!glowKeyframe) {
+    glowKeyframe = new Keyframe({
+      0: {
+        transform: [{ rotateZ: '-180deg' }, { scale: 0.8 }],
+        opacity: 0,
+      },
+      [DURATION / 1000]: {
+        transform: [{ rotateZ: '0deg' }, { scale: 1 }],
+        opacity: 1,
+        easing: Easing.elastic(0.7),
+      },
+      100: {
+        transform: [{ rotateZ: '7200deg' }],
+      },
+    });
+  }
+  return glowKeyframe;
+}
 
 export function AnimatedIcon() {
   return (
     <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
+      <Animated.View entering={getGlowKeyframe().duration(60 * 1000 * 4)} style={styles.glow}>
         <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
       </Animated.View>
 
-      <Animated.View style={styles.background} entering={keyframe.duration(DURATION)}>
+      <Animated.View style={styles.background} entering={getKeyframe().duration(DURATION)}>
         <div className={classes.expoLogoBackground} />
       </Animated.View>
 
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
+      <Animated.View style={styles.imageContainer} entering={getLogoKeyframe().duration(DURATION)}>
         <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
       </Animated.View>
     </View>
