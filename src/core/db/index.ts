@@ -7,14 +7,19 @@
  * connectPowerSync() attaches the SupabaseConnector so local writes upload and
  * remote changes stream down. It only connects when a PowerSync URL is configured
  * — until then the app runs purely local.
+ *
+ * This module executes NOTHING at import time beyond declaring the two `let`s
+ * below — see ./schema.ts for why `getAppSchema()` is a lazily-built,
+ * memoized function rather than a module-level constant.
  */
 
 import { PowerSyncDatabase, SyncStreamConnectionMethod } from '@powersync/react-native';
 
+import { guardImport } from '../diagnostics/import-error-store';
 import { isPowerSyncConfigured } from '../env';
 import { getOrCreateDbKey } from '../security';
 import { SupabaseConnector } from '../sync/connector';
-import { AppSchema } from './schema';
+import { getAppSchema } from './schema';
 
 let dbInstance: PowerSyncDatabase | null = null;
 let connectInFlight: Promise<boolean> | null = null;
@@ -25,8 +30,20 @@ export async function openDatabase(): Promise<PowerSyncDatabase> {
     return dbInstance;
   }
   const encryptionKey = await getOrCreateDbKey();
+
+  // guardImport, not a plain call: building the schema runs eighteen
+  // `new Table(...)` / `new Schema(...)` constructors, and this is the first
+  // point at which they actually run (see ./schema.ts). A failure here is
+  // recorded in the same import-error store that catches module-scope
+  // failures, so the root layout shows a readable screen instead of leaving
+  // the app stuck on a spinner or rejecting silently.
+  const schema = guardImport('core/db: getAppSchema', getAppSchema);
+  if (!schema) {
+    throw new Error('LifeBook: Datenbankschema konnte nicht aufgebaut werden');
+  }
+
   dbInstance = new PowerSyncDatabase({
-    schema: AppSchema,
+    schema,
     database: {
       dbFilename: 'lifebook.db',
       sqliteOptions: { encryptionKey },
