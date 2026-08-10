@@ -61,13 +61,19 @@ export default function FotoVollbildScreen() {
     }
   }, [db, photo]);
 
+  // Der Text ist bewusst deutlich: "weiches Löschen" trifft nur die
+  // Datenbankzeile, die Dateien im Speicher werden hart entfernt (siehe
+  // handleDelete) — ohne Datei ist die Zeile für die Familie wertlos, das
+  // Foto ist tatsächlich weg, auf beiden Handys. Solange es keinen echten
+  // Papierkorb mit Wiederherstellung gibt, darf die Oberfläche keine
+  // Rückholbarkeit suggerieren, die es nicht gibt.
   const confirmDelete = useCallback(() => {
     Alert.alert(
-      'Foto löschen?',
-      'Das Foto wird aus der Chronik entfernt. Das kann nicht rückgängig gemacht werden.',
+      'Foto endgültig löschen?',
+      'Das Foto wird unwiderruflich gelöscht — auch vom Handy des anderen Elternteils. Es gibt keine Möglichkeit, es wiederherzustellen.',
       [
         { text: 'Abbrechen', style: 'cancel' },
-        { text: 'Löschen', style: 'destructive', onPress: handleDelete },
+        { text: 'Endgültig löschen', style: 'destructive', onPress: handleDelete },
       ],
     );
   }, [handleDelete]);
