@@ -13,13 +13,13 @@ export default function AppTabs() {
       indicatorColor={colors.backgroundElement}
       labelStyle={{ selected: { color: colors.text } }}>
       {/*
-        Füttern is the start screen (route "index") and the first tab —
-        needed ten times a day, against the Chronik's few times a week, so it
-        gets the position and the app-launch slot that used to belong to the
-        photo timeline.
+        Heute (Füttern, Wickeln, …) is the start screen (route "index") and
+        the first tab — needed many times a day, against the Chronik's few
+        times a week, so it gets the position and the app-launch slot that
+        used to belong to the photo timeline.
       */}
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Füttern</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>Heute</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="waterbottle.fill" md="water_bottle" />
       </NativeTabs.Trigger>
 

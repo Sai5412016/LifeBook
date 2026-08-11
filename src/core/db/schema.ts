@@ -123,9 +123,9 @@ function buildAppSchema() {
   const diapers = new Table(
     {
       ...eventColumns,
-      kind: column.text, // wet | dirty | mixed | dry
-      consistency: column.text,
-      color: column.text,
+      kind: column.text, // wet | dirty | both
+      consistency: column.text, // liquid | soft | formed | hard
+      color: column.text, // yellow | green | brown | black | red | white
       leaked: column.integer, // 0 | 1
     },
     { indexes: { child_time: ['child_id', 'occurred_at'] } },
