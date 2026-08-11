@@ -216,17 +216,28 @@ export type FeedAmountSummary = {
 };
 
 /**
+ * Bare duration or amount, with no side label — "18 min" or "120 ml". Used
+ * where the type is already named separately, e.g. the delete confirmation
+ * ("Stillen links, 06:43, 3 min wirklich löschen?").
+ */
+export function describeFeedQuantity(feed: FeedAmountSummary): string {
+  if (feed.feed_type === 'bottle_breastmilk' || feed.feed_type === 'bottle_formula') {
+    return `${feed.amount_ml ?? 0} ml`;
+  }
+  return formatDuration((feed.duration_left_s ?? 0) + (feed.duration_right_s ?? 0));
+}
+
+/**
  * Human amount/duration summary for a feed — "links, 18 min", "beidseitig,
  * 25 min", or "120 ml" for a bottle. Shared by the "last feed" status line
  * and the day's feed list, so both read the same way.
  */
 export function describeFeedAmount(feed: FeedAmountSummary): string {
   if (feed.feed_type === 'bottle_breastmilk' || feed.feed_type === 'bottle_formula') {
-    return `${feed.amount_ml ?? 0} ml`;
+    return describeFeedQuantity(feed);
   }
 
-  const totalLabel = formatDuration((feed.duration_left_s ?? 0) + (feed.duration_right_s ?? 0));
   const sideLabel =
     feed.feed_type === 'breast_right' ? 'rechts' : feed.feed_type === 'breast_left' ? 'links' : 'beidseitig';
-  return `${sideLabel}, ${totalLabel}`;
+  return `${sideLabel}, ${describeFeedQuantity(feed)}`;
 }

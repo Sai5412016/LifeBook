@@ -12,7 +12,7 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -25,10 +25,12 @@ import { useActiveChild } from '@/features/household/repository';
 import {
   acknowledgeReviewFlag,
   correctFeedDurations,
+  editFeed,
   endFeed,
   logBottle,
   pauseFeed,
   resumeFeed,
+  softDeleteFeed,
   startBreastFeed,
   switchSide,
   useFeedsNeedingReview,
@@ -37,8 +39,10 @@ import {
   useOpenFeed,
   useRunningFeed,
 } from '@/features/feeding/repository';
+import type { FeedEditInput } from '@/features/feeding/repository';
 import {
   describeFeedAmount,
+  describeFeedQuantity,
   describeFeedType,
   elapsedSeconds,
   formatClock,
@@ -88,6 +92,7 @@ export default function FuetternScreen() {
   const [busy, setBusy] = useState(false);
   const [bottleFormOpen, setBottleFormOpen] = useState(false);
   const [reviewFeedIdOpen, setReviewFeedIdOpen] = useState<string | null>(null);
+  const [editFeedId, setEditFeedId] = useState<string | null>(null);
   const [runawayDismissedFeedId, setRunawayDismissedFeedId] = useState<string | null>(null);
 
   const handleStart = useCallback(
@@ -183,6 +188,49 @@ export default function FuetternScreen() {
     [db],
   );
 
+  const handleOpenEdit = useCallback((feedId: string) => {
+    setEditFeedId(feedId);
+    setBottleFormOpen(false);
+    setReviewFeedIdOpen(null);
+  }, []);
+
+  const handleSaveEdit = useCallback(
+    async (feedId: string, input: FeedEditInput) => {
+      setBusy(true);
+      try {
+        await editFeed(db, feedId, input);
+        setEditFeedId(null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [db],
+  );
+
+  const handleRequestDelete = useCallback(
+    (feed: FeedRow) => {
+      const isOpenFeed = feed.ended_at === null;
+      const label = describeFeedType(feed.feed_type);
+      const time = formatTimeLabel(feed.occurred_at, feed.tz);
+      const message = isOpenFeed
+        ? `${label}, gestartet um ${time}, wirklich verwerfen?`
+        : `${label}, ${time}, ${describeFeedQuantity(feed)} wirklich löschen?`;
+
+      Alert.alert(isOpenFeed ? 'Fütterung verwerfen?' : 'Fütterung löschen?', message, [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: isOpenFeed ? 'Verwerfen' : 'Löschen',
+          style: 'destructive',
+          onPress: async () => {
+            await softDeleteFeed(db, feed.id);
+            setEditFeedId(null);
+          },
+        },
+      ]);
+    },
+    [db],
+  );
+
   if (childLoading || openLoading) {
     return (
       <ThemedView style={styles.centered}>
@@ -214,6 +262,7 @@ export default function FuetternScreen() {
   const reviewFeedOpen = reviewFeedIdOpen
     ? reviewFeeds.find((feed) => feed.id === reviewFeedIdOpen)
     : undefined;
+  const editFeedTarget = editFeedId ? todayFeeds.find((feed) => feed.id === editFeedId) : undefined;
 
   return (
     <ThemedView style={styles.container}>
@@ -226,7 +275,10 @@ export default function FuetternScreen() {
           {reviewFeeds.length > 0 ? (
             <ReviewBanner
               count={reviewFeeds.length}
-              onOpen={() => setReviewFeedIdOpen(reviewFeeds[0].id)}
+              onOpen={() => {
+                setReviewFeedIdOpen(reviewFeeds[0].id);
+                setEditFeedId(null);
+              }}
               onAcknowledge={() => handleAcknowledgeReview(reviewFeeds[0].id)}
             />
           ) : null}
@@ -273,7 +325,10 @@ export default function FuetternScreen() {
                 label="Fläschchen"
                 color={ACCENT}
                 variant="secondary"
-                onPress={() => setBottleFormOpen(true)}
+                onPress={() => {
+                  setBottleFormOpen(true);
+                  setEditFeedId(null);
+                }}
                 disabled={busy || !child}
               />
             </View>
@@ -282,6 +337,17 @@ export default function FuetternScreen() {
           <ThemedText type="smallBold" style={styles.listTitle}>
             Heute
           </ThemedText>
+
+          {editFeedTarget ? (
+            <FeedEditPanel
+              feed={editFeedTarget}
+              busy={busy}
+              onCancel={() => setEditFeedId(null)}
+              onSave={(input) => handleSaveEdit(editFeedTarget.id, input)}
+              onDelete={() => handleRequestDelete(editFeedTarget)}
+            />
+          ) : null}
+
           {todayFeeds.length === 0 ? (
             <ThemedText type="small" themeColor="textSecondary">
               Noch keine Fütterung heute.
@@ -289,7 +355,12 @@ export default function FuetternScreen() {
           ) : (
             <View style={styles.list}>
               {[...todayFeeds].reverse().map((feed) => (
-                <TodayFeedRow key={feed.id} feed={feed} tickingNow={tickingNow} />
+                <TodayFeedRow
+                  key={feed.id}
+                  feed={feed}
+                  tickingNow={tickingNow}
+                  onPress={() => handleOpenEdit(feed.id)}
+                />
               ))}
             </View>
           )}
@@ -505,7 +576,134 @@ function KindChip({ label, selected, onPress }: { label: string; selected: boole
   );
 }
 
-function TodayFeedRow({ feed, tickingNow }: { feed: FeedRow; tickingNow: string }) {
+/**
+ * Correction panel opened by tapping a row in the "Heute" list — same shape
+ * as `ReviewCorrectionPanel` above (reused styles: `correctionPanel`,
+ * `correctionRow`/`correctionField`, `bannerActions`, and the `KindChip`
+ * component), extended with the start time and, for a bottle feed, amount
+ * and kind. Works for a feed in any state; `onDelete` is labelled by the
+ * caller ("Löschen" once ended, "Verwerfen" while still open).
+ */
+function FeedEditPanel({
+  feed,
+  busy,
+  onCancel,
+  onSave,
+  onDelete,
+}: {
+  feed: FeedRow;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (input: FeedEditInput) => void;
+  onDelete: () => void;
+}) {
+  const isBreast = feed.feed_type.startsWith('breast_');
+  const isOpenFeed = feed.ended_at === null;
+
+  const [time, setTime] = useState(formatTimeLabel(feed.occurred_at, feed.tz));
+  const [leftMin, setLeftMin] = useState(String(Math.round((feed.duration_left_s ?? 0) / 60)));
+  const [rightMin, setRightMin] = useState(String(Math.round((feed.duration_right_s ?? 0) / 60)));
+  const [amount, setAmount] = useState(feed.amount_ml ? String(feed.amount_ml) : '');
+  const [kind, setKind] = useState<BottleKind>(feed.feed_type === 'bottle_formula' ? 'formula' : 'breastmilk');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = () => {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      setError('Uhrzeit bitte als HH:MM eingeben.');
+      return;
+    }
+
+    if (isBreast) {
+      const left = Math.max(0, Number(leftMin) || 0);
+      const right = Math.max(0, Number(rightMin) || 0);
+      setError(null);
+      onSave({ time, durationLeftS: left * 60, durationRightS: right * 60 });
+      return;
+    }
+
+    const amountMl = Number(amount);
+    if (!Number.isFinite(amountMl) || amountMl <= 0) {
+      setError('Bitte eine Menge in ml eingeben.');
+      return;
+    }
+    setError(null);
+    onSave({ time, amountMl: Math.round(amountMl), kind });
+  };
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.correctionPanel}>
+      <ThemedText type="smallBold">{describeFeedType(feed.feed_type)}</ThemedText>
+
+      <TextField
+        label="Uhrzeit (HH:MM)"
+        value={time}
+        onChangeText={setTime}
+        keyboardType="numbers-and-punctuation"
+      />
+
+      {isBreast ? (
+        <View style={styles.correctionRow}>
+          <View style={styles.correctionField}>
+            <TextField
+              label="Links (min)"
+              value={leftMin}
+              onChangeText={setLeftMin}
+              keyboardType="number-pad"
+            />
+          </View>
+          <View style={styles.correctionField}>
+            <TextField
+              label="Rechts (min)"
+              value={rightMin}
+              onChangeText={setRightMin}
+              keyboardType="number-pad"
+            />
+          </View>
+        </View>
+      ) : (
+        <>
+          <TextField label="Menge (ml)" value={amount} onChangeText={setAmount} keyboardType="number-pad" />
+          <View style={styles.kindRow}>
+            <KindChip label="Muttermilch" selected={kind === 'breastmilk'} onPress={() => setKind('breastmilk')} />
+            <KindChip label="Nahrung" selected={kind === 'formula'} onPress={() => setKind('formula')} />
+          </View>
+        </>
+      )}
+
+      {error ? (
+        <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+          {error}
+        </ThemedText>
+      ) : null}
+
+      <View style={styles.bannerActions}>
+        <Pressable onPress={onCancel} hitSlop={8} disabled={busy}>
+          <ThemedText type="link" themeColor="textSecondary">
+            Abbrechen
+          </ThemedText>
+        </Pressable>
+        <Pressable onPress={onDelete} hitSlop={8} disabled={busy}>
+          <ThemedText type="link" style={{ color: DANGER_TEXT }}>
+            {isOpenFeed ? 'Verwerfen' : 'Löschen'}
+          </ThemedText>
+        </Pressable>
+        <Pressable onPress={handleSave} hitSlop={8} disabled={busy}>
+          <ThemedText type="linkPrimary">Speichern</ThemedText>
+        </Pressable>
+      </View>
+    </ThemedView>
+  );
+}
+
+function TodayFeedRow({
+  feed,
+  tickingNow,
+  onPress,
+}: {
+  feed: FeedRow;
+  tickingNow: string;
+  onPress: () => void;
+}) {
   const time = formatTimeLabel(feed.occurred_at, feed.tz);
   const typeLabel = describeFeedType(feed.feed_type);
   const amountLabel =
@@ -514,18 +712,20 @@ function TodayFeedRow({ feed, tickingNow }: { feed: FeedRow; tickingNow: string 
       : describeFeedAmount(feed);
 
   return (
-    <ThemedView type="backgroundElement" style={styles.row}>
-      <ThemedText type="smallBold" style={styles.rowTime}>
-        {time}
-      </ThemedText>
-      <ThemedText type="small" style={styles.rowType}>
-        {typeLabel}
-      </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary">
-        {amountLabel}
-      </ThemedText>
-      {feed.needs_review === 1 ? <ThemedText style={{ color: AMBER }}> ⚠</ThemedText> : null}
-    </ThemedView>
+    <Pressable onPress={onPress}>
+      <ThemedView type="backgroundElement" style={styles.row}>
+        <ThemedText type="smallBold" style={styles.rowTime}>
+          {time}
+        </ThemedText>
+        <ThemedText type="small" style={styles.rowType}>
+          {typeLabel}
+        </ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">
+          {amountLabel}
+        </ThemedText>
+        {feed.needs_review === 1 ? <ThemedText style={{ color: AMBER }}> ⚠</ThemedText> : null}
+      </ThemedView>
+    </Pressable>
   );
 }
 

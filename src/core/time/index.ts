@@ -87,6 +87,36 @@ export const formatTimeLabel = (occurredAtUtcIso: string, tz: string): string =>
   formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'HH:mm');
 
 /**
+ * Combines a calendar date (YYYY-MM-DD) and wall-clock time (HH:mm) in `tz`
+ * into a UTC instant — the inverse of `formatTimeLabel`/`toLocalDate`
+ * together. For correcting an event's start time: the caller supplies the
+ * date the event is currently filed under and only the clock time changes,
+ * mirroring what a "Uhrzeit" field can actually edit.
+ *
+ * Returns null for a malformed date/time or an unknown IANA zone, so callers
+ * can reject the edit instead of storing a bogus instant.
+ */
+export const combineLocalDateAndTime = (
+  localDate: string,
+  time: string,
+  tz: string,
+): string | null => {
+  const match = `${localDate}T${time}`.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const [, year, month, day, hour, minute] = match;
+
+  try {
+    const instant = fromZonedTime(`${year}-${month}-${day}T${hour}:${minute}:00`, tz);
+    return Number.isNaN(instant.getTime()) ? null : instant.toISOString();
+  } catch {
+    // Unknown IANA zone id — no sensible instant can be derived.
+    return null;
+  }
+};
+
+/**
  * Derive the DST-safe local calendar date (YYYY-MM-DD) of a UTC instant in `tz`.
  * Use this to fill `local_date` at insert time.
  */
