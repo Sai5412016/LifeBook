@@ -85,7 +85,8 @@
           "icon": "./assets/images/icon.png",
           "color": "#208AEF"
         }
-      ]
+      ],
+      "react-native-share"
     ],
     "experiments": {
       "typedRoutes": true,

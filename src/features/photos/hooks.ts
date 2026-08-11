@@ -7,9 +7,11 @@
  * rather than showing a broken image.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { createSignedUrls } from './storage';
+import { ShareCancelledError, sharePhotos } from './share';
+import { checkShareBatchSize, formatMobileDataWarning, shouldWarnAboutMobileData } from './sharing';
+import { createSignedUrls, isOnWifi, type ShareableOriginal, type ShareBatchProgress } from './storage';
 
 /**
  * Resolve display URLs for a set of object keys.
@@ -57,4 +59,72 @@ export function useSignedUrls(keys: (string | null | undefined)[]): Map<string, 
   }, [dependency]);
 
   return urls;
+}
+
+export type SharePhotosOutcome =
+  /** Rejected before anything was loaded — empty selection or over the cap (see photos/sharing#checkShareBatchSize). */
+  | { status: 'rejected'; message: string }
+  /** The loading screen was cancelled before the share sheet opened. */
+  | { status: 'cancelled' }
+  /** Loading failed outright (not a per-photo skip — see `failedCount` below for that). */
+  | { status: 'error' }
+  | {
+      status: 'done';
+      shared: number;
+      failedCount: number;
+      /** Advisory only, set when off Wi-Fi for a large-enough batch — never blocks the share. */
+      wifiWarning: string | null;
+    };
+
+/**
+ * Shared share-photos flow for the Chronik's multi-select action bar and the
+ * fullscreen viewer's single-photo button — both need the same batch-size
+ * check, Wi-Fi warning, cancelable loading progress and per-photo failure
+ * tolerance, so it lives here once rather than twice.
+ */
+export function useSharePhotos(): {
+  progress: ShareBatchProgress | null;
+  share: (photos: readonly ShareableOriginal[]) => Promise<SharePhotosOutcome>;
+  cancel: () => void;
+} {
+  const [progress, setProgress] = useState<ShareBatchProgress | null>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => {
+    controllerRef.current?.abort();
+  }, []);
+
+  const share = useCallback(async (photos: readonly ShareableOriginal[]): Promise<SharePhotosOutcome> => {
+    const check = checkShareBatchSize(photos.length);
+    if (!check.ok) {
+      return { status: 'rejected', message: check.message };
+    }
+
+    const wifiWarning = shouldWarnAboutMobileData(photos.length, await isOnWifi())
+      ? formatMobileDataWarning(photos.length)
+      : null;
+
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setProgress({ current: 0, total: photos.length });
+
+    try {
+      const result = await sharePhotos(photos, {
+        signal: controller.signal,
+        onProgress: setProgress,
+      });
+      return { status: 'done', shared: result.shared, failedCount: result.failedCount, wifiWarning };
+    } catch (error) {
+      if (error instanceof ShareCancelledError) {
+        return { status: 'cancelled' };
+      }
+      console.error('[LifeBook] Teilen fehlgeschlagen', error);
+      return { status: 'error' };
+    } finally {
+      setProgress(null);
+      controllerRef.current = null;
+    }
+  }, []);
+
+  return { progress, share, cancel };
 }

@@ -14,12 +14,13 @@
  */
 
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { File, UploadType } from 'expo-file-system';
+import { Directory, File, Paths, UploadType } from 'expo-file-system';
 import * as Network from 'expo-network';
 
 import { ENV } from '@/core/env';
 import { supabase } from '@/core/supabase';
 
+import { extensionForMime } from './identity';
 import { createThumbnail, deleteQuietly } from './media';
 import { loadPendingUploads, markOriginalUploaded, markThumbUploaded } from './repository';
 
@@ -235,4 +236,148 @@ export async function removeStoredObjects(
   if (error) {
     console.error('[LifeBook] Fotodateien konnten nicht gelöscht werden', error.message);
   }
+}
+
+/* ────────────────────────────── Sharing ────────────────────────────── */
+
+/** The subset of a photo row `resolveOriginalForSharing` needs. */
+export type ShareableOriginal = {
+  id: string;
+  local_uri: string | null;
+  original_key: string | null;
+  mime: string | null;
+};
+
+export type ResolvedShareFile = {
+  uri: string;
+  /**
+   * True when `uri` was downloaded into the sharing cache and must be
+   * deleted once the share sheet has been handed the file. False when `uri`
+   * IS `local_uri` — the same file this device is still holding for its own
+   * pending upload — which must never be deleted here; only the upload
+   * queue (storage.ts#executeUploadQueue) retires that file, once the bytes
+   * are confirmed safe in object storage.
+   */
+  isTemporary: boolean;
+};
+
+/**
+ * Directory holding originals fetched only for a share operation. Separate
+ * from `photos-pending` (media.ts) on purpose: those files are staged
+ * uploads this device still owns; these are throwaway copies of photos this
+ * device does NOT hold locally, fetched purely to hand to the OS share
+ * sheet and deleted right after. Built lazily for the same reason as every
+ * other native-call-holding directory in this feature — see
+ * media.ts#getStagingDirectory.
+ */
+let shareCacheDirectory: Directory | null = null;
+
+function getShareCacheDirectory(): Directory {
+  if (!shareCacheDirectory) {
+    shareCacheDirectory = new Directory(Paths.cache, 'photos-sharing');
+  }
+  return shareCacheDirectory;
+}
+
+/**
+ * Resolve a local file path for a photo's ORIGINAL, ready to hand to the OS
+ * share sheet. If the original is still staged on this device (`local_uri`
+ * set — not yet uploaded, or the upload just hasn't finished), that file is
+ * used directly, no network needed. Otherwise it is downloaded from object
+ * storage into the sharing cache.
+ *
+ * `signal` lets a caller abort an in-progress download when the user cancels
+ * the loading screen (see ./sharing's `formatShareProgressLabel` and the
+ * screens that show it).
+ */
+export async function resolveOriginalForSharing(
+  photo: ShareableOriginal,
+  options: { signal?: AbortSignal } = {},
+): Promise<ResolvedShareFile> {
+  if (photo.local_uri) {
+    return { uri: photo.local_uri, isTemporary: false };
+  }
+  if (!photo.original_key) {
+    throw new Error(`photos: no original available to share for photo ${photo.id}`);
+  }
+
+  const urls = await createSignedUrls([photo.original_key]);
+  const signedUrl = urls.get(photo.original_key);
+  if (!signedUrl) {
+    throw new Error(`photos: could not sign the original to share for photo ${photo.id}`);
+  }
+
+  const directory = getShareCacheDirectory();
+  if (!directory.info().exists) {
+    directory.create({ intermediates: true });
+  }
+
+  const destination = new File(directory, `${photo.id}.${extensionForMime(photo.mime)}`);
+  const downloaded = await File.downloadFileAsync(signedUrl, destination, {
+    idempotent: true,
+    signal: options.signal,
+  });
+
+  return { uri: downloaded.uri, isTemporary: true };
+}
+
+/** Deletes only the files this share operation itself downloaded — never a staged upload. */
+export function cleanupSharedFiles(files: readonly ResolvedShareFile[]): void {
+  for (const file of files) {
+    if (file.isTemporary) {
+      deleteQuietly(file.uri);
+    }
+  }
+}
+
+export type ShareBatchProgress = { current: number; total: number };
+
+export type ShareBatchResult = {
+  files: ResolvedShareFile[];
+  /** How many photos in the batch could not be resolved — reported to the user, never silent. */
+  failedCount: number;
+  /** True when `signal` was aborted before every photo was processed. */
+  cancelled: boolean;
+};
+
+/**
+ * Resolves every photo in `photos` to a local file, one at a time so
+ * `onProgress` can drive a "Bild X von Y wird geladen …" display.
+ *
+ * A single photo that fails to load (network hiccup, missing original, …)
+ * is skipped and counted, never lets the whole batch abort — mirrors
+ * `executeUploadQueue`'s per-item try/catch above. Checked BEFORE and AFTER
+ * each fetch so an abort during the slow part (the download itself) stops
+ * the loop promptly instead of finishing the batch regardless.
+ */
+export async function prepareShareBatch(
+  photos: readonly ShareableOriginal[],
+  options: { signal?: AbortSignal; onProgress?: (progress: ShareBatchProgress) => void } = {},
+): Promise<ShareBatchResult> {
+  const files: ResolvedShareFile[] = [];
+  let failedCount = 0;
+
+  for (let index = 0; index < photos.length; index += 1) {
+    if (options.signal?.aborted) {
+      return { files, failedCount, cancelled: true };
+    }
+
+    options.onProgress?.({ current: index + 1, total: photos.length });
+
+    try {
+      const file = await resolveOriginalForSharing(photos[index], { signal: options.signal });
+      files.push(file);
+    } catch (error) {
+      if (options.signal?.aborted) {
+        return { files, failedCount, cancelled: true };
+      }
+      failedCount += 1;
+      console.error('[LifeBook] Foto konnte für das Teilen nicht geladen werden', {
+        photoId: photos[index].id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { files, failedCount, cancelled: false };
 }
