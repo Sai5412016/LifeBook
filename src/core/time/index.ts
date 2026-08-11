@@ -14,7 +14,7 @@
  * this module is the single allowed place for time construction.
  */
 
-import { differenceInCalendarDays, parseISO, subHours } from 'date-fns';
+import { differenceInCalendarDays, differenceInSeconds, parseISO, subHours } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 
@@ -82,6 +82,10 @@ export const formatDayLabel = (localDate: string): string => {
   return formatInTimeZone(date, 'UTC', 'EEEE, d. MMMM yyyy', { locale: de });
 };
 
+/** Wall-clock time of a UTC instant in `tz`, e.g. "14:32" — for event-list rows. */
+export const formatTimeLabel = (occurredAtUtcIso: string, tz: string): string =>
+  formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'HH:mm');
+
 /**
  * Derive the DST-safe local calendar date (YYYY-MM-DD) of a UTC instant in `tz`.
  * Use this to fill `local_date` at insert time.
@@ -103,6 +107,16 @@ export const toDashboardDate = (
   dayStartHour = 6,
 ): string =>
   formatInTimeZone(subHours(parseISO(occurredAtUtcIso), dayStartHour), tz, 'yyyy-MM-dd');
+
+/**
+ * Whole seconds from `fromUtcIso` to `toUtcIso` (negative when `to` is
+ * earlier than `from`). Both instants are UTC, so — unlike calendar-day math
+ * — this needs no timezone and is never affected by a DST transition
+ * happening to fall in between: a running timer's elapsed time is a real
+ * duration, not a calendar concept.
+ */
+export const secondsBetween = (fromUtcIso: string, toUtcIso: string): number =>
+  differenceInSeconds(parseISO(toUtcIso), parseISO(fromUtcIso));
 
 /**
  * Age in whole days of an event relative to birth, evaluated in `tz`.

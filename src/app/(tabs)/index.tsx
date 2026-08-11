@@ -1,110 +1,189 @@
 /**
- * Chronik — the photo timeline, and the app's home screen.
+ * Füttern — the start screen (Stufe 4, first tracking feature).
  *
- * Replaces the Expo starter template that stood here. Photos are grouped by the
- * day they were TAKEN (not imported) and labelled with the child's age, which is
- * the whole point: "Tag 4" means more to a parent than a date does.
+ * Route "index": needed many times a day, unlike the Chronik (a few times a
+ * week), so it gets the app's launch slot — see components/app-tabs.tsx.
  *
- * Tiles prefer the local staged file while it is still on the device and fall
- * back to the signed preview URL afterwards, so a freshly imported photo appears
- * instantly instead of waiting for a round trip.
+ * Built for one-handed, in-the-dark use: large full-width buttons, high
+ * contrast, no small tap targets. All timer math is the pure logic in
+ * features/feeding/timer.ts; this file only renders it and calls the
+ * repository — no time construction happens here.
  */
 
 import { usePowerSync } from '@powersync/react-native';
-import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  SectionList,
-  StyleSheet,
-  useWindowDimensions,
-} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
-import { ageInDays, formatDayLabel, nowUtcIso } from '@/core/time';
+import { formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
-import { formatAgeLabel } from '@/features/photos/identity';
-import { PickCancelledError, describeImport, importPhotos } from '@/features/photos/import';
-import { useSignedUrls } from '@/features/photos/hooks';
-import { usePendingUploadCount, usePhotoSections } from '@/features/photos/repository';
-import { runUploadQueue } from '@/features/photos/storage';
-import type { PhotoRow } from '@/features/photos/types';
-import { Button } from '@/ui';
+import {
+  acknowledgeReviewFlag,
+  correctFeedDurations,
+  endFeed,
+  logBottle,
+  pauseFeed,
+  resumeFeed,
+  startBreastFeed,
+  switchSide,
+  useFeedsNeedingReview,
+  useFeedsOfDay,
+  useLastCompletedFeed,
+  useOpenFeed,
+  useRunningFeed,
+} from '@/features/feeding/repository';
+import {
+  describeFeedAmount,
+  describeFeedType,
+  elapsedSeconds,
+  formatClock,
+  formatDuration,
+  formatSinceLastFeed,
+  isRunaway,
+} from '@/features/feeding/timer';
+import type { BottleKind, FeedRow, FeedSide } from '@/features/feeding/types';
+import { TextField } from '@/ui';
 
-const COLUMNS = 3;
-const GRID_GAP = Spacing.half;
+const ACCENT = '#3c87f7';
+const AMBER = '#d9822b';
+const GREEN = '#3ba55d';
+const WARNING_BG = '#3a2c10';
+const DANGER_BG = '#3a1414';
+const DANGER_TEXT = '#ff8a80';
 
-export default function ChronikScreen() {
+/** Ticks every second so the running timer and "vor …" labels stay live. */
+function useTickingNow(): string {
+  const [now, setNow] = useState(() => nowUtcIso());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(nowUtcIso()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return now;
+}
+
+export default function FuetternScreen() {
   const db = usePowerSync();
   const { session } = useAuth();
   const { child, isLoading: childLoading } = useActiveChild();
-  const { sections, isLoading: photosLoading } = usePhotoSections(child?.childId);
-  const pendingCount = usePendingUploadCount();
-  const { width } = useWindowDimensions();
+  const tz = deviceTimeZone();
+  const tickingNow = useTickingNow();
+
+  // Reactive conflict resolution: a second concurrently running timer that
+  // arrived via sync is resolved here, not only when a timer is started.
+  useRunningFeed(child?.childId);
+
+  const { feed: openFeed, isLoading: openLoading } = useOpenFeed(child?.childId);
+  const { feed: lastCompletedFeed } = useLastCompletedFeed(child?.childId);
+  const todayLocalDate = toLocalDate(tickingNow, tz);
+  const { feeds: todayFeeds } = useFeedsOfDay(child?.childId, todayLocalDate);
+  const reviewFeeds = useFeedsNeedingReview(child?.childId);
 
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [bottleFormOpen, setBottleFormOpen] = useState(false);
+  const [reviewFeedIdOpen, setReviewFeedIdOpen] = useState<string | null>(null);
+  const [runawayDismissedFeedId, setRunawayDismissedFeedId] = useState<string | null>(null);
 
-  const tileSize = Math.floor(
-    (width - Spacing.three * 2 - GRID_GAP * (COLUMNS - 1)) / COLUMNS,
-  );
-
-  const thumbKeys = useMemo(
-    () => sections.flatMap((section) => section.photos.map((photo) => photo.thumb_key)),
-    [sections],
-  );
-  const signedUrls = useSignedUrls(thumbKeys);
-
-  const handleImport = useCallback(async () => {
-    if (!child || !session?.user.id) {
-      return;
-    }
-
-    setBusy(true);
-    setMessage(null);
-    try {
-      const summary = await importPhotos(db, {
-        householdId: child.householdId,
-        childId: child.childId,
-        userId: session.user.id,
-        tz: deviceTimeZone(),
-        birthAtUtcIso: child.birthAtUtcIso,
-      });
-      setMessage(describeImport(summary));
-    } catch (error) {
-      if (error instanceof PickCancelledError) {
-        return;
+  const handleStart = useCallback(
+    async (side: FeedSide) => {
+      if (!child || !session?.user.id) return;
+      setBusy(true);
+      try {
+        await startBreastFeed(db, {
+          householdId: child.householdId,
+          childId: child.childId,
+          userId: session.user.id,
+          tz,
+          side,
+        });
+      } catch (error) {
+        console.error('[LifeBook] Stillen konnte nicht gestartet werden', error);
+      } finally {
+        setBusy(false);
       }
-      console.error('[LifeBook] Foto-Import fehlgeschlagen', error);
-      setMessage('Import fehlgeschlagen. Details stehen im Protokoll.');
-    } finally {
-      setBusy(false);
-    }
-  }, [child, db, session?.user.id]);
+    },
+    [child, session?.user.id, db, tz],
+  );
 
-  const handleForceUpload = useCallback(async () => {
+  const handleSwitchSide = useCallback(async () => {
+    if (!openFeed) return;
     setBusy(true);
-    setMessage(null);
     try {
-      const result = await runUploadQueue(db, { wifiOnly: false });
-      setMessage(
-        result.originals > 0
-          ? `${result.originals} Foto${result.originals === 1 ? '' : 's'} hochgeladen.`
-          : 'Nichts zu übertragen.',
-      );
+      await switchSide(db, openFeed.id);
     } finally {
       setBusy(false);
     }
-  }, [db]);
+  }, [db, openFeed]);
 
-  if (childLoading || photosLoading) {
+  const handlePauseResume = useCallback(async () => {
+    if (!openFeed) return;
+    setBusy(true);
+    try {
+      if (openFeed.is_running) {
+        await pauseFeed(db, openFeed.id);
+      } else {
+        await resumeFeed(db, openFeed.id);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [db, openFeed]);
+
+  const handleEndFeed = useCallback(async () => {
+    if (!openFeed) return;
+    setBusy(true);
+    try {
+      await endFeed(db, openFeed.id);
+      setRunawayDismissedFeedId(null);
+    } finally {
+      setBusy(false);
+    }
+  }, [db, openFeed]);
+
+  const handleSaveBottle = useCallback(
+    async (amountMl: number, kind: BottleKind) => {
+      if (!child || !session?.user.id) return;
+      setBusy(true);
+      try {
+        await logBottle(db, {
+          householdId: child.householdId,
+          childId: child.childId,
+          userId: session.user.id,
+          tz,
+          amountMl,
+          kind,
+        });
+        setBottleFormOpen(false);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [child, session?.user.id, db, tz],
+  );
+
+  const handleAcknowledgeReview = useCallback(
+    async (feedId: string) => {
+      await acknowledgeReviewFlag(db, feedId);
+      setReviewFeedIdOpen((current) => (current === feedId ? null : current));
+    },
+    [db],
+  );
+
+  const handleSaveCorrection = useCallback(
+    async (feedId: string, durationLeftS: number, durationRightS: number) => {
+      await correctFeedDurations(db, feedId, { durationLeftS, durationRightS });
+      setReviewFeedIdOpen(null);
+    },
+    [db],
+  );
+
+  if (childLoading || openLoading) {
     return (
       <ThemedView style={styles.centered}>
         <ActivityIndicator />
@@ -112,159 +191,395 @@ export default function ChronikScreen() {
     );
   }
 
-  const todayAge = child
-    ? formatAgeLabel(ageInDays(nowUtcIso(), child.birthAtUtcIso, child.birthTz))
-    : '';
+  const isRunning = openFeed?.is_running === 1;
+  const runawayVisible =
+    isRunning && !!openFeed && runawayDismissedFeedId !== openFeed.id && isRunaway(openFeed, tickingNow);
+
+  let statusText: string;
+  if (openFeed) {
+    const elapsed = elapsedSeconds(openFeed, tickingNow);
+    const sideLabel = openFeed.running_side === 'right' ? 'rechts' : 'links';
+    if (isRunning) {
+      const activeSeconds = openFeed.running_side === 'right' ? elapsed.right : elapsed.left;
+      statusText = `Stillen ${sideLabel} · ${formatClock(activeSeconds)}`;
+    } else {
+      statusText = `Pausiert · ${sideLabel}, ${formatDuration(elapsed.left + elapsed.right)}`;
+    }
+  } else if (lastCompletedFeed) {
+    statusText = `Letzte Mahlzeit ${formatSinceLastFeed(lastCompletedFeed.occurred_at, tickingNow)} · ${describeFeedAmount(lastCompletedFeed)}`;
+  } else {
+    statusText = 'Noch keine Fütterung erfasst';
+  }
+
+  const reviewFeedOpen = reviewFeedIdOpen
+    ? reviewFeeds.find((feed) => feed.id === reviewFeedIdOpen)
+    : undefined;
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.header}>
-          <ThemedText type="title">{child ? child.firstName : 'Chronik'}</ThemedText>
-          {todayAge ? (
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <ThemedText type="small" themeColor="textSecondary">
+            {child ? child.firstName : 'Füttern'}
+          </ThemedText>
+
+          {reviewFeeds.length > 0 ? (
+            <ReviewBanner
+              count={reviewFeeds.length}
+              onOpen={() => setReviewFeedIdOpen(reviewFeeds[0].id)}
+              onAcknowledge={() => handleAcknowledgeReview(reviewFeeds[0].id)}
+            />
+          ) : null}
+
+          {reviewFeedOpen ? (
+            <ReviewCorrectionPanel
+              feed={reviewFeedOpen}
+              onCancel={() => setReviewFeedIdOpen(null)}
+              onAcknowledge={() => handleAcknowledgeReview(reviewFeedOpen.id)}
+              onSave={(leftS, rightS) => handleSaveCorrection(reviewFeedOpen.id, leftS, rightS)}
+            />
+          ) : null}
+
+          {runawayVisible && openFeed ? (
+            <RunawayBanner onEnd={handleEndFeed} onDismiss={() => setRunawayDismissedFeedId(openFeed.id)} />
+          ) : null}
+
+          <ThemedText type="title" style={styles.status}>
+            {statusText}
+          </ThemedText>
+
+          {bottleFormOpen ? (
+            <BottleForm
+              busy={busy}
+              onCancel={() => setBottleFormOpen(false)}
+              onSave={handleSaveBottle}
+            />
+          ) : openFeed ? (
+            <View style={styles.actions}>
+              <BigButton label="Seite wechseln" color={ACCENT} onPress={handleSwitchSide} disabled={busy || !isRunning} />
+              <BigButton
+                label={isRunning ? 'Pause' : 'Weiter'}
+                color={AMBER}
+                onPress={handlePauseResume}
+                disabled={busy}
+              />
+              <BigButton label="Beenden" color={GREEN} onPress={handleEndFeed} disabled={busy} />
+            </View>
+          ) : (
+            <View style={styles.actions}>
+              <BigButton label="Stillen links" color={ACCENT} onPress={() => handleStart('left')} disabled={busy || !child} />
+              <BigButton label="Stillen rechts" color={ACCENT} onPress={() => handleStart('right')} disabled={busy || !child} />
+              <BigButton
+                label="Fläschchen"
+                color={ACCENT}
+                variant="secondary"
+                onPress={() => setBottleFormOpen(true)}
+                disabled={busy || !child}
+              />
+            </View>
+          )}
+
+          <ThemedText type="smallBold" style={styles.listTitle}>
+            Heute
+          </ThemedText>
+          {todayFeeds.length === 0 ? (
             <ThemedText type="small" themeColor="textSecondary">
-              Heute · {todayAge}
+              Noch keine Fütterung heute.
             </ThemedText>
-          ) : null}
-        </ThemedView>
-
-        <ThemedView style={styles.actions}>
-          <Button
-            label="Fotos hinzufügen"
-            onPress={handleImport}
-            loading={busy}
-            disabled={!child}
-          />
-          {message ? (
-            <ThemedText type="small" themeColor="textSecondary" style={styles.message}>
-              {message}
-            </ThemedText>
-          ) : null}
-          {pendingCount > 0 ? (
-            <ThemedView type="backgroundElement" style={styles.pendingRow}>
-              <ThemedText type="small" themeColor="textSecondary">
-                {pendingCount === 1
-                  ? '1 Foto wartet auf WLAN'
-                  : `${pendingCount} Fotos warten auf WLAN`}
-              </ThemedText>
-              <Pressable onPress={handleForceUpload} disabled={busy} hitSlop={8}>
-                <ThemedText type="linkPrimary">Jetzt übertragen</ThemedText>
-              </Pressable>
-            </ThemedView>
-          ) : null}
-        </ThemedView>
-
-        <SectionList
-          sections={sections.map((section) => ({
-            title: section.localDate,
-            ageDays: section.ageDays,
-            data: chunk(section.photos, COLUMNS),
-          }))}
-          keyExtractor={(row, index) => row[0]?.id ?? String(index)}
-          stickySectionHeadersEnabled={false}
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={
-            <ThemedView style={styles.empty}>
-              <ThemedText type="subtitle">Noch keine Fotos</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" style={styles.emptyHint}>
-                Füge die ersten Bilder hinzu. Sie werden nach Aufnahmedatum sortiert
-                und mit dem Alter beschriftet — doppelte Bilder erkennt LifeBook
-                automatisch.
-              </ThemedText>
-            </ThemedView>
-          }
-          renderSectionHeader={({ section }) => (
-            <ThemedView style={styles.sectionHeader}>
-              <ThemedText type="smallBold">{formatDayLabel(section.title)}</ThemedText>
-              {section.ageDays !== null ? (
-                <ThemedText type="small" themeColor="textSecondary">
-                  {formatAgeLabel(section.ageDays)}
-                </ThemedText>
-              ) : null}
-            </ThemedView>
-          )}
-          renderItem={({ item: row }) => (
-            <ThemedView style={styles.gridRow}>
-              {row.map((photo) => (
-                <PhotoTile
-                  key={photo.id}
-                  photo={photo}
-                  size={tileSize}
-                  signedUrl={photo.thumb_key ? signedUrls.get(photo.thumb_key) : undefined}
-                />
+          ) : (
+            <View style={styles.list}>
+              {[...todayFeeds].reverse().map((feed) => (
+                <TodayFeedRow key={feed.id} feed={feed} tickingNow={tickingNow} />
               ))}
-            </ThemedView>
+            </View>
           )}
-        />
+        </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
 }
 
-function PhotoTile({
-  photo,
-  size,
-  signedUrl,
+function BigButton({
+  label,
+  color,
+  onPress,
+  disabled,
+  variant = 'primary',
 }: {
-  photo: PhotoRow;
-  size: number;
-  signedUrl: string | undefined;
+  label: string;
+  color: string;
+  onPress: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary';
 }) {
-  // Local file first: it exists until the original is safely uploaded, and it
-  // needs neither network nor a signed URL.
-  const uri = photo.local_uri ?? signedUrl;
-
   return (
-    <Pressable onPress={() => router.push(`/foto/${photo.id}`)}>
-      <ThemedView type="backgroundElement" style={[styles.tile, { width: size, height: size }]}>
-        {uri ? (
-          <Image
-            source={{ uri }}
-            style={styles.tileImage}
-            contentFit="cover"
-            transition={120}
-          />
-        ) : null}
-      </ThemedView>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.bigButton,
+        variant === 'primary'
+          ? { backgroundColor: color }
+          : { backgroundColor: 'transparent', borderWidth: 2, borderColor: color },
+        disabled && styles.bigButtonDisabled,
+        pressed && !disabled && styles.bigButtonPressed,
+      ]}>
+      <ThemedText
+        style={[styles.bigButtonLabel, variant === 'primary' ? { color: '#ffffff' } : { color }]}>
+        {label}
+      </ThemedText>
     </Pressable>
   );
 }
 
-/** Split a day's photos into fixed-width rows for the grid. */
-function chunk<T>(items: T[], size: number): T[][] {
-  const rows: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    rows.push(items.slice(index, index + size));
-  }
-  return rows;
+function ReviewBanner({
+  count,
+  onOpen,
+  onAcknowledge,
+}: {
+  count: number;
+  onOpen: () => void;
+  onAcknowledge: () => void;
+}) {
+  return (
+    <ThemedView style={[styles.banner, { backgroundColor: WARNING_BG }]}>
+      <ThemedText type="smallBold" style={styles.warningText}>
+        {count === 1
+          ? 'Zwei Timer liefen gleichzeitig — bitte prüfen'
+          : `${count} Fütterungen mit gleichzeitig laufenden Timern — bitte prüfen`}
+      </ThemedText>
+      <View style={styles.bannerActions}>
+        <Pressable onPress={onOpen} hitSlop={8}>
+          <ThemedText type="linkPrimary">Öffnen</ThemedText>
+        </Pressable>
+        <Pressable onPress={onAcknowledge} hitSlop={8}>
+          <ThemedText type="linkPrimary">Bestätigen</ThemedText>
+        </Pressable>
+      </View>
+    </ThemedView>
+  );
+}
+
+function ReviewCorrectionPanel({
+  feed,
+  onCancel,
+  onAcknowledge,
+  onSave,
+}: {
+  feed: FeedRow;
+  onCancel: () => void;
+  onAcknowledge: () => void;
+  onSave: (durationLeftS: number, durationRightS: number) => void;
+}) {
+  const [leftMin, setLeftMin] = useState(String(Math.round((feed.duration_left_s ?? 0) / 60)));
+  const [rightMin, setRightMin] = useState(String(Math.round((feed.duration_right_s ?? 0) / 60)));
+
+  const handleSave = () => {
+    const left = Math.max(0, Number(leftMin) || 0);
+    const right = Math.max(0, Number(rightMin) || 0);
+    onSave(left * 60, right * 60);
+  };
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.correctionPanel}>
+      <ThemedText type="smallBold">
+        {formatTimeLabel(feed.occurred_at, feed.tz)} · {describeFeedType(feed.feed_type)}
+      </ThemedText>
+      <View style={styles.correctionRow}>
+        <View style={styles.correctionField}>
+          <TextField
+            label="Links (min)"
+            value={leftMin}
+            onChangeText={setLeftMin}
+            keyboardType="number-pad"
+          />
+        </View>
+        <View style={styles.correctionField}>
+          <TextField
+            label="Rechts (min)"
+            value={rightMin}
+            onChangeText={setRightMin}
+            keyboardType="number-pad"
+          />
+        </View>
+      </View>
+      <View style={styles.bannerActions}>
+        <Pressable onPress={onCancel} hitSlop={8}>
+          <ThemedText type="link" themeColor="textSecondary">
+            Abbrechen
+          </ThemedText>
+        </Pressable>
+        <Pressable onPress={onAcknowledge} hitSlop={8}>
+          <ThemedText type="linkPrimary">Nur bestätigen</ThemedText>
+        </Pressable>
+        <Pressable onPress={handleSave} hitSlop={8}>
+          <ThemedText type="linkPrimary">Speichern &amp; bestätigen</ThemedText>
+        </Pressable>
+      </View>
+    </ThemedView>
+  );
+}
+
+function RunawayBanner({ onEnd, onDismiss }: { onEnd: () => void; onDismiss: () => void }) {
+  return (
+    <ThemedView style={[styles.banner, { backgroundColor: DANGER_BG }]}>
+      <ThemedText type="smallBold" style={{ color: DANGER_TEXT }}>
+        Läuft schon länger als 3 Stunden — läuft der Timer noch?
+      </ThemedText>
+      <View style={styles.bannerActions}>
+        <Pressable onPress={onEnd} hitSlop={8}>
+          <ThemedText type="linkPrimary">Jetzt beenden</ThemedText>
+        </Pressable>
+        <Pressable onPress={onDismiss} hitSlop={8}>
+          <ThemedText type="link" themeColor="textSecondary">
+            Läuft weiter
+          </ThemedText>
+        </Pressable>
+      </View>
+    </ThemedView>
+  );
+}
+
+function BottleForm({
+  busy,
+  onCancel,
+  onSave,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (amountMl: number, kind: BottleKind) => void;
+}) {
+  const [amount, setAmount] = useState('');
+  const [kind, setKind] = useState<BottleKind | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSave = () => {
+    const amountMl = Number(amount);
+    if (!Number.isFinite(amountMl) || amountMl <= 0) {
+      setError('Bitte eine Menge in ml eingeben.');
+      return;
+    }
+    if (!kind) {
+      setError('Bitte Muttermilch oder Nahrung auswählen.');
+      return;
+    }
+    setError(null);
+    onSave(Math.round(amountMl), kind);
+  };
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.bottleForm}>
+      <TextField
+        label="Menge (ml)"
+        value={amount}
+        onChangeText={setAmount}
+        keyboardType="number-pad"
+        placeholder="z. B. 120"
+      />
+      <View style={styles.kindRow}>
+        <KindChip label="Muttermilch" selected={kind === 'breastmilk'} onPress={() => setKind('breastmilk')} />
+        <KindChip label="Nahrung" selected={kind === 'formula'} onPress={() => setKind('formula')} />
+      </View>
+      {error ? (
+        <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+          {error}
+        </ThemedText>
+      ) : null}
+      <View style={styles.bottleFormActions}>
+        <BigButton label="Abbrechen" color={ACCENT} variant="secondary" onPress={onCancel} disabled={busy} />
+        <BigButton label="Speichern" color={ACCENT} onPress={handleSave} disabled={busy} />
+      </View>
+    </ThemedView>
+  );
+}
+
+function KindChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.kindChip, selected && { backgroundColor: ACCENT, borderColor: ACCENT }]}>
+      <ThemedText style={selected ? styles.kindChipLabelSelected : styles.kindChipLabel}>{label}</ThemedText>
+    </Pressable>
+  );
+}
+
+function TodayFeedRow({ feed, tickingNow }: { feed: FeedRow; tickingNow: string }) {
+  const time = formatTimeLabel(feed.occurred_at, feed.tz);
+  const typeLabel = describeFeedType(feed.feed_type);
+  const amountLabel =
+    feed.is_running === 1
+      ? formatDuration(elapsedSeconds(feed, tickingNow).left + elapsedSeconds(feed, tickingNow).right)
+      : describeFeedAmount(feed);
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.row}>
+      <ThemedText type="smallBold" style={styles.rowTime}>
+        {time}
+      </ThemedText>
+      <ThemedText type="small" style={styles.rowType}>
+        {typeLabel}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        {amountLabel}
+      </ThemedText>
+      {feed.needs_review === 1 ? <ThemedText style={{ color: AMBER }}> ⚠</ThemedText> : null}
+    </ThemedView>
+  );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   safeArea: { flex: 1, paddingHorizontal: Spacing.three },
-  header: { gap: Spacing.one, paddingTop: Spacing.three },
-  actions: { gap: Spacing.two, paddingVertical: Spacing.three },
-  message: { paddingHorizontal: Spacing.one },
-  pendingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  content: {
+    gap: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: BottomTabInset + Spacing.four,
+  },
+  status: { fontSize: 30, lineHeight: 36 },
+  actions: { gap: Spacing.two },
+  bigButton: {
+    minHeight: 88,
+    borderRadius: Spacing.three,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.four,
+  },
+  bigButtonDisabled: { opacity: 0.4 },
+  bigButtonPressed: { opacity: 0.85 },
+  bigButtonLabel: { fontSize: 22, fontWeight: '700' },
+  banner: { gap: Spacing.one, padding: Spacing.three, borderRadius: Spacing.three },
+  bannerActions: { flexDirection: 'row', gap: Spacing.four, paddingTop: Spacing.one },
+  warningText: { color: '#ffd54f' },
+  correctionPanel: { gap: Spacing.two, padding: Spacing.three, borderRadius: Spacing.three },
+  correctionRow: { flexDirection: 'row', gap: Spacing.two },
+  correctionField: { flex: 1 },
+  bottleForm: { gap: Spacing.three, padding: Spacing.three, borderRadius: Spacing.three },
+  kindRow: { flexDirection: 'row', gap: Spacing.two },
+  kindChip: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: Spacing.two,
+    borderWidth: 2,
+    borderColor: '#60646C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  kindChipLabel: { fontSize: 16, fontWeight: '600' },
+  kindChipLabelSelected: { fontSize: 16, fontWeight: '700', color: '#ffffff' },
+  bottleFormActions: { flexDirection: 'row', gap: Spacing.two },
+  listTitle: { paddingTop: Spacing.two },
+  list: { gap: Spacing.two },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    borderRadius: Spacing.three,
+    borderRadius: Spacing.two,
   },
-  listContent: { paddingBottom: BottomTabInset + Spacing.four },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.two,
-  },
-  gridRow: { flexDirection: 'row', gap: GRID_GAP, marginBottom: GRID_GAP },
-  tile: { borderRadius: Spacing.two, overflow: 'hidden' },
-  tileImage: { width: '100%', height: '100%' },
-  empty: { paddingTop: Spacing.five, gap: Spacing.two, alignItems: 'center' },
-  emptyHint: { textAlign: 'center' },
+  rowTime: { width: 48 },
+  rowType: { flex: 1 },
 });
