@@ -218,6 +218,27 @@ export function usePhotoById(photoId: string | undefined): {
   return { photo: data?.[0], isLoading };
 }
 
+/**
+ * Reactive: every photo of a child in the same order the Chronik shows them
+ * (`occurred_at` descending) — the flat sequence the swipeable fullscreen
+ * viewer pages through. `groupPhotosByDay` sorts each day's photos and the
+ * days themselves the same way, so this list and the Chronik grid always
+ * agree on ordering.
+ */
+export function usePhotosOfChild(childId: string | undefined): {
+  photos: PhotoRow[];
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useQuery<PhotoRow>(
+    `SELECT ${PHOTO_COLUMNS} FROM photos
+      WHERE child_id = ? AND deleted_at IS NULL
+      ORDER BY occurred_at DESC`,
+    [childId ?? ''],
+  );
+
+  return { photos: data ?? [], isLoading };
+}
+
 /** Reactive count of photos still waiting to be uploaded. */
 export function usePendingUploadCount(): number {
   const { data } = useQuery<{ n: number }>(

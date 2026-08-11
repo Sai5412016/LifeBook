@@ -1,17 +1,39 @@
 /**
- * Fotochronik Stufe 2 — Vollbildansicht eines einzelnen Fotos, mit Löschen.
+ * Fotochronik — Vollbildansicht, wischbar wie die Android-Galerie.
  *
- * Bild bevorzugt die lokal zwischengelagerte Datei (`local_uri`), solange sie
- * noch existiert, und fällt sonst auf eine signierte URL des Originals
- * zurück — dieselbe Präferenz, die die Kacheln in der Chronik für ihr
- * Vorschaubild nutzen (siehe `resolveFullscreenUri`).
+ * Blättert horizontal über ALLE Fotos des Kindes, in derselben Reihenfolge
+ * wie die Chronik (`occurred_at` absteigend — siehe
+ * `repository.ts#usePhotosOfChild`). Kopfzeile, Positionsangabe, Teilen und
+ * Löschen beziehen sich immer auf das gerade sichtbare Foto (`currentIndex`),
+ * nicht mehr auf die Route selbst — die Route-`id` dient nur noch dazu, beim
+ * Öffnen die Startposition in der Liste zu finden.
+ *
+ * KEIN NEUES NATIVES MODUL: eine horizontale FlatList mit `pagingEnabled` +
+ * `getItemLayout` übernimmt das Paging. `react-native-pager-view` wäre ein
+ * neues natives Modul und damit ein erzwungener Build (siehe CLAUDE.md,
+ * Fallstrick 5) — bewusst nicht verwendet.
+ *
+ * `getItemLayout` ist außerdem, was `initialScrollIndex` (kein sichtbarer
+ * Sprung beim Öffnen) UND das programmatische `scrollToIndex` nach dem
+ * Löschen zuverlässig macht: ohne sie müsste die Liste erst rendern und
+ * messen, bevor sie irgendwo hin springen kann.
  */
 
 import { usePowerSync } from '@powersync/react-native';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -20,25 +42,93 @@ import { formatDayLabel } from '@/core/time';
 import { formatAgeLabel, resolveFullscreenUri } from '@/features/photos/identity';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { deleteQuietly } from '@/features/photos/media';
-import { softDeletePhoto, usePhotoById } from '@/features/photos/repository';
+import { softDeletePhoto, usePhotoById, usePhotosOfChild } from '@/features/photos/repository';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { removeStoredObjects } from '@/features/photos/storage';
+import type { PhotoRow } from '@/features/photos/types';
+import {
+  clampIndex,
+  formatPositionLabel,
+  indexAfterDeletion,
+  indexOfPhoto,
+  windowIndices,
+} from '@/features/photos/viewer';
+
+/** Signed URLs are kept warm for the current photo plus this many on each side. */
+const SIGNED_URL_WINDOW_RADIUS = 3;
 
 export default function FotoVollbildScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = usePowerSync();
-  const { photo, isLoading } = usePhotoById(id);
+  const { width } = useWindowDimensions();
+  const flatListRef = useRef<FlatList<PhotoRow>>(null);
+  const pendingIndexRef = useRef<number | null>(null);
+
+  // Only used to resolve which child this photo belongs to, so the full
+  // ordered list below can be loaded. Once that list is ready, the actual
+  // state of truth for everything on screen is `photos[currentIndex]`, not
+  // this single-row query.
+  const { photo: initialPhoto, isLoading: initialPhotoLoading } = usePhotoById(id);
+  const { photos, isLoading: photosLoading } = usePhotosOfChild(initialPhoto?.child_id);
+
+  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
 
-  const signedUrls = useSignedUrls([photo?.original_key]);
-  const uri = photo ? resolveFullscreenUri(photo, signedUrls) : undefined;
+  const resolvedInitialIndex = indexOfPhoto(photos, id);
 
-  const handleShare = useCallback(async () => {
-    if (!photo) {
+  // Bootstraps the starting position exactly once, the moment the ordered
+  // list first contains the tapped photo. Never runs again afterwards — from
+  // here on `currentIndex` is driven by swipes (handleMomentumScrollEnd) and
+  // by handleDelete.
+  useEffect(() => {
+    if (currentIndex === null && resolvedInitialIndex >= 0) {
+      setCurrentIndex(resolvedInitialIndex);
+    }
+  }, [currentIndex, resolvedInitialIndex]);
+
+  // Applies a scroll queued by handleDelete once the list has actually
+  // shrunk — calling scrollToIndex before that would target a row that
+  // doesn't exist yet in the FlatList's current `data`.
+  useEffect(() => {
+    if (pendingIndexRef.current === null) {
       return;
     }
-    const outcome = await share([photo]);
+    const target = clampIndex(pendingIndexRef.current, photos.length - 1);
+    pendingIndexRef.current = null;
+    setCurrentIndex(target);
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToIndex({ index: target, animated: false });
+    });
+  }, [photos]);
+
+  // "Foto nicht verfügbar" only once we can be SURE, not just because a
+  // query hasn't settled yet: either the tapped id never resolved to a row
+  // at all, or the full list settled without that id in it.
+  const notFound =
+    (!initialPhotoLoading && !initialPhoto) ||
+    (!!initialPhoto && !photosLoading && currentIndex === null && resolvedInitialIndex === -1);
+  const loading = !notFound && currentIndex === null;
+
+  const currentPhoto = currentIndex !== null ? photos[currentIndex] : undefined;
+
+  const windowKeys = useMemo(() => {
+    if (currentIndex === null) {
+      return [];
+    }
+    return windowIndices(currentIndex, photos.length, SIGNED_URL_WINDOW_RADIUS)
+      .map((index) => photos[index])
+      .filter((entry): entry is PhotoRow => !!entry && !entry.local_uri)
+      .map((entry) => entry.original_key)
+      .filter((key): key is string => Boolean(key));
+  }, [currentIndex, photos]);
+  const signedUrls = useSignedUrls(windowKeys);
+
+  const handleShare = useCallback(async () => {
+    if (!currentPhoto) {
+      return;
+    }
+    const outcome = await share([currentPhoto]);
     if (outcome.status === 'error') {
       Alert.alert('Teilen fehlgeschlagen', 'Bitte später erneut versuchen.');
       return;
@@ -49,36 +139,44 @@ export default function FotoVollbildScreen() {
         formatShareFailureSummary(outcome.failedCount, 1) ?? 'Das Foto konnte nicht geladen werden.',
       );
     }
-  }, [photo, share]);
+  }, [currentPhoto, share]);
 
   const handleDelete = useCallback(async () => {
-    if (!photo) {
+    if (!currentPhoto || currentIndex === null) {
       return;
     }
 
     setDeleting(true);
     try {
-      await softDeletePhoto(db, photo.id);
+      await softDeletePhoto(db, currentPhoto.id);
 
       // Hartes Löschen der Dateien ist Best-Effort: schlägt es fehl, ist das
       // weiche Löschen in der Datenbank trotzdem gültig — protokollieren und
       // weitermachen statt abzubrechen.
       try {
-        await removeStoredObjects(photo.thumb_key, photo.original_key);
+        await removeStoredObjects(currentPhoto.thumb_key, currentPhoto.original_key);
       } catch (error) {
         console.error('[LifeBook] Speicherobjekte konnten nicht entfernt werden', error);
       }
-
-      if (photo.local_uri) {
-        deleteQuietly(photo.local_uri);
+      if (currentPhoto.local_uri) {
+        deleteQuietly(currentPhoto.local_uri);
       }
 
-      router.back();
+      const nextIndex = indexAfterDeletion(currentIndex, photos.length);
+      if (nextIndex === -1) {
+        router.back();
+        return;
+      }
+      // `photos` hasn't shrunk yet at this point (the reactive query re-runs
+      // asynchronously) — queue the target and let the effect above apply it
+      // once it has, so scrollToIndex never targets a row that isn't there yet.
+      pendingIndexRef.current = nextIndex;
     } catch (error) {
       console.error('[LifeBook] Foto konnte nicht gelöscht werden', error);
+    } finally {
       setDeleting(false);
     }
-  }, [db, photo]);
+  }, [db, currentPhoto, currentIndex, photos.length]);
 
   // Der Text ist bewusst deutlich: "weiches Löschen" trifft nur die
   // Datenbankzeile, die Dateien im Speicher werden hart entfernt (siehe
@@ -97,6 +195,53 @@ export default function FotoVollbildScreen() {
     );
   }, [handleDelete]);
 
+  const handleMomentumScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (width <= 0 || photos.length === 0) {
+        return;
+      }
+      const index = clampIndex(Math.round(event.nativeEvent.contentOffset.x / width), photos.length - 1);
+      setCurrentIndex(index);
+    },
+    [width, photos.length],
+  );
+
+  const getItemLayout = useCallback(
+    (_data: ArrayLike<PhotoRow> | null | undefined, index: number) => ({
+      length: width,
+      offset: width * index,
+      index,
+    }),
+    [width],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: PhotoRow }) => {
+      const uri = resolveFullscreenUri(item, signedUrls);
+      return (
+        <View style={{ width, height: '100%' }}>
+          {/* Kein Spinner hier: ein noch ungeladenes Bild soll ruhig
+              erscheinen, nicht wackeln, während schnell durchgeblättert wird. */}
+          {uri ? (
+            <Image source={{ uri }} style={styles.image} contentFit="contain" transition={120} />
+          ) : (
+            <View style={styles.image} />
+          )}
+        </View>
+      );
+    },
+    [width, signedUrls],
+  );
+
+  const headerSubtitle = currentPhoto
+    ? [
+        currentPhoto.age_days !== null ? formatAgeLabel(currentPhoto.age_days) : null,
+        formatPositionLabel(currentIndex ?? 0, photos.length),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : '';
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -105,26 +250,25 @@ export default function FotoVollbildScreen() {
             <ThemedText style={styles.headerAction}>Zurück</ThemedText>
           </Pressable>
 
-          {photo ? (
+          {currentPhoto ? (
             <View style={styles.headerInfo}>
               <ThemedText style={styles.headerTitle} numberOfLines={1}>
-                {formatDayLabel(photo.local_date)}
+                {formatDayLabel(currentPhoto.local_date)}
               </ThemedText>
-              {photo.age_days !== null ? (
-                <ThemedText style={styles.headerSubtitle}>
-                  {formatAgeLabel(photo.age_days)}
-                </ThemedText>
-              ) : null}
+              <ThemedText style={styles.headerSubtitle}>{headerSubtitle}</ThemedText>
             </View>
           ) : (
             <View style={styles.headerInfo} />
           )}
 
           <View style={styles.headerActionsRight}>
-            <Pressable onPress={handleShare} hitSlop={12} disabled={!photo || deleting || shareProgress !== null}>
+            <Pressable
+              onPress={handleShare}
+              hitSlop={12}
+              disabled={!currentPhoto || deleting || shareProgress !== null}>
               <ThemedText style={styles.headerAction}>Teilen</ThemedText>
             </Pressable>
-            <Pressable onPress={confirmDelete} hitSlop={12} disabled={!photo || deleting}>
+            <Pressable onPress={confirmDelete} hitSlop={12} disabled={!currentPhoto || deleting}>
               {deleting ? (
                 <ActivityIndicator color="#ff453a" />
               ) : (
@@ -147,12 +291,31 @@ export default function FotoVollbildScreen() {
         ) : null}
 
         <View style={styles.imageArea}>
-          {isLoading ? (
+          {loading ? (
             <ActivityIndicator color="#ffffff" />
-          ) : uri ? (
-            <Image source={{ uri }} style={styles.image} contentFit="contain" transition={120} />
-          ) : (
+          ) : notFound ? (
             <ThemedText style={styles.placeholderText}>Foto nicht verfügbar</ThemedText>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={photos}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(item) => item.id}
+              initialScrollIndex={currentIndex ?? 0}
+              getItemLayout={getItemLayout}
+              onMomentumScrollEnd={handleMomentumScrollEnd}
+              renderItem={renderItem}
+              onScrollToIndexFailed={(info) => {
+                requestAnimationFrame(() => {
+                  flatListRef.current?.scrollToOffset({
+                    offset: info.averageItemLength * info.index,
+                    animated: false,
+                  });
+                });
+              }}
+            />
           )}
         </View>
       </SafeAreaView>
