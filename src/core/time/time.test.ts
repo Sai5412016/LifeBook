@@ -3,6 +3,7 @@ import {
   toLocalDate,
   toDashboardDate,
   ageInDays,
+  combineLocalDateAndTime,
   exifWallClockToUtcIso,
   formatDayLabel,
   formatTimeLabel,
@@ -105,6 +106,42 @@ describe('formatTimeLabel', () => {
 
   it('pads single-digit hours and minutes', () => {
     expect(formatTimeLabel('2026-08-08T04:05:00Z', BERLIN)).toBe('06:05');
+  });
+});
+
+describe('combineLocalDateAndTime', () => {
+  it('combines a date and time in summer (+02:00)', () => {
+    expect(combineLocalDateAndTime('2026-08-08', '14:32', BERLIN)).toBe('2026-08-08T12:32:00.000Z');
+  });
+
+  it('combines a date and time in winter (+01:00)', () => {
+    expect(combineLocalDateAndTime('2026-01-08', '14:32', BERLIN)).toBe('2026-01-08T13:32:00.000Z');
+  });
+
+  it('round-trips with formatTimeLabel/toLocalDate', () => {
+    const combined = combineLocalDateAndTime('2026-08-08', '06:43', BERLIN)!;
+    expect(formatTimeLabel(combined, BERLIN)).toBe('06:43');
+    expect(toLocalDate(combined, BERLIN)).toBe('2026-08-08');
+  });
+
+  it('a near-midnight time stays on the given calendar day, not the UTC one', () => {
+    // 23:50 in Berlin summer is 21:50 UTC — still the 8th on both sides here,
+    // but the point is combineLocalDateAndTime must not let the UTC instant's
+    // own date leak in anywhere.
+    const combined = combineLocalDateAndTime('2026-08-08', '23:50', BERLIN)!;
+    expect(toLocalDate(combined, BERLIN)).toBe('2026-08-08');
+  });
+
+  it('returns null for a malformed date', () => {
+    expect(combineLocalDateAndTime('08.08.2026', '14:32', BERLIN)).toBeNull();
+  });
+
+  it('returns null for a malformed time', () => {
+    expect(combineLocalDateAndTime('2026-08-08', '2:32 pm', BERLIN)).toBeNull();
+  });
+
+  it('returns null for an unknown timezone rather than a wrong instant', () => {
+    expect(combineLocalDateAndTime('2026-08-08', '14:32', 'Mars/Olympus')).toBeNull();
   });
 });
 

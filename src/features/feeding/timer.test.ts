@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   describeFeedAmount,
+  describeFeedQuantity,
   describeFeedType,
   elapsedSeconds,
   formatClock,
@@ -341,5 +342,40 @@ describe('describeFeedAmount', () => {
         amount_ml: null,
       }),
     ).toBe('0 ml');
+  });
+});
+
+describe('describeFeedQuantity', () => {
+  it('omits the side label a breastfeed duration would otherwise repeat', () => {
+    expect(
+      describeFeedQuantity({
+        feed_type: 'breast_left',
+        duration_left_s: 180,
+        duration_right_s: 0,
+        amount_ml: null,
+      }),
+    ).toBe('3 min');
+  });
+
+  it('sums both sides for a two-sided breastfeed', () => {
+    expect(
+      describeFeedQuantity({
+        feed_type: 'breast_both',
+        duration_left_s: 600,
+        duration_right_s: 900,
+        amount_ml: null,
+      }),
+    ).toBe('25 min');
+  });
+
+  it('describes a bottle feed by amount', () => {
+    expect(
+      describeFeedQuantity({
+        feed_type: 'bottle_formula',
+        duration_left_s: null,
+        duration_right_s: null,
+        amount_ml: 120,
+      }),
+    ).toBe('120 ml');
   });
 });

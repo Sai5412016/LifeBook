@@ -24,7 +24,7 @@ import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useEffect } from 'react';
 
 import { newId } from '@/core/db/ids';
-import { nowUtcIso, toLocalDate } from '@/core/time';
+import { combineLocalDateAndTime, nowUtcIso, toLocalDate } from '@/core/time';
 
 import {
   elapsedSeconds,
@@ -291,6 +291,83 @@ export async function correctFeedDurations(
       WHERE id = ?`,
     [input.durationLeftS, input.durationRightS, feedType, nowUtcIso(), feedId],
   );
+}
+
+export type FeedEditInput = {
+  /** New "HH:mm" wall-clock start time, interpreted in the feed's own `tz`. */
+  time?: string;
+  /** Breastfeed only. */
+  durationLeftS?: number;
+  durationRightS?: number;
+  /** Bottle only. */
+  amountMl?: number;
+  kind?: BottleKind;
+};
+
+/**
+ * Applies a parent's correction to an existing feed — start time, and
+ * either the breastfeed durations or the bottle amount/kind, whichever
+ * `feed_type` calls for. Works on a feed in any state (running, paused, or
+ * already ended); the caller decides which fields to show and which are
+ * left `undefined` (unchanged).
+ *
+ * A time correction re-derives BOTH `occurred_at` and `local_date` from the
+ * new value via `combineLocalDateAndTime` + `toLocalDate` — never assumes
+ * the day stays the same. This is a deliberate exception to "local_date is
+ * frozen at insert, never recomputed" (Master-Spec §7): that rule guards
+ * against passive drift (e.g. the family travelling), not an explicit,
+ * intentional correction like this one.
+ */
+export async function editFeed(
+  db: AbstractPowerSyncDatabase,
+  feedId: string,
+  input: FeedEditInput,
+): Promise<void> {
+  const feed = await loadFeedById(db, feedId);
+  if (!feed) {
+    return;
+  }
+
+  let occurredAt = feed.occurred_at;
+  let localDate = feed.local_date;
+  if (input.time) {
+    const combined = combineLocalDateAndTime(feed.local_date, input.time, feed.tz);
+    if (combined) {
+      occurredAt = combined;
+      localDate = toLocalDate(combined, feed.tz);
+    }
+  }
+
+  const isBreast = feed.feed_type.startsWith('breast_');
+  const durationLeftS = isBreast ? (input.durationLeftS ?? feed.duration_left_s ?? 0) : null;
+  const durationRightS = isBreast ? (input.durationRightS ?? feed.duration_right_s ?? 0) : null;
+  const amountMl = isBreast ? null : (input.amountMl ?? feed.amount_ml);
+  const feedType: FeedType = isBreast
+    ? resolveBreastFeedType(durationLeftS ?? 0, durationRightS ?? 0)
+    : input.kind
+      ? input.kind === 'breastmilk'
+        ? 'bottle_breastmilk'
+        : 'bottle_formula'
+      : feed.feed_type;
+
+  await db.execute(
+    `UPDATE feeds
+        SET occurred_at = ?, local_date = ?, duration_left_s = ?, duration_right_s = ?,
+            amount_ml = ?, feed_type = ?, updated_at = ?
+      WHERE id = ?`,
+    [occurredAt, localDate, durationLeftS, durationRightS, amountMl, feedType, nowUtcIso(), feedId],
+  );
+}
+
+/**
+ * Soft-deletes a feed, mirroring the convention used by every other table.
+ * Works on a feed in any state — a running or paused feed can be discarded
+ * without ending it first: `deleted_at` alone excludes it from every
+ * reactive query here, regardless of `is_running`.
+ */
+export async function softDeleteFeed(db: AbstractPowerSyncDatabase, feedId: string): Promise<void> {
+  const now = nowUtcIso();
+  await db.execute('UPDATE feeds SET deleted_at = ?, updated_at = ? WHERE id = ?', [now, now, feedId]);
 }
 
 export type LogBottleInput = {
