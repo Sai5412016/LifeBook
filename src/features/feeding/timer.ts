@@ -10,9 +10,16 @@
  * `secondsBetween` from core/time, the single allowed place for time math.
  */
 
-import { secondsBetween } from '@/core/time';
+import { formatDuration, secondsBetween } from '@/core/time';
+import {
+  hasUnresolvedRunningConflict,
+  isRunaway as isRunawayGeneric,
+  resolveRunningConflicts as resolveRunningConflictsGeneric,
+} from '@/core/tracking/running-conflicts';
 
 import type { FeedSide, FeedType } from './types';
+
+export { hasUnresolvedRunningConflict, formatDuration };
 
 /** The subset of a feed row the timer math needs. */
 export type FeedTimerState = {
@@ -67,56 +74,26 @@ export type ConflictResolution = {
 };
 
 /**
- * True when `feeds` (all rows currently `is_running = 1` for one child)
- * actually need conflict resolution — i.e. more than one is running.
- *
- * This is the gate a reactive caller (`useRunningFeed`) checks BEFORE
- * calling `resolveRunningConflicts` and writing anything: two devices that
- * independently notice the same already-resolved state (0 or 1 running
- * feeds) and write anyway would keep bumping `updated_at` back and forth
- * through sync — a state that is already consistent must never produce a
- * write. Kept as its own tiny pure function (rather than inlining
- * `feeds.length > 1` at the call site) so that guarantee has one definition
- * and one test, shared by every caller.
- */
-export function hasUnresolvedRunningConflict(feeds: readonly unknown[]): boolean {
-  return feeds.length > 1;
-}
-
-/**
  * Picks which of several simultaneously "running" feeds for one child is
  * allowed to keep running, and finalizes the rest.
  *
- * Winner: earliest `occurred_at`; ties broken by the lexicographically
- * smaller `id`. Both comparisons use plain string operators (`<`/`>`), not
- * `localeCompare` — `localeCompare` is locale/ICU-dependent and can rank the
- * same two strings differently on different devices, which would break the
- * "every device agrees" requirement this function exists to satisfy. Plain
- * comparison of ISO-8601 UTC strings is exact byte order and always agrees.
- *
- * Losers are never deleted — callers write back the finalized duration/
- * ended_at here plus `needs_review = 1`, keeping the row as a flagged event
- * a parent can correct.
+ * The winner-picking rule itself (earliest `occurred_at`, tie-broken by the
+ * lexicographically smaller `id` via plain string operators, never
+ * `localeCompare` — see core/tracking/running-conflicts for why) is shared
+ * by every tracking feature with this problem and lives there; this wrapper
+ * only adds feeding's own consequence for a loser: bank its elapsed duration
+ * per side up to `jetzt`, ready for the caller to write back alongside
+ * `needs_review = 1`. Losers are never deleted — the row stays a flagged
+ * event a parent can correct.
  */
 export function resolveRunningConflicts(
   feeds: readonly FeedConflictCandidate[],
   jetzt: string,
 ): ConflictResolution {
-  if (feeds.length === 0) {
-    return { winnerId: null, losers: [] };
-  }
+  const { winnerId, loserIds } = resolveRunningConflictsGeneric(feeds);
 
-  const sorted = [...feeds].sort((a, b) => {
-    if (a.occurred_at < b.occurred_at) return -1;
-    if (a.occurred_at > b.occurred_at) return 1;
-    if (a.id < b.id) return -1;
-    if (a.id > b.id) return 1;
-    return 0;
-  });
-
-  const [winner, ...rest] = sorted;
-
-  const losers = rest.map((feed) => {
+  const losers = loserIds.map((id) => {
+    const feed = feeds.find((candidate) => candidate.id === id)!;
     const elapsed = elapsedSeconds(feed, jetzt);
     return {
       id: feed.id,
@@ -126,7 +103,7 @@ export function resolveRunningConflicts(
     };
   });
 
-  return { winnerId: winner.id, losers };
+  return { winnerId, losers };
 }
 
 /**
@@ -141,22 +118,7 @@ export function isRunaway(
   jetzt: string,
   thresholdHours = 3,
 ): boolean {
-  if (!feed.running_since) {
-    return false;
-  }
-  return secondsBetween(feed.running_since, jetzt) >= thresholdHours * 3600;
-}
-
-/** Whole-second duration as "18 min" or "1 h 05 min". Negative input floors to "0 min". */
-export function formatDuration(seconds: number): string {
-  const totalMinutes = Math.round(Math.max(0, seconds) / 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (hours === 0) {
-    return `${minutes} min`;
-  }
-  return `${hours} h ${String(minutes).padStart(2, '0')} min`;
+  return isRunawayGeneric(feed.running_since, jetzt, thresholdHours);
 }
 
 /** "vor 2 h 15 min" — time since the last feed, in the same format as `formatDuration`. */

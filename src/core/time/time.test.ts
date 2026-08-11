@@ -6,6 +6,7 @@ import {
   combineLocalDateAndTime,
   exifWallClockToUtcIso,
   formatDayLabel,
+  formatDuration,
   formatTimeLabel,
   secondsBetween,
 } from './index';
@@ -174,5 +175,27 @@ describe('ageInDays', () => {
   });
   it('stays correct across the spring DST transition (2026-03-29)', () => {
     expect(ageInDays('2026-03-30T12:00:00Z', '2026-03-28T12:00:00Z', BERLIN)).toBe(2);
+  });
+});
+
+describe('formatDuration', () => {
+  it.each([
+    [0, '0 min'],
+    [1080, '18 min'],
+    [3540, '59 min'],
+    [3600, '1 h 00 min'],
+    [3900, '1 h 05 min'],
+    [7325, '2 h 02 min'],
+  ])('formats %i seconds as "%s"', (seconds, expected) => {
+    expect(formatDuration(seconds)).toBe(expected);
+  });
+
+  it('floors a negative duration to "0 min" instead of showing a negative time', () => {
+    expect(formatDuration(-90)).toBe('0 min');
+  });
+
+  it('rounds to the nearest minute', () => {
+    expect(formatDuration(89)).toBe('1 min'); // 1.48 min
+    expect(formatDuration(91)).toBe('2 min'); // 1.52 min
   });
 });

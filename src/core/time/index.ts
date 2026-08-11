@@ -149,6 +149,24 @@ export const secondsBetween = (fromUtcIso: string, toUtcIso: string): number =>
   differenceInSeconds(parseISO(toUtcIso), parseISO(fromUtcIso));
 
 /**
+ * Whole-second duration as "18 min" or "1 h 05 min". Negative input floors to
+ * "0 min". Shared by every tracking feature's completed-event summaries
+ * (feeding's "vor 2 h 15 min", sleep's daily tally, …) — deliberately NOT the
+ * live ticking clock format (feeding's `formatClock` in features/feeding/timer
+ * stays there, it is feeding-specific UI, not a general time rule).
+ */
+export const formatDuration = (seconds: number): string => {
+  const totalMinutes = Math.round(Math.max(0, seconds) / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) {
+    return `${minutes} min`;
+  }
+  return `${hours} h ${String(minutes).padStart(2, '0')} min`;
+};
+
+/**
  * Age in whole days of an event relative to birth, evaluated in `tz`.
  * 0 on the birth day (matches Spec §8 `differenceInCalendarDays`).
  * Reduced to local date strings first so DST transitions can't shift the count.

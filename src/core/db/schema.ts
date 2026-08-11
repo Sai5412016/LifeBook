@@ -113,7 +113,7 @@ function buildAppSchema() {
       ...eventColumns,
       ended_at: column.text,
       quality: column.integer, // 1..5
-      location: column.text, // crib | stroller | carrier | bed | car
+      location: column.text, // bed | stroller | arms | car | other
       is_running: column.integer,
       needs_review: column.integer,
     },

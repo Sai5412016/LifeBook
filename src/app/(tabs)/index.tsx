@@ -21,6 +21,7 @@ import { deviceTimeZone } from '@/core/time/device';
 import { DiaperSection } from '@/features/diaper/components/diaper-section';
 import { FeedingSection } from '@/features/feeding/components/feeding-section';
 import { useActiveChild } from '@/features/household/repository';
+import { SleepSection } from '@/features/sleep/components/sleep-section';
 
 /** Ticks every second so Füttern's running timer and "vor …" labels stay live. */
 function useTickingNow(): string {
@@ -61,6 +62,9 @@ export default function HeuteScreen() {
 
           <ThemedText type="subtitle">Wickeln</ThemedText>
           <DiaperSection child={child} session={session} tz={tz} />
+
+          <ThemedText type="subtitle">Schlafen</ThemedText>
+          <SleepSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
