@@ -108,6 +108,38 @@ gesperrt — dann `EXPO_OFFLINE=1 npx expo install <paket>` verwenden, das
 greift auf die mit dem Paket `expo` ausgelieferte
 `expo/bundledNativeModules.json` zurück statt auf den Netzwerkaufruf.
 
+### 7. Expo-Plugins von Drittanbietern brechen `expo config`, nicht erst den Build
+
+Beobachtet (2026-08-11) beim Plugin von `react-native-share`: `eas build` brach
+sofort mit „expo config --json exited with non-zero code: 1" ab — nach der
+üblichen Wartezeit für den Upload, aber vor jedem eigentlichen Kompilierschritt.
+Zwei unabhängige Ursachen, beide im selben Drittanbieter-Plugin:
+
+1. **Fehlende Peer-Abhängigkeit.** Das Plugin ruft intern `expo-build-properties`
+   auf, bringt es aber nicht selbst als Abhängigkeit mit — `Cannot find module
+   'expo-build-properties'`. Das Paket stand nirgends in `package.json`, obwohl
+   das Plugin es zwingend braucht.
+2. **Fehlendes Optionsobjekt.** Der Plugin-Eintrag stand in `app.json` als reine
+   Zeichenkette `"react-native-share"`. Der Plugin-Code liest `props.android`
+   — ohne Optionsobjekt ist `props` `undefined`, also `TypeError: Cannot read
+   properties of undefined (reading 'android')`.
+
+→ Fehlende Peer-Abhängigkeit mit `npx expo install <paket>` nachrüsten (siehe
+Fallstrick 6). Plugin-Eintrag als `["<plugin>", {}]` schreiben, nicht als reine
+Zeichenkette — auch ein leeres Optionsobjekt reicht, damit `props` definiert
+ist. Für `react-native-share` speziell: `android` in den Optionen ist nur eine
+Liste von Ziel-Apps für den Manifest-Abschnitt `queries` (z. B. um gezielt
+nach Instagram/WhatsApp zu teilen) — für den allgemeinen Teilen-Dialog bleibt
+das Feld leer.
+
+**Jedes Drittanbieter-Plugin kann eigene Peer-Abhängigkeiten und ein
+Pflicht-Optionsobjekt verlangen, ohne dass Expo das beim Hinzufügen prüft.**
+`npx expo config --json` führt exakt denselben Konfigurationsschritt aus wie
+`eas build` als Allererstes — in Sekunden statt nach zwanzig Minuten
+Build-Warteschlange. Deshalb: nach **jeder** Änderung an `app.json` oder an der
+Plugin-Liste `npx expo config --json` ausführen, **bevor** ein Build gestartet
+wird (siehe „Vor jeder Abgabe").
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste
@@ -136,6 +168,11 @@ eas update --branch preview -m "Beschreibung"  # Funkupdate ohne neuen Build
 `npx tsc --noEmit` **und** `npx vitest run` müssen sauber durchlaufen. Für
 Änderungen an Zugriffsregeln oder Datenbanklogik zusätzlich gegen die echte
 Datenbank prüfen, nicht nur nachdenken — genau das hat Fallstrick 1 aufgedeckt.
+
+Bei jeder Änderung an `app.json` oder an der Plugin-Liste zusätzlich
+`npx expo config --json` ausführen — muss ohne Fehler durchlaufen und eine
+lesbare Konfiguration ausgeben. Das prüft in Sekunden denselben Schritt, an
+dem `eas build` sonst erst nach der Build-Warteschlange scheitert (Fallstrick 7).
 
 ## Berichtsformat — am Ende JEDER Aufgabe ausgeben
 

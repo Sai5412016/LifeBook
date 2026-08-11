@@ -87,7 +87,7 @@
           "color": "#208AEF"
         }
       ],
-      "react-native-share"
+      ["react-native-share", {}]
     ],
     "experiments": {
       "typedRoutes": true,
