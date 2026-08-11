@@ -15,6 +15,8 @@
 
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
+import { notifyHousehold, shouldNotifyAfterImport } from '@/core/notifications';
+
 import { dedupeByHash, extensionForMime } from './identity';
 import { PickCancelledError, deleteQuietly, pickPhotos, stagePickedPhoto } from './media';
 import { insertPhotos, loadKnownHashes, prepareEntry } from './repository';
@@ -75,6 +77,13 @@ export async function importPhotos(
       birthAtUtcIso: input.birthAtUtcIso,
       entries,
     });
+  }
+
+  // Best-effort and not awaited: the household ping matters far less than the
+  // import itself, and notifyHousehold() already swallows its own failures —
+  // nothing here could delay or break the import result below.
+  if (shouldNotifyAfterImport(entries.length)) {
+    void notifyHousehold(input.householdId, 'photos', entries.length);
   }
 
   // The picker's own cache copies are redundant once staged.

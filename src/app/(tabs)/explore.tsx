@@ -8,7 +8,7 @@
  */
 
 import { usePowerSync, useStatus } from '@powersync/react-native';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,6 +17,14 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { connectPowerSync } from '@/core/db';
+import {
+  canRequestPushPermission,
+  describePushPermissionStatus,
+  getPushPermissionStatus,
+  registerForPushNotifications,
+  unregisterPushToken,
+  type PushPermissionStatus,
+} from '@/core/notifications';
 import { supabase } from '@/core/supabase';
 import { useActiveChild } from '@/features/household/repository';
 import { usePendingUploadCount } from '@/features/photos/repository';
@@ -87,6 +95,54 @@ function PhotoStatusRow() {
   );
 }
 
+/**
+ * Shows whether push notifications are active and offers to ask again.
+ * Reads the OS permission directly rather than any stored app state, so it
+ * always reflects reality even if the parent changed it in the system
+ * settings since the app last asked.
+ */
+function NotificationStatusRow() {
+  const { session } = useAuth();
+  const [status, setStatus] = useState<PushPermissionStatus | null>(null);
+  const [requesting, setRequesting] = useState(false);
+
+  const refreshStatus = useCallback(() => {
+    getPushPermissionStatus().then(setStatus);
+  }, []);
+
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
+  if (!session) {
+    return null;
+  }
+
+  const handleRequest = async () => {
+    setRequesting(true);
+    try {
+      await registerForPushNotifications(session.user.id);
+    } finally {
+      setRequesting(false);
+      refreshStatus();
+    }
+  };
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.card}>
+      <ThemedText type="smallBold">Benachrichtigungen</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        {status ? describePushPermissionStatus(status) : 'Wird geprüft …'}
+      </ThemedText>
+      {status && canRequestPushPermission(status) ? (
+        <Pressable onPress={handleRequest} disabled={requesting} hitSlop={8}>
+          <ThemedText type="linkPrimary">{requesting ? '…' : 'Berechtigung erneut anfragen'}</ThemedText>
+        </Pressable>
+      ) : null}
+    </ThemedView>
+  );
+}
+
 function AccountRow() {
   const { session } = useAuth();
   const db = usePowerSync();
@@ -98,6 +154,9 @@ function AccountRow() {
 
   const handleSignOut = async () => {
     setSigningOut(true);
+    // Must run BEFORE signOut(): removing this device's push token needs the
+    // still-valid session (push_tokens' access rule is "only your own rows").
+    await unregisterPushToken(session.user.id);
     try {
       await db.disconnect();
     } catch {
@@ -142,6 +201,7 @@ export default function EinstellungenScreen() {
 
           <PhotoStatusRow />
           <SyncStatusRow />
+          <NotificationStatusRow />
           <AccountRow />
         </ScrollView>
       </SafeAreaView>

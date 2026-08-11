@@ -18,9 +18,10 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { formatDayLabel } from '@/core/time';
 import { formatAgeLabel, resolveFullscreenUri } from '@/features/photos/identity';
-import { useSignedUrls } from '@/features/photos/hooks';
+import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { deleteQuietly } from '@/features/photos/media';
 import { softDeletePhoto, usePhotoById } from '@/features/photos/repository';
+import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { removeStoredObjects } from '@/features/photos/storage';
 
 export default function FotoVollbildScreen() {
@@ -28,9 +29,27 @@ export default function FotoVollbildScreen() {
   const db = usePowerSync();
   const { photo, isLoading } = usePhotoById(id);
   const [deleting, setDeleting] = useState(false);
+  const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
 
   const signedUrls = useSignedUrls([photo?.original_key]);
   const uri = photo ? resolveFullscreenUri(photo, signedUrls) : undefined;
+
+  const handleShare = useCallback(async () => {
+    if (!photo) {
+      return;
+    }
+    const outcome = await share([photo]);
+    if (outcome.status === 'error') {
+      Alert.alert('Teilen fehlgeschlagen', 'Bitte später erneut versuchen.');
+      return;
+    }
+    if (outcome.status === 'done' && outcome.failedCount > 0) {
+      Alert.alert(
+        'Teilen nicht möglich',
+        formatShareFailureSummary(outcome.failedCount, 1) ?? 'Das Foto konnte nicht geladen werden.',
+      );
+    }
+  }, [photo, share]);
 
   const handleDelete = useCallback(async () => {
     if (!photo) {
@@ -101,14 +120,31 @@ export default function FotoVollbildScreen() {
             <View style={styles.headerInfo} />
           )}
 
-          <Pressable onPress={confirmDelete} hitSlop={12} disabled={!photo || deleting}>
-            {deleting ? (
-              <ActivityIndicator color="#ff453a" />
-            ) : (
-              <ThemedText style={[styles.headerAction, styles.deleteAction]}>Löschen</ThemedText>
-            )}
-          </Pressable>
+          <View style={styles.headerActionsRight}>
+            <Pressable onPress={handleShare} hitSlop={12} disabled={!photo || deleting || shareProgress !== null}>
+              <ThemedText style={styles.headerAction}>Teilen</ThemedText>
+            </Pressable>
+            <Pressable onPress={confirmDelete} hitSlop={12} disabled={!photo || deleting}>
+              {deleting ? (
+                <ActivityIndicator color="#ff453a" />
+              ) : (
+                <ThemedText style={[styles.headerAction, styles.deleteAction]}>Löschen</ThemedText>
+              )}
+            </Pressable>
+          </View>
         </View>
+
+        {shareProgress ? (
+          <View style={styles.progressRow}>
+            <ActivityIndicator color="#ffffff" />
+            <ThemedText style={styles.progressText}>
+              {formatShareProgressLabel(shareProgress.current, shareProgress.total)}
+            </ThemedText>
+            <Pressable onPress={cancelShare} hitSlop={12}>
+              <ThemedText style={styles.headerAction}>Abbrechen</ThemedText>
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.imageArea}>
           {isLoading ? (
@@ -136,10 +172,19 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   headerAction: { color: '#ffffff', fontSize: 16, fontWeight: '600' },
+  headerActionsRight: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   deleteAction: { color: '#ff453a' },
   headerInfo: { flex: 1, alignItems: 'center' },
   headerTitle: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   headerSubtitle: { color: '#B0B4BA', fontSize: 12 },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  progressText: { flex: 1, color: '#ffffff', fontSize: 14 },
   imageArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', height: '100%' },
   placeholderText: { color: '#B0B4BA' },
