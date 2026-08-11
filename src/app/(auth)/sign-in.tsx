@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { translateAuthError } from '@/core/auth/errors';
+import { registerForPushNotifications } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
 import { Button, TextField } from '@/ui';
 
@@ -24,7 +25,7 @@ export default function SignInScreen() {
     }
 
     setSubmitting(true);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
@@ -32,6 +33,15 @@ export default function SignInScreen() {
 
     if (signInError) {
       setError(translateAuthError(signInError.message));
+      return;
+    }
+
+    // Fire-and-forget, right after a successful sign-in — NOT at cold start
+    // (see core/notifications#registerForPushNotifications), so a parent is
+    // only ever asked for the permission right after they've actively signed
+    // in, never as a surprise on app launch.
+    if (data.user) {
+      void registerForPushNotifications(data.user.id);
     }
     // No manual navigation on success: the root layout's redirect gate
     // (src/app/_layout.tsx) reacts to the new session automatically.

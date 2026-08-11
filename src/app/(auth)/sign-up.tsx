@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { translateAuthError } from '@/core/auth/errors';
+import { registerForPushNotifications } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
 import { Button, TextField } from '@/ui';
 
@@ -54,6 +55,10 @@ export default function SignUpScreen() {
       setInfo('Konto erstellt. Bitte bestätige deine E-Mail-Adresse und melde dich danach an.');
       return;
     }
+
+    // Same fire-and-forget registration as sign-in — only reachable here when
+    // email confirmation is off and the user is signed in immediately.
+    void registerForPushNotifications(data.session.user.id);
     // If a session came back immediately (email confirmation disabled), the
     // root layout's redirect gate reacts to it automatically — on to onboarding.
   };
