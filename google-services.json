@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "234980348973",
+    "project_id": "lifebook-27733",
+    "storage_bucket": "lifebook-27733.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:234980348973:android:c162a65c7a0c76fed154a4",
+        "android_client_info": {
+          "package_name": "com.lifebook.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApseKp-C8cnYDG-cduuoOA3dH4IvLZ6oc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
