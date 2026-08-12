@@ -4,11 +4,13 @@ import {
   buildNotifyHouseholdRequest,
   canRequestPushPermission,
   describeExecutionEnvironment,
+  describeProjectIdSource,
   describePushPermissionStatus,
   describeRegistrationRunStatus,
   describeSupabaseError,
   describeTokenPresence,
   describeUnknownError,
+  selectProjectId,
   shouldNotifyAfterImport,
 } from './logic';
 
@@ -138,5 +140,52 @@ describe('describeExecutionEnvironment', () => {
   it('falls back to "Unbekannt" for null or an unrecognised value', () => {
     expect(describeExecutionEnvironment(null)).toBe('Unbekannt');
     expect(describeExecutionEnvironment('something-new')).toBe('Unbekannt');
+  });
+});
+
+describe('selectProjectId', () => {
+  it('uses expoConfig when only the first source is present', () => {
+    expect(selectProjectId('expo-project-id', null, 'fallback-id')).toEqual({
+      projectId: 'expo-project-id',
+      source: 'expoConfig',
+    });
+  });
+
+  it('uses easConfig when only the second source is present', () => {
+    expect(selectProjectId(null, 'eas-project-id', 'fallback-id')).toEqual({
+      projectId: 'eas-project-id',
+      source: 'easConfig',
+    });
+  });
+
+  it('uses the fallback when both sources are empty', () => {
+    expect(selectProjectId(null, undefined, 'fallback-id')).toEqual({
+      projectId: 'fallback-id',
+      source: 'fallback',
+    });
+  });
+
+  it('prefers expoConfig over easConfig when both are present but differ', () => {
+    expect(selectProjectId('expo-project-id', 'eas-project-id', 'fallback-id')).toEqual({
+      projectId: 'expo-project-id',
+      source: 'expoConfig',
+    });
+  });
+
+  it('treats an empty string the same as missing', () => {
+    expect(selectProjectId('', 'eas-project-id', 'fallback-id')).toEqual({
+      projectId: 'eas-project-id',
+      source: 'easConfig',
+    });
+  });
+});
+
+describe('describeProjectIdSource', () => {
+  it.each([
+    ['expoConfig', 'aus expoConfig'],
+    ['easConfig', 'aus easConfig'],
+    ['fallback', 'fester Rückfallwert'],
+  ] as const)('describes %s', (source, expected) => {
+    expect(describeProjectIdSource(source)).toBe(expected);
   });
 });

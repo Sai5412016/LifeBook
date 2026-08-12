@@ -40,6 +40,7 @@ import { useAuth } from '@/core/auth/session-store';
 import { connectPowerSync } from '@/core/db';
 import {
   describeExecutionEnvironment,
+  describeProjectIdSource,
   describePushPermissionStatus,
   describeRegistrationRunStatus,
   describeTokenPresence,
@@ -207,6 +208,9 @@ function NotificationStatusRow() {
       </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         Projekt-ID: {diagnostics.projectId ?? 'leer'}
+        {diagnostics.projectId && diagnostics.projectIdSource
+          ? ` (${describeProjectIdSource(diagnostics.projectIdSource)})`
+          : ''}
       </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         Schlüssel von Expo: {describeTokenPresence(diagnostics.tokenFetched)}

@@ -33,9 +33,22 @@ import {
   buildNotifyHouseholdRequest,
   describeSupabaseError,
   describeUnknownError,
+  selectProjectId,
   type NotifyHouseholdKind,
+  type ProjectIdSource,
   type PushPermissionStatus,
 } from './logic';
+
+/**
+ * Last resort when NEITHER `Constants.expoConfig?.extra?.eas?.projectId` NOR
+ * `Constants.easConfig?.projectId` resolve to anything (observed 2026-08-13
+ * on a Bare build: the first was empty at runtime even though app.json has
+ * it — see resolveProjectId below). MUST match app.json's
+ * `extra.eas.projectId` — if that value ever changes, this one has to
+ * change with it, or push registration silently breaks again for whichever
+ * build type doesn't expose it via `Constants` at runtime.
+ */
+const FALLBACK_EAS_PROJECT_ID = 'fb2b4376-fcf6-41ab-98e2-99b14c9438b5';
 
 /**
  * IMPORTANCE_HIGH (not the default MEDIUM) — Android only shows a
@@ -56,25 +69,21 @@ async function ensureAndroidChannel(): Promise<void> {
 }
 
 /**
- * `Constants.expoConfig.extra.eas.projectId` is the documented path
- * `getExpoPushTokenAsync` needs (app.json → `extra.eas.projectId`, present
- * and verified in this project). Split into two checks — config missing
- * entirely vs. present but without the field — because they point at very
- * different causes (a stripped/misconfigured runtime manifest vs. an
- * app.json typo) and the diagnostic text should say which.
+ * `getExpoPushTokenAsync`'s required projectId, resolved in Expo's
+ * documented order. 2026-08-13: `Constants.expoConfig?.extra?.eas?.projectId`
+ * alone was found empty on a Bare build even though app.json has it —
+ * `Constants.easConfig?.projectId` is where EAS actually injects it for
+ * that build type. Falls back to a fixed value as a last resort so a device
+ * is never left with no projectId at all. The actual decision (which source
+ * wins) is pure logic in ./logic.ts#selectProjectId — this is only the
+ * `Constants` read.
  */
-function resolveProjectId(): { projectId: string | null; diagnostic: string | null } {
-  if (!Constants.expoConfig) {
-    return { projectId: null, diagnostic: 'Constants.expoConfig ist leer (Runtime-Manifest fehlt)' };
-  }
-  const projectId = Constants.expoConfig.extra?.eas?.projectId;
-  if (!projectId) {
-    return {
-      projectId: null,
-      diagnostic: 'Keine EAS-Projekt-ID gefunden (app.json → extra.eas.projectId)',
-    };
-  }
-  return { projectId, diagnostic: null };
+function resolveProjectId(): { projectId: string; source: ProjectIdSource } {
+  return selectProjectId(
+    Constants.expoConfig?.extra?.eas?.projectId,
+    Constants.easConfig?.projectId,
+    FALLBACK_EAS_PROJECT_ID,
+  );
 }
 
 /** Current permission status, for the settings screen. Never throws — 'undetermined' on any failure. */
@@ -163,11 +172,21 @@ async function upsertPushToken(userId: string, token: string, platform: string):
  * granted, registers this device's Expo push token for `userId`. Records
  * every step in ./diagnostics — see the module doc comment.
  *
- * Called after a successful sign-in/sign-up — NOT at cold start, so a parent
- * is never asked for a permission before they've even reached the app; and
- * again from the settings screen's "Registrierung erneut versuchen" action —
- * the only way to get a FRESH diagnosis without restarting the app, since
- * this otherwise only ever runs once, right after sign-in.
+ * Called from src/app/_layout.tsx#PushRegistrationEffect on every app start
+ * once a signed-in user is confirmed (cold start with a persisted session,
+ * or a fresh sign-in/sign-up) — MUST be repeatable, not once-ever: the OS
+ * can rotate a push token at any time, and an app that only ever registers
+ * once quietly stops receiving notifications whenever that happens. Also
+ * callable directly from the settings screen's "Registrierung erneut
+ * versuchen" action for a fresh diagnosis without restarting the app.
+ *
+ * 2026-08-13: this used to run ONLY right after an interactive sign-in
+ * (called directly from sign-in.tsx/sign-up.tsx) — deliberately not at cold
+ * start, so a parent already using the app wouldn't suddenly see a
+ * permission prompt. That meant a returning already-signed-in user (the
+ * normal case after the first day) never ran this again, ever — the
+ * settings screen showed "Registrierung: Nie versucht" indefinitely.
+ * Moved to react to the session itself instead of one specific user action.
  */
 export async function registerForPushNotifications(userId: string): Promise<void> {
   const lastCheckedAt = nowUtcIso();
@@ -206,16 +225,12 @@ export async function registerForPushNotifications(userId: string): Promise<void
       return;
     }
 
-    // Always recorded, success or failure — a missing/misconfigured
-    // projectId is a common trip-up and was previously invisible unless it
-    // happened to also be the most recent thing written to `lastError`.
-    const { projectId, diagnostic: projectIdError } = resolveProjectId();
-    setPushDiagnostics({ projectId });
-    if (!projectId) {
-      console.error('[LifeBook] Push-Registrierung:', projectIdError);
-      setPushDiagnostics({ runStatus: 'failed', lastError: projectIdError, tokenPresent: false });
-      return;
-    }
+    // Always recorded, success or failure — which SOURCE actually supplied
+    // it is a common trip-up and was previously invisible entirely (see
+    // resolveProjectId — a Bare build was found resolving it from
+    // easConfig, not expoConfig, with no way to see that on the device).
+    const { projectId, source } = resolveProjectId();
+    setPushDiagnostics({ projectId, projectIdSource: source });
 
     let token: string;
     try {
@@ -281,10 +296,6 @@ export async function unregisterPushToken(userId: string): Promise<void> {
     }
 
     const { projectId } = resolveProjectId();
-    if (!projectId) {
-      return;
-    }
-
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
 
     const { error } = await supabase.from('push_tokens').delete().eq('user_id', userId).eq('token', token);
@@ -346,9 +357,11 @@ export { usePushDiagnostics, type PushDiagnostics, type PushRegistrationRunStatu
 export {
   canRequestPushPermission,
   describeExecutionEnvironment,
+  describeProjectIdSource,
   describePushPermissionStatus,
   describeRegistrationRunStatus,
   describeTokenPresence,
   shouldNotifyAfterImport,
+  type ProjectIdSource,
   type PushPermissionStatus,
 } from './logic';

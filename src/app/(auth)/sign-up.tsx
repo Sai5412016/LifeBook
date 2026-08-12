@@ -6,7 +6,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { translateAuthError } from '@/core/auth/errors';
-import { registerForPushNotifications } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
 import { Button, KeyboardSafeScreen, TextField } from '@/ui';
 
@@ -55,11 +54,10 @@ export default function SignUpScreen() {
       return;
     }
 
-    // Same fire-and-forget registration as sign-in — only reachable here when
-    // email confirmation is off and the user is signed in immediately.
-    void registerForPushNotifications(data.session.user.id);
     // If a session came back immediately (email confirmation disabled), the
-    // root layout's redirect gate reacts to it automatically — on to onboarding.
+    // root layout's redirect gate reacts to it automatically — on to
+    // onboarding. Push registration reacts to the same session too (see
+    // _layout.tsx#PushRegistrationEffect) — no separate call needed here.
   };
 
   return (

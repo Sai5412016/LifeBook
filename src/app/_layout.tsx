@@ -15,6 +15,7 @@ import { GlobalErrorBoundary } from '@/core/diagnostics/error-boundary';
 import { installGlobalErrorHandler, useGlobalCrash } from '@/core/diagnostics/crash-reporter';
 import { guardImport, guardImportAsync, useImportErrors } from '@/core/diagnostics/import-error-store';
 import { checkEnv } from '@/core/env';
+import { registerForPushNotifications } from '@/core/notifications';
 import { useHasHousehold } from '@/features/household/repository';
 
 // As early as this module can manage it — before anything else in the app
@@ -105,9 +106,55 @@ function DbAndAuthGate({ children }: { children: ReactNode }) {
   return (
     <PowerSyncContext.Provider value={db}>
       <PowerSyncConnector db={db} />
+      <PushRegistrationEffect />
       {children}
     </PowerSyncContext.Provider>
   );
+}
+
+/**
+ * Registers this device's push token once per signed-in "session" of the
+ * running app — every cold start with a persisted login, and again on any
+ * fresh sign-in — not just once, ever, right after an interactive sign-in.
+ *
+ * 2026-08-13: registerForPushNotifications() used to be called ONLY from
+ * sign-in.tsx / sign-up.tsx, directly after those screens' own auth calls
+ * succeeded. That meant a user who signed in once and then just kept using
+ * the already-authenticated app across restarts (the overwhelmingly common
+ * case) never ran it again — the settings screen's diagnosis showed
+ * "Registrierung: Nie versucht" on a device that had been signed in for
+ * some time. Centralized here instead, reacting to `useAuth()` (the same
+ * store `PowerSyncConnector` above already reacts to) so it fires on every
+ * app start, not only the one specific user action that used to trigger it.
+ *
+ * Guarded on `session.user.id` so it does not also re-fire on every token
+ * refresh — `onAuthStateChange` emits those too, and this must run once per
+ * app-start/sign-in, not once per hour. The ref is cleared on sign-out so a
+ * sign-out-then-sign-in-again within one running app process (not just a
+ * fresh app start) still re-registers.
+ */
+function PushRegistrationEffect() {
+  const { status, session } = useAuth();
+  const registeredForUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (status === 'signedOut') {
+      registeredForUserIdRef.current = null;
+      return;
+    }
+    if (status !== 'signedIn' || !session) {
+      return;
+    }
+    if (registeredForUserIdRef.current === session.user.id) {
+      return;
+    }
+    registeredForUserIdRef.current = session.user.id;
+    // Never awaited and never throws (registerForPushNotifications swallows
+    // its own errors into ./diagnostics) — must not delay or block startup.
+    void registerForPushNotifications(session.user.id);
+  }, [status, session]);
+
+  return null;
 }
 
 /**

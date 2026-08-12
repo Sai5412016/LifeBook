@@ -21,12 +21,13 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { create } from 'zustand';
 
-import type { PushPermissionStatus } from './logic';
+import type { ProjectIdSource, PushPermissionStatus } from './logic';
 
 /**
- * 'never'   — registerForPushNotifications hasn't run this session at all
- *             (e.g. the session was already signed in before this app
- *             launch — registration only runs right after sign-in/sign-up).
+ * 'never'   — registerForPushNotifications hasn't run this session at all.
+ *             Should be rare: it runs once at every app start for a
+ *             signed-in user, and again after a fresh sign-in/sign-up — see
+ *             src/app/_layout.tsx#PushRegistrationEffect.
  * 'running' — a run is currently in progress.
  * 'done'    — the last run ended with a token confirmed stored in push_tokens.
  * 'failed'  — the last run ended WITHOUT a stored token, for any reason —
@@ -48,8 +49,10 @@ export type PushDiagnostics = {
   tokenFetched: boolean | null;
   /** null = not checked yet; true/false reflects the last actual attempt or DB read. */
   tokenPresent: boolean | null;
-  /** Resolved EAS project id, or null if it couldn't be found — see ./index.ts#resolveProjectId. Always shown, not just when something else fails. */
+  /** Resolved EAS project id — see ./index.ts#resolveProjectId. Always shown, not just when something else fails. Null only before the first run. */
   projectId: string | null;
+  /** Which of expoConfig / easConfig / the fixed fallback actually supplied `projectId` — see ./logic.ts#selectProjectId. */
+  projectIdSource: ProjectIdSource | null;
   /**
    * Verbatim text of the last real failure — an Error's name, message and
    * `code` (when present), never replaced with our own paraphrase. Covers
@@ -81,6 +84,7 @@ const initialDiagnostics: PushDiagnostics = {
   tokenFetched: null,
   tokenPresent: null,
   projectId: null,
+  projectIdSource: null,
   lastError: null,
   tokenWriteError: null,
   executionEnvironment: Constants.executionEnvironment ?? null,

@@ -108,6 +108,48 @@ export function describeExecutionEnvironment(env: string | null): string {
   }
 }
 
+/** Which of the three lookups actually supplied the EAS project id — shown on the settings screen. */
+export type ProjectIdSource = 'expoConfig' | 'easConfig' | 'fallback';
+
+/**
+ * Picks the EAS project id `getExpoPushTokenAsync` needs, in Expo's
+ * documented order: `Constants.expoConfig?.extra?.eas?.projectId`, then
+ * `Constants.easConfig?.projectId` (2026-08-13: a Bare build was observed
+ * with the FIRST empty but the second populated — build type changes which
+ * one Expo actually fills in). `fallbackProjectId` is the last resort so a
+ * device is never left with no projectId at all; the caller supplies it
+ * from a fixed value that must match app.json (see ./index.ts).
+ *
+ * Pure and dependency-free on purpose: this is the actual decision, kept
+ * separate from reading `Constants` itself so it can run — and be tested —
+ * without Expo.
+ */
+export function selectProjectId(
+  expoConfigProjectId: string | null | undefined,
+  easConfigProjectId: string | null | undefined,
+  fallbackProjectId: string,
+): { projectId: string; source: ProjectIdSource } {
+  if (expoConfigProjectId) {
+    return { projectId: expoConfigProjectId, source: 'expoConfig' };
+  }
+  if (easConfigProjectId) {
+    return { projectId: easConfigProjectId, source: 'easConfig' };
+  }
+  return { projectId: fallbackProjectId, source: 'fallback' };
+}
+
+/** German label for the settings screen's "Projekt-ID stammt aus" line. */
+export function describeProjectIdSource(source: ProjectIdSource): string {
+  switch (source) {
+    case 'expoConfig':
+      return 'aus expoConfig';
+    case 'easConfig':
+      return 'aus easConfig';
+    case 'fallback':
+      return 'fester Rückfallwert';
+  }
+}
+
 export type NotifyHouseholdKind = 'photos';
 
 export type NotifyHouseholdRequest = {
