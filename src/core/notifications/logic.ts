@@ -60,12 +60,52 @@ export function describeSupabaseError(error: { message: string; code?: string | 
   return error.code ? `${error.message} (Code ${error.code})` : error.message;
 }
 
-/** Turns an unknown thrown value into readable text, for a catch block that must never itself throw. */
+/**
+ * Turns an unknown thrown value into readable text, for a catch block that
+ * must never itself throw. For an Error, this is its name and message
+ * verbatim, plus a `code` property when the error carries one (some native
+ * push/Firebase errors do) — never replaced with our own paraphrase, so a
+ * diagnostics screen shows exactly what was thrown, not a guess at it.
+ */
 export function describeUnknownError(error: unknown): string {
   if (error instanceof Error) {
-    return error.message;
+    const code = 'code' in error && error.code != null ? String((error as { code: unknown }).code) : null;
+    return code ? `${error.name}: ${error.message} (code: ${code})` : `${error.name}: ${error.message}`;
   }
   return String(error);
+}
+
+/** German label for the settings screen's "Registrierung" run-status line. */
+export function describeRegistrationRunStatus(status: 'never' | 'running' | 'done' | 'failed'): string {
+  switch (status) {
+    case 'never':
+      return 'Nie versucht';
+    case 'running':
+      return 'Läuft …';
+    case 'done':
+      return 'Abgeschlossen';
+    case 'failed':
+      return 'Fehlgeschlagen';
+  }
+}
+
+/**
+ * German label for `Constants.executionEnvironment` — Expo Go (SDK 53+)
+ * cannot receive remote push at all, which is exactly the kind of "the
+ * whole feature can't work here" fact a push diagnostics screen must not
+ * stay silent about.
+ */
+export function describeExecutionEnvironment(env: string | null): string {
+  switch (env) {
+    case 'standalone':
+      return 'Eigenständiger Build';
+    case 'storeClient':
+      return 'Expo Go oder Dev-Client (kein Push-Empfang möglich)';
+    case 'bare':
+      return 'Bare (natives Projekt ohne Expo Go)';
+    default:
+      return 'Unbekannt';
+  }
 }
 
 export type NotifyHouseholdKind = 'photos';

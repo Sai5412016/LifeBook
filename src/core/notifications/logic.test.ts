@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildNotifyHouseholdRequest,
   canRequestPushPermission,
+  describeExecutionEnvironment,
   describePushPermissionStatus,
+  describeRegistrationRunStatus,
   describeSupabaseError,
   describeTokenPresence,
   describeUnknownError,
@@ -85,12 +87,56 @@ describe('describeSupabaseError', () => {
 });
 
 describe('describeUnknownError', () => {
-  it('uses the message of a real Error', () => {
-    expect(describeUnknownError(new Error('boom'))).toBe('boom');
+  it('uses the name and message of a real Error, verbatim', () => {
+    expect(describeUnknownError(new Error('boom'))).toBe('Error: boom');
+  });
+
+  it('preserves a subclassed Error name', () => {
+    expect(describeUnknownError(new TypeError('Network request failed'))).toBe(
+      'TypeError: Network request failed',
+    );
+  });
+
+  it('appends a code property when the error carries one', () => {
+    const error = new Error('Missing registration token');
+    (error as Error & { code: string }).code = 'messaging/registration-token-not-registered';
+    expect(describeUnknownError(error)).toBe(
+      'Error: Missing registration token (code: messaging/registration-token-not-registered)',
+    );
   });
 
   it('stringifies anything else thrown', () => {
     expect(describeUnknownError('a plain string throw')).toBe('a plain string throw');
     expect(describeUnknownError(42)).toBe('42');
+  });
+});
+
+describe('describeRegistrationRunStatus', () => {
+  it.each([
+    ['never', 'Nie versucht'],
+    ['running', 'Läuft …'],
+    ['done', 'Abgeschlossen'],
+    ['failed', 'Fehlgeschlagen'],
+  ] as const)('describes %s', (status, expected) => {
+    expect(describeRegistrationRunStatus(status)).toBe(expected);
+  });
+});
+
+describe('describeExecutionEnvironment', () => {
+  it('describes a standalone build', () => {
+    expect(describeExecutionEnvironment('standalone')).toBe('Eigenständiger Build');
+  });
+
+  it('describes Expo Go / a dev client, naming the push limitation', () => {
+    expect(describeExecutionEnvironment('storeClient')).toBe('Expo Go oder Dev-Client (kein Push-Empfang möglich)');
+  });
+
+  it('describes a bare project', () => {
+    expect(describeExecutionEnvironment('bare')).toBe('Bare (natives Projekt ohne Expo Go)');
+  });
+
+  it('falls back to "Unbekannt" for null or an unrecognised value', () => {
+    expect(describeExecutionEnvironment(null)).toBe('Unbekannt');
+    expect(describeExecutionEnvironment('something-new')).toBe('Unbekannt');
   });
 });

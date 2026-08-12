@@ -30,7 +30,7 @@
 
 import { usePowerSync, useStatus } from '@powersync/react-native';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -39,8 +39,9 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { connectPowerSync } from '@/core/db';
 import {
-  canRequestPushPermission,
+  describeExecutionEnvironment,
   describePushPermissionStatus,
+  describeRegistrationRunStatus,
   describeTokenPresence,
   getPushPermissionStatus,
   hasPushTokenRegistered,
@@ -50,6 +51,8 @@ import {
   type PushPermissionStatus,
 } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
+import { formatTimeLabel } from '@/core/time';
+import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
 import { usePendingUploadCount } from '@/features/photos/repository';
 
@@ -120,16 +123,20 @@ function PhotoStatusRow() {
 }
 
 /**
- * Shows whether push notifications are active and offers to ask again.
+ * Shows the FULL push-registration diagnosis, not just "Fehlt" — that one
+ * word used to collapse "never attempted" and "attempted and failed" into
+ * the same reading, and gave no way to get a fresh error without
+ * restarting the app (registration only otherwise runs once, right after
+ * sign-in). See core/notifications/diagnostics.ts for what each field means.
+ *
  * Reads the OS permission directly rather than any stored app state, so it
  * always reflects reality even if the parent changed it in the system
  * settings since the app last asked.
  *
- * "Schlüssel vorhanden" starts from a live database read (a token from an
+ * "Schlüssel gespeichert" starts from a live database read (a token from an
  * earlier app session is still real even if nothing ran this session), then
  * switches to whatever this session's own attempt just found — the more
- * current of the two. "Letzter Fehler" is diagnostics-store-only by nature:
- * there is nothing to read from the database for a failure that left no row.
+ * current of the two.
  */
 function NotificationStatusRow() {
   const { session } = useAuth();
@@ -142,58 +149,93 @@ function NotificationStatusRow() {
     getPushPermissionStatus().then(setStatus);
   }, []);
 
-  useEffect(() => {
-    refreshStatus();
-  }, [refreshStatus]);
-
-  useEffect(() => {
+  const refreshDbTokenPresent = useCallback(() => {
     if (!session) {
       return;
     }
     hasPushTokenRegistered(session.user.id).then(({ present, error }) => {
       setDbTokenPresent(present);
       if (error) {
+        // hasPushTokenRegistered returns its error rather than throwing, and
+        // this screen is its only caller — logged the same way SyncStatusRow
+        // above logs its own retry failures.
         console.error('[LifeBook] Push-Token-Prüfung fehlgeschlagen', error);
       }
     });
   }, [session]);
 
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    refreshDbTokenPresent();
+  }, [refreshDbTokenPresent]);
+
   if (!session) {
     return null;
   }
 
-  const handleRequest = async () => {
+  const handleRetryRegistration = async () => {
     setRequesting(true);
     try {
       await registerForPushNotifications(session.user.id);
     } finally {
       setRequesting(false);
       refreshStatus();
-      hasPushTokenRegistered(session.user.id).then(({ present }) => setDbTokenPresent(present));
+      refreshDbTokenPresent();
     }
   };
 
   const tokenPresent = diagnostics.tokenPresent ?? dbTokenPresent;
+  const lastCheckedLabel = diagnostics.lastCheckedAt
+    ? formatTimeLabel(diagnostics.lastCheckedAt, deviceTimeZone())
+    : 'noch nie';
 
   return (
     <ThemedView type="backgroundElement" style={styles.card}>
       <ThemedText type="smallBold">Benachrichtigungen</ThemedText>
+
+      <ThemedText type="small" themeColor="textSecondary">
+        Registrierung: {describeRegistrationRunStatus(diagnostics.runStatus)}
+      </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         Berechtigung: {status ? describePushPermissionStatus(status) : 'Wird geprüft …'}
       </ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
-        Push-Schlüssel: {describeTokenPresence(tokenPresent)}
+        Build-Typ: {describeExecutionEnvironment(diagnostics.executionEnvironment)}
       </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Projekt-ID: {diagnostics.projectId ?? 'leer'}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Schlüssel von Expo: {describeTokenPresence(diagnostics.tokenFetched)}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Schlüssel in der Datenbank: {describeTokenPresence(tokenPresent)}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Zuletzt geprüft: {lastCheckedLabel}
+      </ThemedText>
+
       {diagnostics.lastError ? (
-        <ThemedText type="small" themeColor="dangerText">
+        <ThemedText type="small" themeColor="dangerText" style={styles.errorText}>
           Letzter Fehler: {diagnostics.lastError}
         </ThemedText>
       ) : null}
-      {status && canRequestPushPermission(status) ? (
-        <Pressable onPress={handleRequest} disabled={requesting} hitSlop={8}>
-          <ThemedText type="linkPrimary">{requesting ? '…' : 'Berechtigung erneut anfragen'}</ThemedText>
-        </Pressable>
+      {diagnostics.tokenWriteError ? (
+        <ThemedText type="small" themeColor="dangerText" style={styles.errorText}>
+          Schlüssel kam an, Speichern in der Datenbank scheiterte: {diagnostics.tokenWriteError}
+        </ThemedText>
       ) : null}
+
+      <Pressable onPress={handleRetryRegistration} disabled={requesting} hitSlop={8}>
+        {requesting ? (
+          <ActivityIndicator />
+        ) : (
+          <ThemedText type="linkPrimary">Registrierung erneut versuchen</ThemedText>
+        )}
+      </Pressable>
     </ThemedView>
   );
 }
@@ -281,4 +323,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     borderRadius: Spacing.three,
   },
+  // No numberOfLines / ellipsizeMode anywhere here on purpose — this is the
+  // full, unabridged error text, not a preview of it.
+  errorText: { marginTop: Spacing.one },
 });

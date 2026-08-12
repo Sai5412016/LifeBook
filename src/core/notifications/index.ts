@@ -83,7 +83,12 @@ export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
     const { status } = await Notifications.getPermissionsAsync();
     return status;
   } catch (error) {
+    const message = describeUnknownError(error);
     console.error('[LifeBook] Push-Berechtigungsstatus konnte nicht gelesen werden', error);
+    // Not a registration run (runStatus untouched) — just a read failure,
+    // but still a caught error, so it still has to reach the diagnostics
+    // screen rather than living only in the device log.
+    setPushDiagnostics({ lastError: message });
     return 'undetermined';
   }
 }
@@ -160,16 +165,30 @@ async function upsertPushToken(userId: string, token: string, platform: string):
  *
  * Called after a successful sign-in/sign-up — NOT at cold start, so a parent
  * is never asked for a permission before they've even reached the app; and
- * again from the settings screen's "Berechtigung erneut anfragen" action.
+ * again from the settings screen's "Registrierung erneut versuchen" action —
+ * the only way to get a FRESH diagnosis without restarting the app, since
+ * this otherwise only ever runs once, right after sign-in.
  */
 export async function registerForPushNotifications(userId: string): Promise<void> {
   const lastCheckedAt = nowUtcIso();
-  setPushDiagnostics({ lastCheckedAt });
+  // Reset the previous run's outcome so a retry doesn't show stale
+  // success/failure detail while this one is still in progress.
+  setPushDiagnostics({
+    runStatus: 'running',
+    lastCheckedAt,
+    tokenFetched: null,
+    tokenWriteError: null,
+    lastError: null,
+  });
 
   try {
     if (!Device.isDevice) {
       // Simulators/emulators have no push capability — not an error, just nothing to do.
-      setPushDiagnostics({ lastError: 'Simulator/Emulator ohne Push-Fähigkeit', tokenPresent: false });
+      setPushDiagnostics({
+        runStatus: 'failed',
+        lastError: 'Simulator/Emulator ohne Push-Fähigkeit',
+        tokenPresent: false,
+      });
       return;
     }
 
@@ -183,15 +202,18 @@ export async function registerForPushNotifications(userId: string): Promise<void
     setPushDiagnostics({ permissionStatus: finalStatus });
 
     if (finalStatus !== 'granted') {
-      setPushDiagnostics({ lastError: 'Berechtigung nicht erteilt', tokenPresent: false });
+      setPushDiagnostics({ runStatus: 'failed', lastError: 'Berechtigung nicht erteilt', tokenPresent: false });
       return;
     }
 
+    // Always recorded, success or failure — a missing/misconfigured
+    // projectId is a common trip-up and was previously invisible unless it
+    // happened to also be the most recent thing written to `lastError`.
     const { projectId, diagnostic: projectIdError } = resolveProjectId();
     setPushDiagnostics({ projectId });
     if (!projectId) {
       console.error('[LifeBook] Push-Registrierung:', projectIdError);
-      setPushDiagnostics({ lastError: projectIdError, tokenPresent: false });
+      setPushDiagnostics({ runStatus: 'failed', lastError: projectIdError, tokenPresent: false });
       return;
     }
 
@@ -203,27 +225,40 @@ export async function registerForPushNotifications(userId: string): Promise<void
       // The single most common real-world cause here: Expo Go (SDK 53+) no
       // longer supports remote push at all — this throws with a message
       // naming Expo Go explicitly, which is exactly why it's shown verbatim
-      // rather than replaced with a generic "failed" text.
+      // rather than replaced with a generic "failed" text. `tokenFetched:
+      // false` is what lets the settings screen say "no token ever came
+      // back" instead of leaving that to be inferred from the error text.
       const message = describeUnknownError(error);
       console.error('[LifeBook] Push-Schlüssel konnte nicht geholt werden', error);
-      setPushDiagnostics({ tokenPresent: false, lastError: `Push-Schlüssel: ${message}` });
+      setPushDiagnostics({ runStatus: 'failed', tokenFetched: false, tokenPresent: false, lastError: message });
       return;
     }
 
-    setPushDiagnostics({ tokenPresent: true });
+    setPushDiagnostics({ tokenFetched: true });
 
     const writeError = await upsertPushToken(userId, token, Platform.OS);
     if (writeError) {
       console.error('[LifeBook] Push-Token konnte nicht gespeichert werden', writeError);
-      setPushDiagnostics({ tokenPresent: false, lastError: `Speichern: ${writeError}` });
+      // tokenWriteError is the SAME text as lastError here, kept separately
+      // on purpose: it is what lets the settings screen say "the token DID
+      // come back, only saving it failed" — a token that was fetched but
+      // never stored is a completely different bug from one that never
+      // arrived at all, and collapsing both into one `lastError` string is
+      // exactly what made this diagnosis blind before.
+      setPushDiagnostics({
+        runStatus: 'failed',
+        tokenPresent: false,
+        tokenWriteError: writeError,
+        lastError: writeError,
+      });
       return;
     }
 
-    setPushDiagnostics({ lastError: null });
+    setPushDiagnostics({ runStatus: 'done', tokenPresent: true, tokenWriteError: null, lastError: null });
   } catch (error) {
     const message = describeUnknownError(error);
     console.error('[LifeBook] Push-Registrierung fehlgeschlagen', error);
-    setPushDiagnostics({ lastError: message });
+    setPushDiagnostics({ runStatus: 'failed', lastError: message });
   }
 }
 
@@ -254,10 +289,18 @@ export async function unregisterPushToken(userId: string): Promise<void> {
 
     const { error } = await supabase.from('push_tokens').delete().eq('user_id', userId).eq('token', token);
     if (error) {
-      console.error('[LifeBook] Push-Token konnte nicht entfernt werden', describeSupabaseError(error));
+      const message = describeSupabaseError(error);
+      console.error('[LifeBook] Push-Token konnte nicht entfernt werden', message);
+      // Not a registration run (runStatus untouched) — but still a caught
+      // error, so it still has to reach the diagnostics screen rather than
+      // living only in the device log (2026-08-13: this is where the last
+      // silently-console.error-only catch block in this file lived).
+      setPushDiagnostics({ lastError: message });
     }
   } catch (error) {
+    const message = describeUnknownError(error);
     console.error('[LifeBook] Push-Token-Entfernung fehlgeschlagen', error);
+    setPushDiagnostics({ lastError: message });
   }
 }
 
@@ -299,10 +342,12 @@ export async function notifyHousehold(
   }
 }
 
-export { usePushDiagnostics, type PushDiagnostics } from './diagnostics';
+export { usePushDiagnostics, type PushDiagnostics, type PushRegistrationRunStatus } from './diagnostics';
 export {
   canRequestPushPermission,
+  describeExecutionEnvironment,
   describePushPermissionStatus,
+  describeRegistrationRunStatus,
   describeTokenPresence,
   shouldNotifyAfterImport,
   type PushPermissionStatus,
