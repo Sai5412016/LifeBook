@@ -31,6 +31,7 @@ bucket_definitions:
       - SELECT * FROM milestones          WHERE household_id = bucket.household_id
       - SELECT * FROM notes               WHERE household_id = bucket.household_id
       - SELECT * FROM photos              WHERE household_id = bucket.household_id
+      - SELECT * FROM people              WHERE household_id = bucket.household_id
       - SELECT * FROM reminders           WHERE household_id = bucket.household_id
 
   user_data:

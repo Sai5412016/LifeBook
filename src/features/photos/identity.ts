@@ -84,8 +84,12 @@ export const extensionForMime = (mime: string | null | undefined): string =>
  * user belongs to. A `/` or `..` smuggled into an id would shift that segment and
  * defeat the check, so ids are validated here — at the single place where paths
  * are built — rather than trusted.
+ *
+ * Exported: features/people builds paths into this SAME bucket under the same
+ * rule (first segment = household id) — reused rather than re-implemented so
+ * the two can never drift apart on this security-relevant check.
  */
-const assertPathSafe = (value: string, label: string): void => {
+export const assertPathSafe = (value: string, label: string): void => {
   if (value.length === 0 || /[/\\]|\.\./.test(value)) {
     throw new Error(`photos: unsafe ${label} for a storage path: "${value}"`);
   }
