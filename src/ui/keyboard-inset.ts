@@ -53,3 +53,72 @@ export function computeKeyboardInset(input: KeyboardInsetInput): number {
   const tabBarHeight = sanitize(input.tabBarHeight);
   return basePadding + safeAreaBottom + tabBarHeight;
 }
+
+export type FieldScrollInput = {
+  /** Whether the keyboard is currently open. Closed => never scroll here; the keyboard-show handler owns that transition (see ./keyboard-safe-screen). */
+  keyboardOpen: boolean;
+  /** The focused field's top edge, in ScrollView content coordinates (e.g. from `measureLayout` against the content view). */
+  fieldTop: number;
+  /** The focused field's height. */
+  fieldHeight: number;
+  /** How much vertical space is free above the keyboard — already net of any breathing-room margin the caller wants. */
+  visibleHeight: number;
+  /** The ScrollView's current content offset. */
+  scrollY: number;
+};
+
+/**
+ * Whether a keyboard-aware ScrollView should scroll to reveal the focused
+ * field, and if so, to which content offset. Returns null for "don't move
+ * anything" — either the keyboard is closed, or the field is already fully
+ * inside the visible window `[scrollY, scrollY + visibleHeight]`.
+ *
+ * Three cases when it isn't already visible:
+ * - Above the visible window (user scrolled past it) → bring its TOP down
+ *   to the top of the window.
+ * - Taller than the whole visible window → align its TOP, not its bottom.
+ *   Bottom-aligning a field taller than the available space would push the
+ *   very first line the user is looking at up off-screen — showing the top
+ *   is what a note field's writer actually needs to see.
+ * - Otherwise below the visible window (the reported bug: a field further
+ *   down the form gets focus while the keyboard is already open) → bring
+ *   its BOTTOM up to the bottom of the window, revealing the whole field.
+ */
+export function computeFieldScrollTarget(input: FieldScrollInput): number | null {
+  if (!input.keyboardOpen) {
+    return null;
+  }
+
+  const fieldTop = sanitize(input.fieldTop);
+  const fieldHeight = sanitize(input.fieldHeight);
+  const visibleHeight = sanitize(input.visibleHeight);
+  const scrollY = sanitize(input.scrollY);
+
+  const fieldBottom = fieldTop + fieldHeight;
+  const visibleTop = scrollY;
+  const visibleBottom = scrollY + visibleHeight;
+
+  if (fieldTop >= visibleTop && fieldBottom <= visibleBottom) {
+    return null;
+  }
+
+  if (fieldTop < visibleTop) {
+    return fieldTop;
+  }
+
+  if (fieldHeight > visibleHeight) {
+    return fieldTop;
+  }
+
+  return Math.max(0, fieldBottom - visibleHeight);
+}
+
+/**
+ * The optional keyboard-safe-screen focus-report context (see
+ * ./keyboard-safe-screen#useReportFieldFocus) defaults to this outside any
+ * provider — a `TextField` must never crash just because it happens to be
+ * rendered somewhere that isn't wrapped in `KeyboardSafeScreen`. Kept here,
+ * not inline in the context's default value, so that guarantee is covered
+ * by a test rather than only ever exercised on a device.
+ */
+export const noopFieldFocusReport = (): void => {};

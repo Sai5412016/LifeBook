@@ -31,7 +31,7 @@
  * computes. Letting `SafeAreaView` ALSO pad the bottom would double it.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Keyboard,
@@ -41,6 +41,8 @@ import {
   TextInput,
   type KeyboardEvent,
   type KeyboardEventName,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -48,7 +50,24 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BottomTabInset, Spacing } from '@/constants/theme';
 
-import { computeKeyboardInset } from './keyboard-inset';
+import { computeFieldScrollTarget, computeKeyboardInset, noopFieldFocusReport } from './keyboard-inset';
+
+/**
+ * Lets a field (see ./text-field.tsx) report "I just got focus" to its
+ * nearest KeyboardSafeScreen. Only needed for the case the keyboard SHOW
+ * event can't cover: the keyboard is already open and focus moves to a
+ * DIFFERENT field further down the form (the reported bug — tap the name
+ * field, then the note field, with the keyboard never closing in between).
+ *
+ * Defaults to `noopFieldFocusReport` — a `TextField` rendered outside any
+ * `KeyboardSafeScreen` must report into the void, never throw.
+ */
+const FieldFocusReportContext = createContext<() => void>(noopFieldFocusReport);
+
+/** For src/ui/text-field.tsx — see the context doc comment above. */
+export function useReportFieldFocus(): () => void {
+  return useContext(FieldFocusReportContext);
+}
 
 // iOS fires keyboardWillShow/Hide (ahead of the animation, so padding can
 // track it smoothly). Android has NO "will" variant — only
@@ -82,6 +101,8 @@ export function KeyboardSafeScreen({
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
   const viewportHeightRef = useRef(0);
+  const scrollOffsetRef = useRef(0);
+  const keyboardHeightRef = useRef(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const tabBarHeight = hasTabBar ? BottomTabInset : 0;
@@ -112,11 +133,14 @@ export function KeyboardSafeScreen({
   }, [keyboardHeight, insets.bottom, tabBarHeight, paddingAnim]);
 
   /**
-   * Scrolls the currently-focused field above the keyboard. Built from the
-   * ref to the focused field and its position within the ScrollView
-   * (`measureLayout` against the ScrollView's inner content node), NOT
-   * `scrollResponderScrollNativeHandleToKeyboard` — that all-in-one helper
-   * is unreliable under the New Architecture.
+   * Scrolls the currently-focused field above the keyboard, if it needs it.
+   * Built from the ref to the focused field and its position within the
+   * ScrollView (`measureLayout` against the ScrollView's inner content
+   * node), NOT `scrollResponderScrollNativeHandleToKeyboard` — that
+   * all-in-one helper is unreliable under the New Architecture. The actual
+   * "does it need it, and where to" decision is the pure
+   * `computeFieldScrollTarget` — this is only the device-touching plumbing
+   * around it.
    */
   const scrollFocusedInputIntoView = useCallback((currentKeyboardHeight: number) => {
     const scrollView = scrollViewRef.current;
@@ -129,14 +153,16 @@ export function KeyboardSafeScreen({
     focusedInput.measureLayout(
       innerViewNode,
       (_left: number, top: number, _width: number, height: number) => {
-        const visibleHeight = Math.max(0, viewportHeightRef.current - currentKeyboardHeight);
-        const fieldBottom = top + height;
-        // Already fully visible above the keyboard — no need to move anything.
-        if (fieldBottom <= visibleHeight - FOCUS_SCROLL_MARGIN) {
-          return;
+        const target = computeFieldScrollTarget({
+          keyboardOpen: currentKeyboardHeight > 0,
+          fieldTop: top,
+          fieldHeight: height,
+          visibleHeight: viewportHeightRef.current - currentKeyboardHeight - FOCUS_SCROLL_MARGIN,
+          scrollY: scrollOffsetRef.current,
+        });
+        if (target !== null) {
+          scrollView.scrollTo({ y: target, animated: true });
         }
-        const targetY = fieldBottom - visibleHeight + FOCUS_SCROLL_MARGIN;
-        scrollView.scrollTo({ y: Math.max(0, targetY), animated: true });
       },
       () => {
         // Layout not settled yet, or nothing focused anymore — nothing to do.
@@ -147,12 +173,14 @@ export function KeyboardSafeScreen({
   useEffect(() => {
     const handleShow = (event: KeyboardEvent) => {
       const height = event.endCoordinates?.height ?? 0;
+      keyboardHeightRef.current = height;
       setKeyboardHeight(height);
       // The keyboard's own layout animation hasn't necessarily finished
       // yet — give it a frame before measuring against the new viewport.
       requestAnimationFrame(() => scrollFocusedInputIntoView(height));
     };
     const handleHide = () => {
+      keyboardHeightRef.current = 0;
       setKeyboardHeight(0);
     };
 
@@ -164,21 +192,43 @@ export function KeyboardSafeScreen({
     };
   }, [scrollFocusedInputIntoView]);
 
+  /**
+   * The other half of the fix, alongside the keyboard-show handler above:
+   * a field reports focus here directly (see `useReportFieldFocus`) so
+   * switching to a DIFFERENT field while the keyboard is already open also
+   * scrolls — the show event only ever fires once, when the keyboard first
+   * opens. Closed keyboard is deliberately ignored here: the show handler
+   * is about to fire and do this itself once it opens, so scrolling twice
+   * would just make the content jump.
+   */
+  const handleFieldFocus = useCallback(() => {
+    if (keyboardHeightRef.current <= 0) {
+      return;
+    }
+    scrollFocusedInputIntoView(keyboardHeightRef.current);
+  }, [scrollFocusedInputIntoView]);
+
   return (
-    <SafeAreaView style={[styles.safeArea, style]} edges={['top', 'left', 'right']}>
-      {header}
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.scroll}
-        contentContainerStyle={contentContainerStyle}
-        keyboardShouldPersistTaps="handled"
-        onLayout={(event) => {
-          viewportHeightRef.current = event.nativeEvent.layout.height;
-        }}>
-        {children}
-        <Animated.View style={{ height: paddingAnim }} />
-      </ScrollView>
-    </SafeAreaView>
+    <FieldFocusReportContext.Provider value={handleFieldFocus}>
+      <SafeAreaView style={[styles.safeArea, style]} edges={['top', 'left', 'right']}>
+        {header}
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.scroll}
+          contentContainerStyle={contentContainerStyle}
+          keyboardShouldPersistTaps="handled"
+          onLayout={(event) => {
+            viewportHeightRef.current = event.nativeEvent.layout.height;
+          }}
+          onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}>
+          {children}
+          <Animated.View style={{ height: paddingAnim }} />
+        </ScrollView>
+      </SafeAreaView>
+    </FieldFocusReportContext.Provider>
   );
 }
 
