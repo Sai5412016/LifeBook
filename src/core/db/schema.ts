@@ -275,6 +275,33 @@ function buildAppSchema() {
     },
   );
 
+  /* ────────────────────────────── Begleitende Menschen (2026-08-12) ────────────────────────────── */
+
+  // New feature, not in the original Spec: people who accompanied the child
+  // (Hebamme, Ärztin/Arzt, Familie, …). Not an `eventColumns` table — a
+  // roster, not a timestamped occurrence — so it gets its own column list.
+  const people = new Table(
+    {
+      household_id: column.text,
+      child_id: column.text,
+      name: column.text,
+      role: column.text, // midwife | doctor | nurse | family | godparent | other
+      note: column.text,
+      // {household_id}/people/{person_id}.jpg in the existing `photos` bucket —
+      // see features/people/identity.ts#buildPersonPhotoKey.
+      photo_key: column.text,
+      met_from: column.text, // ISO-8601 UTC, optional
+      met_to: column.text, // ISO-8601 UTC, optional
+      sort_index: column.integer,
+      created_by: column.text,
+      created_at: column.text,
+      updated_at: column.text,
+      deleted_at: column.text,
+      source_device_id: column.text,
+    },
+    { indexes: { child_sort: ['child_id', 'sort_index'] } },
+  );
+
   /* ────────────────────────────── Erinnerungen & Einstellungen (§5.5) ────────────────────────────── */
 
   const reminders = new Table({
@@ -318,6 +345,7 @@ function buildAppSchema() {
     milestones,
     notes,
     photos,
+    people,
     reminders,
     user_preferences,
   });

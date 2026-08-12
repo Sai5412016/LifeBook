@@ -58,8 +58,13 @@ async function requireAccessToken(): Promise<string> {
   return token;
 }
 
-/** Stream one local file into the bucket, overwriting any previous attempt. */
-async function putObject(localUri: string, key: string, mime: string): Promise<void> {
+/**
+ * Stream one local file into the bucket, overwriting any previous attempt.
+ * Exported as the one shared uploader into the `photos` bucket — features/people
+ * uploads a person's portrait through this same function rather than
+ * duplicating the auth-header/retry-safe upload request.
+ */
+export async function uploadToPhotosBucket(localUri: string, key: string, mime: string): Promise<void> {
   const token = await requireAccessToken();
   const file = new File(localUri);
 
@@ -157,7 +162,7 @@ async function executeUploadQueue(
         // the import-time preview lives in the OS cache and may be long gone.
         const thumbUri = await createThumbnail(photo.local_uri);
         try {
-          await putObject(thumbUri, photo.thumb_key, 'image/jpeg');
+          await uploadToPhotosBucket(thumbUri, photo.thumb_key, 'image/jpeg');
           await markThumbUploaded(db, photo.id);
           result.thumbnails += 1;
         } finally {
@@ -170,7 +175,7 @@ async function executeUploadQueue(
           result.deferred += 1;
           continue;
         }
-        await putObject(photo.local_uri, photo.original_key, photo.mime ?? 'image/jpeg');
+        await uploadToPhotosBucket(photo.local_uri, photo.original_key, photo.mime ?? 'image/jpeg');
         await markOriginalUploaded(db, photo.id);
         // Only now is it safe to drop the staged copy: the bytes exist elsewhere.
         deleteQuietly(photo.local_uri);

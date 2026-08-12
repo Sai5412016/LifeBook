@@ -25,6 +25,10 @@ import {
   formatWeightKg,
 } from '@/features/household/measurements';
 import { useActiveChild } from '@/features/household/repository';
+import { PersonAvatar } from '@/features/people/components/person-avatar';
+import { describeRole } from '@/features/people/logic';
+import { usePeopleOfChild } from '@/features/people/repository';
+import type { PersonRow } from '@/features/people/types';
 import { formatAgeLabel, resolveFullscreenUri } from '@/features/photos/identity';
 import { useSignedUrls } from '@/features/photos/hooks';
 import { usePhotosOfChild } from '@/features/photos/repository';
@@ -36,6 +40,7 @@ const PHOTO_STRIP_COUNT = 5;
 export default function StartScreen() {
   const { child, isLoading: childLoading } = useActiveChild();
   const { photos } = usePhotosOfChild(child?.childId);
+  const { people } = usePeopleOfChild(child?.childId);
 
   // avatar_photo_id if set, otherwise the newest photo (`photos` is already
   // occurred_at DESC — see repository.ts#usePhotosOfChild).
@@ -47,6 +52,7 @@ export default function StartScreen() {
   const signedUrls = useSignedUrls([
     avatarPhoto?.original_key,
     ...stripPhotos.map((photo) => photo.thumb_key),
+    ...people.map((person) => person.photo_key),
   ]);
   const avatarUri = avatarPhoto ? resolveFullscreenUri(avatarPhoto, signedUrls) : undefined;
 
@@ -134,9 +140,62 @@ export default function StartScreen() {
               </View>
             </ScrollView>
           )}
+
+          <ThemedText type="smallBold" style={styles.stripTitle}>
+            Menschen
+          </ThemedText>
+          {people.length === 0 ? (
+            <Pressable onPress={() => router.push('/menschen/neu')}>
+              <ThemedView type="backgroundElement" style={styles.peopleEmpty}>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Noch niemand eingetragen. Hebamme, Ärztin oder Familie — wer{' '}
+                  {child?.firstName ?? 'das Kind'} begleitet, kann hier festgehalten werden.
+                </ThemedText>
+                <ThemedText type="linkPrimary" style={styles.editLink}>
+                  Person hinzufügen
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.strip}>
+                {people.map((person) => (
+                  <PersonStripTile
+                    key={person.id}
+                    person={person}
+                    signedUrl={person.photo_key ? signedUrls.get(person.photo_key) : undefined}
+                  />
+                ))}
+                <Pressable onPress={() => router.push('/menschen/neu')} style={styles.addPersonTile}>
+                  <ThemedView type="backgroundElement" style={styles.addPersonCircle}>
+                    <ThemedText type="title" themeColor="accent" style={styles.addPersonPlus}>
+                      +
+                    </ThemedText>
+                  </ThemedView>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Hinzufügen
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </ScrollView>
+          )}
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+function PersonStripTile({ person, signedUrl }: { person: PersonRow; signedUrl: string | undefined }) {
+  return (
+    <Pressable onPress={() => router.push(`/menschen/${person.id}`)} style={styles.personTile}>
+      <PersonAvatar uri={signedUrl} name={person.name} size={STRIP_TILE_SIZE} />
+      <ThemedText type="small" numberOfLines={1} style={styles.personName}>
+        {person.name}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+        {describeRole(person.role)}
+      </ThemedText>
+    </Pressable>
   );
 }
 
@@ -196,4 +255,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   stripTileImage: { width: '100%', height: '100%' },
+  peopleEmpty: {
+    gap: Spacing.one,
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
+  },
+  personTile: { width: STRIP_TILE_SIZE, alignItems: 'center', gap: Spacing.half },
+  personName: { textAlign: 'center' },
+  addPersonTile: { width: STRIP_TILE_SIZE, alignItems: 'center', gap: Spacing.half },
+  addPersonCircle: {
+    width: STRIP_TILE_SIZE,
+    height: STRIP_TILE_SIZE,
+    borderRadius: STRIP_TILE_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPersonPlus: { fontSize: 32, lineHeight: 34 },
 });
