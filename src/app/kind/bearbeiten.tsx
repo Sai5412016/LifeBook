@@ -12,8 +12,7 @@ import { usePowerSync } from '@powersync/react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -30,7 +29,7 @@ import { updateChild, useActiveChild } from '@/features/household/repository';
 import { usePhotosOfChild } from '@/features/photos/repository';
 import type { PhotoRow } from '@/features/photos/types';
 import { useSignedUrls } from '@/features/photos/hooks';
-import { useUiColors, TextField } from '@/ui';
+import { KeyboardSafeScreen, useUiColors, TextField } from '@/ui';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -116,23 +115,24 @@ export default function ChildEditScreen() {
     }
   };
 
+  const header = (
+    <View style={styles.header}>
+      <Pressable onPress={() => router.back()} hitSlop={12} disabled={saving}>
+        <ThemedText type="link" themeColor="textSecondary">
+          Abbrechen
+        </ThemedText>
+      </Pressable>
+      <ThemedText type="smallBold">Kind bearbeiten</ThemedText>
+      <Pressable onPress={handleSave} hitSlop={12} disabled={saving || !child}>
+        <ThemedText type="linkPrimary">{saving ? '…' : 'Speichern'}</ThemedText>
+      </Pressable>
+    </View>
+  );
+
   return (
     <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12} disabled={saving}>
-            <ThemedText type="link" themeColor="textSecondary">
-              Abbrechen
-            </ThemedText>
-          </Pressable>
-          <ThemedText type="smallBold">Kind bearbeiten</ThemedText>
-          <Pressable onPress={handleSave} hitSlop={12} disabled={saving || !child}>
-            <ThemedText type="linkPrimary">{saving ? '…' : 'Speichern'}</ThemedText>
-          </Pressable>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <TextField label="Name" value={firstName} onChangeText={setFirstName} autoCapitalize="words" />
+      <KeyboardSafeScreen header={header} contentContainerStyle={styles.content}>
+        <TextField label="Name" value={firstName} onChangeText={setFirstName} autoCapitalize="words" />
 
           <View style={styles.row}>
             <View style={styles.rowField}>
@@ -223,8 +223,7 @@ export default function ChildEditScreen() {
               ))}
             </View>
           )}
-        </ScrollView>
-      </SafeAreaView>
+      </KeyboardSafeScreen>
     </ThemedView>
   );
 }
@@ -261,7 +260,6 @@ const AVATAR_TILE_SIZE = 88;
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  safeArea: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,7 +1,6 @@
 import { usePowerSync } from '@powersync/react-native';
 import { useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -9,7 +8,7 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { deviceTimeZone } from '@/core/time/device';
 import { createHouseholdWithFirstChild } from '@/features/household/repository';
-import { Button, TextField } from '@/ui';
+import { Button, KeyboardSafeScreen, TextField } from '@/ui';
 
 // YYYY-MM-DD. A real date picker needs a native module (Master-Spec §5.2 covers
 // birth_at) — deferred until the next native-dependency EAS build, see chat.
@@ -69,63 +68,60 @@ export default function HouseholdOnboardingScreen() {
 
   return (
     <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <ThemedText type="title" style={styles.title}>
-            Willkommen!
-          </ThemedText>
-          <ThemedText themeColor="textSecondary" style={styles.subtitle}>
-            Leg euren Haushalt und dein erstes Kind an — danach geht&apos;s los.
-          </ThemedText>
+      <KeyboardSafeScreen contentContainerStyle={styles.scrollContent}>
+        <ThemedText type="title" style={styles.title}>
+          Willkommen!
+        </ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.subtitle}>
+          Leg euren Haushalt und dein erstes Kind an — danach geht&apos;s los.
+        </ThemedText>
 
-          <ThemedView style={styles.form}>
-            <TextField
-              label="Dein Name (wie andere dich sehen)"
-              placeholder="z. B. Mama, Papa, Julia …"
-              value={displayName}
-              onChangeText={setDisplayName}
-              autoCapitalize="words"
-            />
-            <TextField
-              label="Name eures Haushalts"
-              placeholder="z. B. Familie Schmidt"
-              value={householdName}
-              onChangeText={setHouseholdName}
-              autoCapitalize="words"
-            />
-            <TextField
-              label="Vorname des Kindes"
-              placeholder="z. B. Mia"
-              value={childName}
-              onChangeText={setChildName}
-              autoCapitalize="words"
-            />
-            <TextField
-              label="Geburtsdatum (JJJJ-MM-TT)"
-              placeholder="2025-03-14"
-              value={birthDate}
-              onChangeText={setBirthDate}
-              keyboardType="numbers-and-punctuation"
-              autoCapitalize="none"
-            />
+        <ThemedView style={styles.form}>
+          <TextField
+            label="Dein Name (wie andere dich sehen)"
+            placeholder="z. B. Mama, Papa, Julia …"
+            value={displayName}
+            onChangeText={setDisplayName}
+            autoCapitalize="words"
+          />
+          <TextField
+            label="Name eures Haushalts"
+            placeholder="z. B. Familie Schmidt"
+            value={householdName}
+            onChangeText={setHouseholdName}
+            autoCapitalize="words"
+          />
+          <TextField
+            label="Vorname des Kindes"
+            placeholder="z. B. Mia"
+            value={childName}
+            onChangeText={setChildName}
+            autoCapitalize="words"
+          />
+          <TextField
+            label="Geburtsdatum (JJJJ-MM-TT)"
+            placeholder="2025-03-14"
+            value={birthDate}
+            onChangeText={setBirthDate}
+            keyboardType="numbers-and-punctuation"
+            autoCapitalize="none"
+          />
 
-            {error ? (
-              <ThemedText type="small" themeColor="dangerText">
-                {error}
-              </ThemedText>
-            ) : null}
+          {error ? (
+            <ThemedText type="small" themeColor="dangerText">
+              {error}
+            </ThemedText>
+          ) : null}
 
-            <Button label="Haushalt anlegen" onPress={handleCreate} loading={submitting} />
-          </ThemedView>
-        </ScrollView>
-      </SafeAreaView>
+          <Button label="Haushalt anlegen" onPress={handleCreate} loading={submitting} />
+        </ThemedView>
+      </KeyboardSafeScreen>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  safeArea: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     alignSelf: 'center',

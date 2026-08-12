@@ -1,7 +1,6 @@
 import { Link } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -9,7 +8,7 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { translateAuthError } from '@/core/auth/errors';
 import { registerForPushNotifications } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
-import { Button, TextField } from '@/ui';
+import { Button, KeyboardSafeScreen, TextField } from '@/ui';
 
 export default function SignUpScreen() {
   const [email, setEmail] = useState('');
@@ -65,69 +64,66 @@ export default function SignUpScreen() {
 
   return (
     <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <ThemedText type="title" style={styles.title}>
-            Konto erstellen
-          </ThemedText>
-          <ThemedText themeColor="textSecondary" style={styles.subtitle}>
-            Für LifeBook — dauert eine Minute.
-          </ThemedText>
+      <KeyboardSafeScreen contentContainerStyle={styles.scrollContent}>
+        <ThemedText type="title" style={styles.title}>
+          Konto erstellen
+        </ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.subtitle}>
+          Für LifeBook — dauert eine Minute.
+        </ThemedText>
 
-          <ThemedView style={styles.form}>
-            <TextField
-              label="E-Mail"
-              placeholder="du@beispiel.de"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-            />
-            <TextField
-              label="Passwort (mind. 6 Zeichen)"
-              placeholder="••••••••"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              textContentType="newPassword"
-            />
-            <TextField
-              label="Passwort bestätigen"
-              placeholder="••••••••"
-              value={passwordConfirm}
-              onChangeText={setPasswordConfirm}
-              secureTextEntry
-              textContentType="newPassword"
-            />
+        <ThemedView style={styles.form}>
+          <TextField
+            label="E-Mail"
+            placeholder="du@beispiel.de"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+          />
+          <TextField
+            label="Passwort (mind. 6 Zeichen)"
+            placeholder="••••••••"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType="newPassword"
+          />
+          <TextField
+            label="Passwort bestätigen"
+            placeholder="••••••••"
+            value={passwordConfirm}
+            onChangeText={setPasswordConfirm}
+            secureTextEntry
+            textContentType="newPassword"
+          />
 
-            {error ? (
-              <ThemedText type="small" themeColor="dangerText">
-                {error}
-              </ThemedText>
-            ) : null}
-            {info ? (
-              <ThemedText type="small" themeColor="green">
-                {info}
-              </ThemedText>
-            ) : null}
+          {error ? (
+            <ThemedText type="small" themeColor="dangerText">
+              {error}
+            </ThemedText>
+          ) : null}
+          {info ? (
+            <ThemedText type="small" themeColor="green">
+              {info}
+            </ThemedText>
+          ) : null}
 
-            <Button label="Registrieren" onPress={handleSignUp} loading={submitting} />
+          <Button label="Registrieren" onPress={handleSignUp} loading={submitting} />
 
-            <Link href="/sign-in" style={styles.switchLink}>
-              <ThemedText type="linkPrimary">Schon ein Konto? Jetzt anmelden</ThemedText>
-            </Link>
-          </ThemedView>
-        </ScrollView>
-      </SafeAreaView>
+          <Link href="/sign-in" style={styles.switchLink}>
+            <ThemedText type="linkPrimary">Schon ein Konto? Jetzt anmelden</ThemedText>
+          </Link>
+        </ThemedView>
+      </KeyboardSafeScreen>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  safeArea: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',

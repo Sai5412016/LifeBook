@@ -10,12 +10,11 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { nowUtcIso } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
@@ -23,6 +22,7 @@ import { DiaperSection } from '@/features/diaper/components/diaper-section';
 import { FeedingSection } from '@/features/feeding/components/feeding-section';
 import { useActiveChild } from '@/features/household/repository';
 import { SleepSection } from '@/features/sleep/components/sleep-section';
+import { KeyboardSafeScreen } from '@/ui';
 
 /** Ticks every second so Füttern's running timer and "vor …" labels stay live. */
 function useTickingNow(): string {
@@ -52,22 +52,20 @@ export default function AlltagScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <ThemedText type="small" themeColor="textSecondary">
-            {child ? child.firstName : 'Heute'}
-          </ThemedText>
+      <KeyboardSafeScreen style={styles.safeArea} contentContainerStyle={styles.content} hasTabBar>
+        <ThemedText type="small" themeColor="textSecondary">
+          {child ? child.firstName : 'Heute'}
+        </ThemedText>
 
-          <ThemedText type="subtitle">Füttern</ThemedText>
-          <FeedingSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
+        <ThemedText type="subtitle">Füttern</ThemedText>
+        <FeedingSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
 
-          <ThemedText type="subtitle">Wickeln</ThemedText>
-          <DiaperSection child={child} session={session} tz={tz} />
+        <ThemedText type="subtitle">Wickeln</ThemedText>
+        <DiaperSection child={child} session={session} tz={tz} />
 
-          <ThemedText type="subtitle">Schlafen</ThemedText>
-          <SleepSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
-        </ScrollView>
-      </SafeAreaView>
+        <ThemedText type="subtitle">Schlafen</ThemedText>
+        <SleepSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
+      </KeyboardSafeScreen>
     </ThemedView>
   );
 }
@@ -79,6 +77,5 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.three,
     paddingTop: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.four,
   },
 });

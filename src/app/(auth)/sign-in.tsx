@@ -1,7 +1,6 @@
 import { Link } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -9,7 +8,7 @@ import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { translateAuthError } from '@/core/auth/errors';
 import { registerForPushNotifications } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
-import { Button, TextField } from '@/ui';
+import { Button, KeyboardSafeScreen, TextField } from '@/ui';
 
 export default function SignInScreen() {
   const [email, setEmail] = useState('');
@@ -49,56 +48,53 @@ export default function SignInScreen() {
 
   return (
     <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          <ThemedText type="title" style={styles.title}>
-            LifeBook
-          </ThemedText>
-          <ThemedText themeColor="textSecondary" style={styles.subtitle}>
-            Melde dich an, um weiterzumachen.
-          </ThemedText>
+      <KeyboardSafeScreen contentContainerStyle={styles.scrollContent}>
+        <ThemedText type="title" style={styles.title}>
+          LifeBook
+        </ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.subtitle}>
+          Melde dich an, um weiterzumachen.
+        </ThemedText>
 
-          <ThemedView style={styles.form}>
-            <TextField
-              label="E-Mail"
-              placeholder="du@beispiel.de"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-            />
-            <TextField
-              label="Passwort"
-              placeholder="••••••••"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              textContentType="password"
-            />
+        <ThemedView style={styles.form}>
+          <TextField
+            label="E-Mail"
+            placeholder="du@beispiel.de"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+          />
+          <TextField
+            label="Passwort"
+            placeholder="••••••••"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType="password"
+          />
 
-            {error ? (
-              <ThemedText type="small" themeColor="dangerText">
-                {error}
-              </ThemedText>
-            ) : null}
+          {error ? (
+            <ThemedText type="small" themeColor="dangerText">
+              {error}
+            </ThemedText>
+          ) : null}
 
-            <Button label="Anmelden" onPress={handleSignIn} loading={submitting} />
+          <Button label="Anmelden" onPress={handleSignIn} loading={submitting} />
 
-            <Link href="/sign-up" style={styles.switchLink}>
-              <ThemedText type="linkPrimary">Noch kein Konto? Jetzt registrieren</ThemedText>
-            </Link>
-          </ThemedView>
-        </ScrollView>
-      </SafeAreaView>
+          <Link href="/sign-up" style={styles.switchLink}>
+            <ThemedText type="linkPrimary">Noch kein Konto? Jetzt registrieren</ThemedText>
+          </Link>
+        </ThemedView>
+      </KeyboardSafeScreen>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  safeArea: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',

@@ -10,14 +10,13 @@
 
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useSignedUrls } from '@/features/photos/hooks';
-import { Chip, TextField, useUiColors } from '@/ui';
+import { Chip, KeyboardSafeScreen, TextField, useUiColors } from '@/ui';
 
 import { PersonPhotoPickCancelledError, pickPersonPhotoUri } from '../photo';
 import { ROLE_OPTIONS } from '../logic';
@@ -124,23 +123,24 @@ export function PersonForm({
 
   const displayError = validationError ?? error;
 
+  const header = (
+    <View style={styles.header}>
+      <Pressable onPress={() => router.back()} hitSlop={12} disabled={busy}>
+        <ThemedText type="link" themeColor="textSecondary">
+          Abbrechen
+        </ThemedText>
+      </Pressable>
+      <ThemedText type="smallBold">{headerTitle}</ThemedText>
+      <Pressable onPress={handleSubmit} hitSlop={12} disabled={busy}>
+        <ThemedText type="linkPrimary">{saving ? '…' : submitLabel}</ThemedText>
+      </Pressable>
+    </View>
+  );
+
   return (
     <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12} disabled={busy}>
-            <ThemedText type="link" themeColor="textSecondary">
-              Abbrechen
-            </ThemedText>
-          </Pressable>
-          <ThemedText type="smallBold">{headerTitle}</ThemedText>
-          <Pressable onPress={handleSubmit} hitSlop={12} disabled={busy}>
-            <ThemedText type="linkPrimary">{saving ? '…' : submitLabel}</ThemedText>
-          </Pressable>
-        </View>
-
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.photoRow}>
+      <KeyboardSafeScreen header={header} contentContainerStyle={styles.content}>
+        <View style={styles.photoRow}>
             <PersonAvatar uri={previewUri} name={name} size={96} />
             <Pressable onPress={handlePickPhoto} hitSlop={8} disabled={busy}>
               <ThemedText type="linkPrimary">Foto auswählen</ThemedText>
@@ -220,15 +220,13 @@ export function PersonForm({
               )}
             </Pressable>
           ) : null}
-        </ScrollView>
-      </SafeAreaView>
+      </KeyboardSafeScreen>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  safeArea: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

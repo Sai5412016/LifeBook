@@ -39,6 +39,12 @@ laufen über EAS). iOS ist vorbereitet, aber nicht getestet.
 5. **Kommentare erklären das WARUM**, nicht das WAS. Besonders bei allem, was
    wie ein Umweg aussieht — sonst wird es beim nächsten Aufräumen entfernt.
 6. **Sichtbare Texte auf Deutsch**, Code und Kommentare auf Englisch.
+7. **Jeder Bildschirm mit Texteingabe wird in KeyboardSafeScreen gelegt.**
+   Seit Edge-to-Edge auf Android verpflichtend ist, verkleinert das System
+   das App-Fenster nicht mehr; KeyboardAvoidingView reicht nicht. Ein
+   nacktes TextInput außerhalb von KeyboardSafeScreen ist ein Fehler, auch
+   wenn er im Emulator nicht auffällt — Emulatoren blenden häufig gar keine
+   Tastatur ein.
 
 ## Verifizierte Fallstricke — nicht erneut hineinlaufen
 
