@@ -19,7 +19,7 @@ import { Spacing } from '@/constants/theme';
 import { formatDuration, formatTimeLabel, toLocalDate } from '@/core/time';
 import { isRunaway } from '@/core/tracking/running-conflicts';
 import type { ActiveChild } from '@/features/household/repository';
-import { ACCENT, BigButton, Chip, DANGER_BG, DANGER_TEXT, TextField, WARNING_BG } from '@/ui';
+import { BigButton, Chip, TextField, useUiColors } from '@/ui';
 
 import {
   acknowledgeSleepReviewFlag,
@@ -57,6 +57,7 @@ export type SleepSectionProps = {
 
 export function SleepSection({ child, session, tz, tickingNow }: SleepSectionProps) {
   const db = usePowerSync();
+  const { accent } = useUiColors();
 
   // Reactive conflict resolution: a second concurrently running sleep that
   // arrived via sync is resolved here, not only when a sleep is started.
@@ -218,9 +219,9 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
 
       <View style={styles.actions}>
         {runningSleep ? (
-          <BigButton label="Wach" color={ACCENT} onPress={handleEnd} disabled={busy} />
+          <BigButton label="Wach" color={accent} onPress={handleEnd} disabled={busy} />
         ) : (
-          <BigButton label="Schläft jetzt" color={ACCENT} onPress={handleStart} disabled={busy || !child} />
+          <BigButton label="Schläft jetzt" color={accent} onPress={handleStart} disabled={busy || !child} />
         )}
       </View>
 
@@ -274,9 +275,11 @@ function ReviewBanner({
   onOpen: () => void;
   onAcknowledge: () => void;
 }) {
+  const { warningBg, warningText } = useUiColors();
+
   return (
-    <ThemedView style={[styles.banner, { backgroundColor: WARNING_BG }]}>
-      <ThemedText type="smallBold" style={styles.warningText}>
+    <ThemedView style={[styles.banner, { backgroundColor: warningBg }]}>
+      <ThemedText type="smallBold" style={{ color: warningText }}>
         {count === 1
           ? 'Zwei Schlaf-Timer liefen gleichzeitig — bitte prüfen'
           : `${count} Schlafphasen mit gleichzeitig laufenden Timern — bitte prüfen`}
@@ -294,9 +297,11 @@ function ReviewBanner({
 }
 
 function RunawayBanner({ onEnd, onDismiss }: { onEnd: () => void; onDismiss: () => void }) {
+  const { dangerBg, dangerText } = useUiColors();
+
   return (
-    <ThemedView style={[styles.banner, { backgroundColor: DANGER_BG }]}>
-      <ThemedText type="smallBold" style={{ color: DANGER_TEXT }}>
+    <ThemedView style={[styles.banner, { backgroundColor: dangerBg }]}>
+      <ThemedText type="smallBold" style={{ color: dangerText }}>
         Läuft schon länger als 12 Stunden — schläft das Kind wirklich noch?
       </ThemedText>
       <View style={styles.bannerActions}>
@@ -401,6 +406,7 @@ function SleepEditPanel({
   const [endTime, setEndTime] = useState(sleep.ended_at ? formatTimeLabel(sleep.ended_at, sleep.tz) : '');
   const [location, setLocation] = useState<SleepLocation | null>(sleep.location);
   const [error, setError] = useState<string | null>(null);
+  const { dangerText } = useUiColors();
 
   const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -443,7 +449,7 @@ function SleepEditPanel({
       <LocationChips location={location} onChange={setLocation} />
 
       {error ? (
-        <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+        <ThemedText type="small" style={{ color: dangerText }}>
           {error}
         </ThemedText>
       ) : null}
@@ -455,7 +461,7 @@ function SleepEditPanel({
           </ThemedText>
         </Pressable>
         <Pressable onPress={onDelete} hitSlop={8} disabled={busy}>
-          <ThemedText type="link" style={{ color: DANGER_TEXT }}>
+          <ThemedText type="link" style={{ color: dangerText }}>
             {isOpenSleep ? 'Verwerfen' : 'Löschen'}
           </ThemedText>
         </Pressable>
@@ -479,6 +485,7 @@ function TodaySleepRow({
   const time = formatTimeLabel(sleep.occurred_at, sleep.tz);
   const durationLabel = formatDuration(sleepDurationSeconds(sleep, tickingNow));
   const locationLabel = sleep.location ? describeSleepLocation(sleep.location) : null;
+  const { dangerText } = useUiColors();
 
   return (
     <Pressable onPress={onPress}>
@@ -490,7 +497,7 @@ function TodaySleepRow({
           {durationLabel}
           {locationLabel ? ` · ${locationLabel}` : ''}
         </ThemedText>
-        {sleep.needs_review === 1 ? <ThemedText style={{ color: DANGER_TEXT }}> ⚠</ThemedText> : null}
+        {sleep.needs_review === 1 ? <ThemedText style={{ color: dangerText }}> ⚠</ThemedText> : null}
       </ThemedView>
     </Pressable>
   );
@@ -503,7 +510,6 @@ const styles = StyleSheet.create({
   actions: { gap: Spacing.two },
   banner: { gap: Spacing.one, padding: Spacing.three, borderRadius: Spacing.three },
   bannerActions: { flexDirection: 'row', gap: Spacing.four, paddingTop: Spacing.one },
-  warningText: { color: '#ffd54f' },
   panel: { gap: Spacing.two, padding: Spacing.three, borderRadius: Spacing.three },
   panelActions: { flexDirection: 'row', gap: Spacing.four, paddingTop: Spacing.one },
   chipRow: { flexDirection: 'row', gap: Spacing.two },

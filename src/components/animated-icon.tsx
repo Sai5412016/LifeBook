@@ -168,7 +168,10 @@ const styles = StyleSheet.create({
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
+    // Matches the native splash screen's background (app.json's
+    // expo-splash-screen config) so this JS-rendered overlay can't flash a
+    // mismatched color between the native splash hiding and this fading out.
+    backgroundColor: '#FAF3E3',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,

@@ -2,7 +2,7 @@ import { Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
-import { ACCENT, CHIP_BORDER } from './colors';
+import { useUiColors } from './colors';
 
 export type ChipProps = {
   label: string;
@@ -13,11 +13,14 @@ export type ChipProps = {
 };
 
 /** A selectable pill for a small, fixed set of choices — bottle kind, diaper consistency/color, … */
-export function Chip({ label, selected, onPress, color = ACCENT }: ChipProps) {
+export function Chip({ label, selected, onPress, color }: ChipProps) {
+  const { accent, chipBorder } = useUiColors();
+  const fill = color ?? accent;
+
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.chip, selected && { backgroundColor: color, borderColor: color }]}>
+      style={[styles.chip, { borderColor: chipBorder }, selected && { backgroundColor: fill, borderColor: fill }]}>
       <ThemedText style={selected ? styles.labelSelected : styles.label}>{label}</ThemedText>
     </Pressable>
   );
@@ -29,7 +32,6 @@ const styles = StyleSheet.create({
     minHeight: 56,
     borderRadius: Spacing.two,
     borderWidth: 2,
-    borderColor: CHIP_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },

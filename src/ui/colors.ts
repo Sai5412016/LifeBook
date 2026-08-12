@@ -1,14 +1,41 @@
 /**
- * Fixed accent colors for the "Heute" screen's tracking sections (Füttern,
- * Wickeln, …). Deliberately NOT theme-adaptive like `constants/theme`'s
- * `Colors` — a warning banner needs to read as a warning in both light and
- * dark mode, not shift with the OS theme.
+ * Non-surface theme colors — brand accent and status (warning/danger)
+ * colors — for the "Heute" screen's tracking sections and other places that
+ * need a color rather than a `ThemedView`/`ThemedText` surface.
+ *
+ * A hook, not flat constants: `warningBackground`/`dangerBackground` (and
+ * their text pairs) DO differ between light and dark (see
+ * `constants/themes/oktopus.ts`'s doc comment), so resolving them requires
+ * knowing the current color scheme, the same way `useTheme()` does.
  */
-export const ACCENT = '#3c87f7';
-export const AMBER = '#d9822b';
-export const GREEN = '#3ba55d';
-export const WARNING_BG = '#3a2c10';
-export const WARNING_TEXT = '#ffd54f';
-export const DANGER_BG = '#3a1414';
-export const DANGER_TEXT = '#ff8a80';
-export const CHIP_BORDER = '#60646C';
+
+import { useTheme } from '@/hooks/use-theme';
+
+export { withAlpha } from './color-utils';
+
+export type UiColors = {
+  accent: string;
+  accentPressed: string;
+  amber: string;
+  green: string;
+  warningBg: string;
+  warningText: string;
+  dangerBg: string;
+  dangerText: string;
+  chipBorder: string;
+};
+
+export function useUiColors(): UiColors {
+  const theme = useTheme();
+  return {
+    accent: theme.accent,
+    accentPressed: theme.accentPressed,
+    amber: theme.amber,
+    green: theme.green,
+    warningBg: theme.warningBackground,
+    warningText: theme.warningText,
+    dangerBg: theme.dangerBackground,
+    dangerText: theme.dangerText,
+    chipBorder: theme.chipBorder,
+  };
+}

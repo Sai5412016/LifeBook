@@ -110,7 +110,7 @@ export default function HouseholdOnboardingScreen() {
             />
 
             {error ? (
-              <ThemedText type="small" style={styles.error}>
+              <ThemedText type="small" themeColor="dangerText">
                 {error}
               </ThemedText>
             ) : null}
@@ -138,5 +138,4 @@ const styles = StyleSheet.create({
   title: { textAlign: 'center' },
   subtitle: { textAlign: 'center' },
   form: { gap: Spacing.three, marginTop: Spacing.three },
-  error: { color: '#e0524c' },
 });

@@ -2,6 +2,7 @@ import { ActivityIndicator, Pressable, StyleSheet, type PressableProps } from 'r
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { useUiColors } from './colors';
 
 type ButtonVariant = 'primary' | 'secondary';
 
@@ -12,9 +13,8 @@ export type ButtonProps = Omit<PressableProps, 'style'> & {
   loading?: boolean;
 };
 
-const ACCENT = '#3c87f7';
-
 export function Button({ label, variant = 'primary', loading = false, disabled, ...rest }: ButtonProps) {
+  const { accent } = useUiColors();
   const isDisabled = disabled || loading;
 
   return (
@@ -24,15 +24,19 @@ export function Button({ label, variant = 'primary', loading = false, disabled, 
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.base,
-        variant === 'primary' ? styles.primary : styles.secondary,
+        variant === 'primary'
+          ? { backgroundColor: accent }
+          : { backgroundColor: 'transparent', borderWidth: 1, borderColor: accent },
         isDisabled && styles.disabled,
         pressed && !isDisabled && styles.pressed,
       ]}
       {...rest}>
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#ffffff' : ACCENT} />
+        <ActivityIndicator color={variant === 'primary' ? '#ffffff' : accent} />
       ) : (
-        <ThemedText type="smallBold" style={variant === 'primary' ? styles.primaryLabel : styles.secondaryLabel}>
+        <ThemedText
+          type="smallBold"
+          style={variant === 'primary' ? styles.primaryLabel : { color: accent }}>
           {label}
         </ThemedText>
       )}
@@ -48,14 +52,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.four,
   },
-  primary: {
-    backgroundColor: ACCENT,
-  },
-  secondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: ACCENT,
-  },
   disabled: {
     opacity: 0.5,
   },
@@ -64,8 +60,5 @@ const styles = StyleSheet.create({
   },
   primaryLabel: {
     color: '#ffffff',
-  },
-  secondaryLabel: {
-    color: ACCENT,
   },
 });

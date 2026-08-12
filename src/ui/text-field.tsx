@@ -29,14 +29,14 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
           {
             color: theme.text,
             backgroundColor: theme.backgroundElement,
-            borderColor: errorText ? '#e0524c' : 'transparent',
+            borderColor: errorText ? theme.dangerText : 'transparent',
           },
           style,
         ]}
         {...rest}
       />
       {errorText ? (
-        <ThemedText type="small" style={styles.error}>
+        <ThemedText type="small" style={{ color: theme.dangerText }}>
           {errorText}
         </ThemedText>
       ) : null}
@@ -54,8 +54,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
     fontSize: 16,
-  },
-  error: {
-    color: '#e0524c',
   },
 });

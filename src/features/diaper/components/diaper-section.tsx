@@ -18,7 +18,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
-import { ACCENT, AMBER, BigButton, Chip, DANGER_TEXT, GREEN, TextField } from '@/ui';
+import { BigButton, Chip, TextField, useUiColors } from '@/ui';
 
 import { editDiaper, logDiaper, softDeleteDiaper, useDiapersOfDay } from '../repository';
 import type { DiaperEditInput } from '../repository';
@@ -43,6 +43,7 @@ export type DiaperSectionProps = {
 
 export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
   const db = usePowerSync();
+  const { accent, amber, green } = useUiColors();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
   const { diapers: todayDiapers } = useDiapersOfDay(child?.childId, todayLocalDate);
 
@@ -130,9 +131,9 @@ export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
   return (
     <View style={styles.section}>
       <View style={styles.actions}>
-        <BigButton label="Nass" color={ACCENT} onPress={() => handleLog('wet')} disabled={busy || !child} />
-        <BigButton label="Stuhl" color={AMBER} onPress={() => handleLog('dirty')} disabled={busy || !child} />
-        <BigButton label="Beides" color={GREEN} onPress={() => handleLog('both')} disabled={busy || !child} />
+        <BigButton label="Nass" color={accent} onPress={() => handleLog('wet')} disabled={busy || !child} />
+        <BigButton label="Stuhl" color={amber} onPress={() => handleLog('dirty')} disabled={busy || !child} />
+        <BigButton label="Beides" color={green} onPress={() => handleLog('both')} disabled={busy || !child} />
       </View>
 
       {detailsPromptId ? (
@@ -189,6 +190,8 @@ function DiaperDetailFields({
   leaked: boolean;
   onLeakedChange: (value: boolean) => void;
 }) {
+  const { dangerText } = useUiColors();
+
   return (
     <>
       <ThemedText type="small" themeColor="textSecondary">
@@ -230,7 +233,7 @@ function DiaperDetailFields({
       </View>
 
       <View style={styles.chipRow}>
-        <Chip label="Ausgelaufen" selected={leaked} onPress={() => onLeakedChange(!leaked)} color={DANGER_TEXT} />
+        <Chip label="Ausgelaufen" selected={leaked} onPress={() => onLeakedChange(!leaked)} color={dangerText} />
       </View>
     </>
   );
@@ -302,6 +305,7 @@ function DiaperEditPanel({
   const [color, setColor] = useState<DiaperColor | null>(diaper.color);
   const [leaked, setLeaked] = useState(diaper.leaked === 1);
   const [error, setError] = useState<string | null>(null);
+  const { dangerText } = useUiColors();
 
   const handleSave = () => {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
@@ -344,7 +348,7 @@ function DiaperEditPanel({
       />
 
       {error ? (
-        <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+        <ThemedText type="small" style={{ color: dangerText }}>
           {error}
         </ThemedText>
       ) : null}
@@ -356,7 +360,7 @@ function DiaperEditPanel({
           </ThemedText>
         </Pressable>
         <Pressable onPress={onDelete} hitSlop={8} disabled={busy}>
-          <ThemedText type="link" style={{ color: DANGER_TEXT }}>
+          <ThemedText type="link" style={{ color: dangerText }}>
             Löschen
           </ThemedText>
         </Pressable>
@@ -371,6 +375,7 @@ function DiaperEditPanel({
 function DiaperRowItem({ diaper, onPress }: { diaper: DiaperRow; onPress: () => void }) {
   const time = formatTimeLabel(diaper.occurred_at, diaper.tz);
   const kindLabel = describeDiaperKind(diaper.kind);
+  const { dangerText } = useUiColors();
 
   return (
     <Pressable onPress={onPress}>
@@ -382,7 +387,7 @@ function DiaperRowItem({ diaper, onPress }: { diaper: DiaperRow; onPress: () => 
           {kindLabel}
         </ThemedText>
         {diaper.leaked === 1 ? (
-          <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+          <ThemedText type="small" style={{ color: dangerText }}>
             ausgelaufen
           </ThemedText>
         ) : null}

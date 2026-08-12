@@ -62,7 +62,7 @@ function SyncStatusRow() {
         {connectionLabel} · zuletzt: {lastSynced}
       </ThemedText>
       {errorMessage ? (
-        <ThemedText type="small" style={styles.error}>
+        <ThemedText type="small" themeColor="dangerText">
           {errorMessage}
         </ThemedText>
       ) : null}
@@ -223,5 +223,4 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
     borderRadius: Spacing.three,
   },
-  error: { color: '#e0524c' },
 });

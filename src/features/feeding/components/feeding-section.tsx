@@ -52,7 +52,7 @@ import {
   isRunaway,
 } from '@/features/feeding/timer';
 import type { BottleKind, FeedRow, FeedSide } from '@/features/feeding/types';
-import { ACCENT, AMBER, BigButton, Chip, DANGER_BG, DANGER_TEXT, GREEN, TextField, WARNING_BG } from '@/ui';
+import { BigButton, Chip, TextField, useUiColors } from '@/ui';
 
 export type FeedingSectionProps = {
   child: ActiveChild | null;
@@ -63,6 +63,7 @@ export type FeedingSectionProps = {
 
 export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectionProps) {
   const db = usePowerSync();
+  const { accent, amber, green } = useUiColors();
 
   // Reactive conflict resolution: a second concurrently running timer that
   // arrived via sync is resolved here, not only when a timer is started.
@@ -285,35 +286,35 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
         <View style={styles.actions}>
           <BigButton
             label="Seite wechseln"
-            color={ACCENT}
+            color={accent}
             onPress={handleSwitchSide}
             disabled={busy || !isRunning}
           />
           <BigButton
             label={isRunning ? 'Pause' : 'Weiter'}
-            color={AMBER}
+            color={amber}
             onPress={handlePauseResume}
             disabled={busy}
           />
-          <BigButton label="Beenden" color={GREEN} onPress={handleEndFeed} disabled={busy} />
+          <BigButton label="Beenden" color={green} onPress={handleEndFeed} disabled={busy} />
         </View>
       ) : (
         <View style={styles.actions}>
           <BigButton
             label="Stillen links"
-            color={ACCENT}
+            color={accent}
             onPress={() => handleStart('left')}
             disabled={busy || !child}
           />
           <BigButton
             label="Stillen rechts"
-            color={ACCENT}
+            color={accent}
             onPress={() => handleStart('right')}
             disabled={busy || !child}
           />
           <BigButton
             label="Fläschchen"
-            color={ACCENT}
+            color={accent}
             variant="secondary"
             onPress={() => {
               setBottleFormOpen(true);
@@ -367,9 +368,11 @@ function ReviewBanner({
   onOpen: () => void;
   onAcknowledge: () => void;
 }) {
+  const { warningBg, warningText } = useUiColors();
+
   return (
-    <ThemedView style={[styles.banner, { backgroundColor: WARNING_BG }]}>
-      <ThemedText type="smallBold" style={styles.warningText}>
+    <ThemedView style={[styles.banner, { backgroundColor: warningBg }]}>
+      <ThemedText type="smallBold" style={{ color: warningText }}>
         {count === 1
           ? 'Zwei Timer liefen gleichzeitig — bitte prüfen'
           : `${count} Fütterungen mit gleichzeitig laufenden Timern — bitte prüfen`}
@@ -442,9 +445,11 @@ function ReviewCorrectionPanel({
 }
 
 function RunawayBanner({ onEnd, onDismiss }: { onEnd: () => void; onDismiss: () => void }) {
+  const { dangerBg, dangerText } = useUiColors();
+
   return (
-    <ThemedView style={[styles.banner, { backgroundColor: DANGER_BG }]}>
-      <ThemedText type="smallBold" style={{ color: DANGER_TEXT }}>
+    <ThemedView style={[styles.banner, { backgroundColor: dangerBg }]}>
+      <ThemedText type="smallBold" style={{ color: dangerText }}>
         Läuft schon länger als 3 Stunden — läuft der Timer noch?
       </ThemedText>
       <View style={styles.bannerActions}>
@@ -473,6 +478,7 @@ function BottleForm({
   const [amount, setAmount] = useState('');
   const [kind, setKind] = useState<BottleKind | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { accent, dangerText } = useUiColors();
 
   const handleSave = () => {
     const amountMl = Number(amount);
@@ -502,13 +508,13 @@ function BottleForm({
         <Chip label="Nahrung" selected={kind === 'formula'} onPress={() => setKind('formula')} />
       </View>
       {error ? (
-        <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+        <ThemedText type="small" style={{ color: dangerText }}>
           {error}
         </ThemedText>
       ) : null}
       <View style={styles.bottleFormActions}>
-        <BigButton label="Abbrechen" color={ACCENT} variant="secondary" onPress={onCancel} disabled={busy} />
-        <BigButton label="Speichern" color={ACCENT} onPress={handleSave} disabled={busy} />
+        <BigButton label="Abbrechen" color={accent} variant="secondary" onPress={onCancel} disabled={busy} />
+        <BigButton label="Speichern" color={accent} onPress={handleSave} disabled={busy} />
       </View>
     </ThemedView>
   );
@@ -545,6 +551,7 @@ function FeedEditPanel({
   const [amount, setAmount] = useState(feed.amount_ml ? String(feed.amount_ml) : '');
   const [kind, setKind] = useState<BottleKind>(feed.feed_type === 'bottle_formula' ? 'formula' : 'breastmilk');
   const [error, setError] = useState<string | null>(null);
+  const { dangerText } = useUiColors();
 
   const handleSave = () => {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
@@ -610,7 +617,7 @@ function FeedEditPanel({
       )}
 
       {error ? (
-        <ThemedText type="small" style={{ color: DANGER_TEXT }}>
+        <ThemedText type="small" style={{ color: dangerText }}>
           {error}
         </ThemedText>
       ) : null}
@@ -622,7 +629,7 @@ function FeedEditPanel({
           </ThemedText>
         </Pressable>
         <Pressable onPress={onDelete} hitSlop={8} disabled={busy}>
-          <ThemedText type="link" style={{ color: DANGER_TEXT }}>
+          <ThemedText type="link" style={{ color: dangerText }}>
             {isOpenFeed ? 'Verwerfen' : 'Löschen'}
           </ThemedText>
         </Pressable>
@@ -649,6 +656,7 @@ function TodayFeedRow({
     feed.is_running === 1
       ? formatDuration(elapsedSeconds(feed, tickingNow).left + elapsedSeconds(feed, tickingNow).right)
       : describeFeedAmount(feed);
+  const { amber } = useUiColors();
 
   return (
     <Pressable onPress={onPress}>
@@ -662,7 +670,7 @@ function TodayFeedRow({
         <ThemedText type="small" themeColor="textSecondary">
           {amountLabel}
         </ThemedText>
-        {feed.needs_review === 1 ? <ThemedText style={{ color: AMBER }}> ⚠</ThemedText> : null}
+        {feed.needs_review === 1 ? <ThemedText style={{ color: amber }}> ⚠</ThemedText> : null}
       </ThemedView>
     </Pressable>
   );
@@ -675,7 +683,6 @@ const styles = StyleSheet.create({
   actions: { gap: Spacing.two },
   banner: { gap: Spacing.one, padding: Spacing.three, borderRadius: Spacing.three },
   bannerActions: { flexDirection: 'row', gap: Spacing.four, paddingTop: Spacing.one },
-  warningText: { color: '#ffd54f' },
   correctionPanel: { gap: Spacing.two, padding: Spacing.three, borderRadius: Spacing.three },
   correctionRow: { flexDirection: 'row', gap: Spacing.two },
   correctionField: { flex: 1 },

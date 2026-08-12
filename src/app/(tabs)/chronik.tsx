@@ -47,7 +47,7 @@ import {
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { removeStoredObjects, runUploadQueue } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
-import { ACCENT, BigButton, Button, DANGER_TEXT } from '@/ui';
+import { BigButton, Button, useUiColors, withAlpha } from '@/ui';
 
 const COLUMNS = 3;
 const GRID_GAP = Spacing.half;
@@ -60,6 +60,7 @@ export default function ChronikScreen() {
   const pendingCount = usePendingUploadCount();
   const { width } = useWindowDimensions();
   const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
+  const { accent, dangerText } = useUiColors();
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -349,14 +350,14 @@ export default function ChronikScreen() {
           <ThemedView style={styles.selectionBar}>
             <BigButton
               label="Teilen"
-              color={ACCENT}
+              color={accent}
               variant="secondary"
               onPress={handleShareSelected}
               disabled={selectedPhotos.length === 0 || busy || shareProgress !== null}
             />
             <BigButton
               label="Löschen"
-              color={DANGER_TEXT}
+              color={dangerText}
               variant="secondary"
               onPress={handleDeleteSelected}
               disabled={selectedPhotos.length === 0 || busy}
@@ -388,6 +389,7 @@ function PhotoTile({
   // Local file first: it exists until the original is safely uploaded, and it
   // needs neither network nor a signed URL.
   const uri = photo.local_uri ?? signedUrl;
+  const { accent } = useUiColors();
 
   return (
     <Pressable onPress={onPress} onLongPress={onLongPress}>
@@ -401,8 +403,8 @@ function PhotoTile({
           />
         ) : null}
         {selectionMode ? (
-          <View style={[styles.selectionOverlay, selected && styles.selectionOverlaySelected]}>
-            <View style={[styles.selectionCheck, selected && styles.selectionCheckSelected]}>
+          <View style={[styles.selectionOverlay, selected && { backgroundColor: withAlpha(accent, 0.35) }]}>
+            <View style={[styles.selectionCheck, selected && { backgroundColor: accent, borderColor: accent }]}>
               {selected ? <ThemedText style={styles.selectionCheckMark}>✓</ThemedText> : null}
             </View>
           </View>
@@ -468,7 +470,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     padding: Spacing.one,
   },
-  selectionOverlaySelected: { backgroundColor: 'rgba(60, 135, 247, 0.35)' },
   selectionCheck: {
     width: 24,
     height: 24,
@@ -479,7 +480,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.25)',
   },
-  selectionCheckSelected: { backgroundColor: ACCENT, borderColor: ACCENT },
   selectionCheckMark: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   selectionBar: { flexDirection: 'row', gap: Spacing.two, paddingTop: Spacing.two, paddingBottom: Spacing.two },
   empty: { paddingTop: Spacing.five, gap: Spacing.two, alignItems: 'center' },

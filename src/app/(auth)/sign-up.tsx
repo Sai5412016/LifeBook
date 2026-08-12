@@ -103,12 +103,12 @@ export default function SignUpScreen() {
             />
 
             {error ? (
-              <ThemedText type="small" style={styles.error}>
+              <ThemedText type="small" themeColor="dangerText">
                 {error}
               </ThemedText>
             ) : null}
             {info ? (
-              <ThemedText type="small" style={styles.info}>
+              <ThemedText type="small" themeColor="green">
                 {info}
               </ThemedText>
             ) : null}
@@ -140,7 +140,5 @@ const styles = StyleSheet.create({
   title: { textAlign: 'center' },
   subtitle: { textAlign: 'center' },
   form: { gap: Spacing.three, marginTop: Spacing.three },
-  error: { color: '#e0524c' },
-  info: { color: '#2f9e58' },
   switchLink: { alignSelf: 'center', marginTop: Spacing.two },
 });
