@@ -85,7 +85,33 @@ ist. Ohne diesen Schritt zeigen Datenbankeinträge irgendwann ins Leere.
 Updates nicht mehr an alte Installationen. Nach jedem neuen nativen Modul ist ein
 neuer Build zwingend.
 
-### 6. Expo-Pakete niemals mit `npm install` und geratener Version
+### 6. Neue synchronisierte Tabellen brauchen REPLICA IDENTITY FULL
+
+Am 12.08.2026 gegen die Live-Datenbank festgestellt: Die Tabelle `people`
+wurde ohne `REPLICA IDENTITY FULL` angelegt und war damit die einzige der
+20 replizierten Tabellen mit dem Standardwert `DEFAULT`.
+
+Bei `DEFAULT` protokolliert Postgres bei UPDATE und DELETE nur den
+Primärschlüssel. PowerSync verteilt Zeilen aber anhand von `household_id`
+auf Buckets. Fehlt die im Protokoll, kann PowerSync bei einer Löschung
+nicht bestimmen, welcher Bucket betroffen ist — die Löschung erreicht
+kein Gerät. Ergebnis: Die Zeile verschwindet auf einem Handy und bleibt
+auf dem anderen für immer stehen.
+
+Weder Typprüfung noch Tests fangen das ab, weil es keine Eigenschaft des
+Codes ist.
+
+→ Jede Migration, die eine neue synchronisierte Tabelle anlegt, MUSS
+enden mit:
+```sql
+ALTER TABLE public.<tabelle> REPLICA IDENTITY FULL;
+```
+→ Die Tabelle muss außerdem in die Publikation `powersync` aufgenommen
+und die Zeile in `sync-rules.yaml` ergänzt werden. Drei Schritte, nicht
+einer — und die Sync-Regeln müssen zusätzlich von Hand in der
+PowerSync-Konsole freigegeben werden.
+
+### 7. Expo-Pakete niemals mit `npm install` und geratener Version
 
 Beobachteter Absturz (2026-08-10): `expo-image-picker` stand auf `~17.0.0` (SDK-54-
 Reihe), während jedes andere Expo-Paket auf der 57er-Reihe stand. Ergebnis:
@@ -108,7 +134,7 @@ gesperrt — dann `EXPO_OFFLINE=1 npx expo install <paket>` verwenden, das
 greift auf die mit dem Paket `expo` ausgelieferte
 `expo/bundledNativeModules.json` zurück statt auf den Netzwerkaufruf.
 
-### 7. Expo-Plugins von Drittanbietern brechen `expo config`, nicht erst den Build
+### 8. Expo-Plugins von Drittanbietern brechen `expo config`, nicht erst den Build
 
 Beobachtet (2026-08-11) beim Plugin von `react-native-share`: `eas build` brach
 sofort mit „expo config --json exited with non-zero code: 1" ab — nach der
@@ -125,7 +151,7 @@ Zwei unabhängige Ursachen, beide im selben Drittanbieter-Plugin:
    properties of undefined (reading 'android')`.
 
 → Fehlende Peer-Abhängigkeit mit `npx expo install <paket>` nachrüsten (siehe
-Fallstrick 6). Plugin-Eintrag als `["<plugin>", {}]` schreiben, nicht als reine
+Fallstrick 7). Plugin-Eintrag als `["<plugin>", {}]` schreiben, nicht als reine
 Zeichenkette — auch ein leeres Optionsobjekt reicht, damit `props` definiert
 ist. Für `react-native-share` speziell: `android` in den Optionen ist nur eine
 Liste von Ziel-Apps für den Manifest-Abschnitt `queries` (z. B. um gezielt
@@ -172,7 +198,7 @@ Datenbank prüfen, nicht nur nachdenken — genau das hat Fallstrick 1 aufgedeck
 Bei jeder Änderung an `app.json` oder an der Plugin-Liste zusätzlich
 `npx expo config --json` ausführen — muss ohne Fehler durchlaufen und eine
 lesbare Konfiguration ausgeben. Das prüft in Sekunden denselben Schritt, an
-dem `eas build` sonst erst nach der Build-Warteschlange scheitert (Fallstrick 7).
+dem `eas build` sonst erst nach der Build-Warteschlange scheitert (Fallstrick 8).
 
 ## Berichtsformat — am Ende JEDER Aufgabe ausgeben
 
