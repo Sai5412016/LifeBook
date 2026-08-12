@@ -20,9 +20,12 @@ import { connectPowerSync } from '@/core/db';
 import {
   canRequestPushPermission,
   describePushPermissionStatus,
+  describeTokenPresence,
   getPushPermissionStatus,
+  hasPushTokenRegistered,
   registerForPushNotifications,
   unregisterPushToken,
+  usePushDiagnostics,
   type PushPermissionStatus,
 } from '@/core/notifications';
 import { supabase } from '@/core/supabase';
@@ -100,11 +103,19 @@ function PhotoStatusRow() {
  * Reads the OS permission directly rather than any stored app state, so it
  * always reflects reality even if the parent changed it in the system
  * settings since the app last asked.
+ *
+ * "Schlüssel vorhanden" starts from a live database read (a token from an
+ * earlier app session is still real even if nothing ran this session), then
+ * switches to whatever this session's own attempt just found — the more
+ * current of the two. "Letzter Fehler" is diagnostics-store-only by nature:
+ * there is nothing to read from the database for a failure that left no row.
  */
 function NotificationStatusRow() {
   const { session } = useAuth();
   const [status, setStatus] = useState<PushPermissionStatus | null>(null);
   const [requesting, setRequesting] = useState(false);
+  const [dbTokenPresent, setDbTokenPresent] = useState<boolean | null>(null);
+  const diagnostics = usePushDiagnostics();
 
   const refreshStatus = useCallback(() => {
     getPushPermissionStatus().then(setStatus);
@@ -113,6 +124,18 @@ function NotificationStatusRow() {
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    hasPushTokenRegistered(session.user.id).then(({ present, error }) => {
+      setDbTokenPresent(present);
+      if (error) {
+        console.error('[LifeBook] Push-Token-Prüfung fehlgeschlagen', error);
+      }
+    });
+  }, [session]);
 
   if (!session) {
     return null;
@@ -125,15 +148,26 @@ function NotificationStatusRow() {
     } finally {
       setRequesting(false);
       refreshStatus();
+      hasPushTokenRegistered(session.user.id).then(({ present }) => setDbTokenPresent(present));
     }
   };
+
+  const tokenPresent = diagnostics.tokenPresent ?? dbTokenPresent;
 
   return (
     <ThemedView type="backgroundElement" style={styles.card}>
       <ThemedText type="smallBold">Benachrichtigungen</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
-        {status ? describePushPermissionStatus(status) : 'Wird geprüft …'}
+        Berechtigung: {status ? describePushPermissionStatus(status) : 'Wird geprüft …'}
       </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Push-Schlüssel: {describeTokenPresence(tokenPresent)}
+      </ThemedText>
+      {diagnostics.lastError ? (
+        <ThemedText type="small" themeColor="dangerText">
+          Letzter Fehler: {diagnostics.lastError}
+        </ThemedText>
+      ) : null}
       {status && canRequestPushPermission(status) ? (
         <Pressable onPress={handleRequest} disabled={requesting} hitSlop={8}>
           <ThemedText type="linkPrimary">{requesting ? '…' : 'Berechtigung erneut anfragen'}</ThemedText>

@@ -75,6 +75,12 @@ function buildAppSchema() {
     deleted_at: column.text,
   });
 
+  // 2026-08-12: birth_head_mm was named birth_head_circumference_mm here
+  // before the Postgres migration landed under the shorter name — renamed to
+  // match (PowerSync's `SELECT *` sync rule syncs by literal column name; a
+  // mismatch would have meant this column silently never received data).
+  // birth_place is new. birth_weight_g / birth_length_mm / avatar_photo_id
+  // already matched and needed no change.
   const children = new Table({
     household_id: column.text,
     first_name: column.text,
@@ -82,7 +88,8 @@ function buildAppSchema() {
     birth_tz: column.text, // IANA, for exact age calculation
     birth_weight_g: column.integer,
     birth_length_mm: column.integer,
-    birth_head_circumference_mm: column.integer,
+    birth_head_mm: column.integer,
+    birth_place: column.text,
     avatar_photo_id: column.text,
     sort_index: column.integer,
     created_at: column.text,

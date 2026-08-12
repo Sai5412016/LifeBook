@@ -121,17 +121,16 @@ describe('resolveFullscreenUri', () => {
 });
 
 describe('groupPhotosByDay', () => {
-  const photo = (local_date: string, occurred_at: string, age_days: number | null = 0) => ({
+  const photo = (local_date: string, occurred_at: string) => ({
     local_date,
     occurred_at,
-    age_days,
   });
 
   it('groups by local_date, newest day first', () => {
     const sections = groupPhotosByDay([
-      photo('2026-08-05', '2026-08-05T10:00:00Z', 0),
-      photo('2026-08-07', '2026-08-07T10:00:00Z', 2),
-      photo('2026-08-05', '2026-08-05T12:00:00Z', 0),
+      photo('2026-08-05', '2026-08-05T10:00:00Z'),
+      photo('2026-08-07', '2026-08-07T10:00:00Z'),
+      photo('2026-08-05', '2026-08-05T12:00:00Z'),
     ]);
 
     expect(sections.map((s) => s.localDate)).toEqual(['2026-08-07', '2026-08-05']);
@@ -148,20 +147,6 @@ describe('groupPhotosByDay', () => {
       '2026-08-05T20:00:00Z',
       '2026-08-05T08:00:00Z',
     ]);
-  });
-
-  it('takes the age from the first photo of the day that has one', () => {
-    const sections = groupPhotosByDay([
-      photo('2026-08-09', '2026-08-09T08:00:00Z', null),
-      photo('2026-08-09', '2026-08-09T09:00:00Z', 4),
-    ]);
-
-    expect(sections[0].ageDays).toBe(4);
-  });
-
-  it('reports a null age when no photo of the day has one', () => {
-    const sections = groupPhotosByDay([photo('2026-08-09', '2026-08-09T08:00:00Z', null)]);
-    expect(sections[0].ageDays).toBeNull();
   });
 
   it('returns nothing for an empty album', () => {

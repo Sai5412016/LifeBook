@@ -4,6 +4,9 @@ import {
   buildNotifyHouseholdRequest,
   canRequestPushPermission,
   describePushPermissionStatus,
+  describeSupabaseError,
+  describeTokenPresence,
+  describeUnknownError,
   shouldNotifyAfterImport,
 } from './logic';
 
@@ -52,5 +55,42 @@ describe('buildNotifyHouseholdRequest', () => {
       kind: 'photos',
       count: 3,
     });
+  });
+});
+
+describe('describeTokenPresence', () => {
+  it('describes true, false and null', () => {
+    expect(describeTokenPresence(true)).toBe('Vorhanden');
+    expect(describeTokenPresence(false)).toBe('Fehlt');
+    expect(describeTokenPresence(null)).toBe('Noch nicht geprüft');
+  });
+});
+
+describe('describeSupabaseError', () => {
+  it('appends the Postgres error code when present, e.g. an RLS rejection', () => {
+    expect(describeSupabaseError({ message: 'new row violates row-level security policy', code: '42501' })).toBe(
+      'new row violates row-level security policy (Code 42501)',
+    );
+  });
+
+  it('falls back to the bare message when there is no code', () => {
+    expect(describeSupabaseError({ message: 'network request failed' })).toBe('network request failed');
+  });
+
+  it('falls back to the bare message when code is explicitly null', () => {
+    expect(describeSupabaseError({ message: 'network request failed', code: null })).toBe(
+      'network request failed',
+    );
+  });
+});
+
+describe('describeUnknownError', () => {
+  it('uses the message of a real Error', () => {
+    expect(describeUnknownError(new Error('boom'))).toBe('boom');
+  });
+
+  it('stringifies anything else thrown', () => {
+    expect(describeUnknownError('a plain string throw')).toBe('a plain string throw');
+    expect(describeUnknownError(42)).toBe('42');
   });
 });

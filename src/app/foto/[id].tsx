@@ -38,7 +38,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
-import { formatDayLabel } from '@/core/time';
+import { ageInDays, formatDayLabel } from '@/core/time';
+import { useActiveChild } from '@/features/household/repository';
 import { formatAgeLabel, resolveFullscreenUri } from '@/features/photos/identity';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { deleteQuietly } from '@/features/photos/media';
@@ -70,6 +71,7 @@ export default function FotoVollbildScreen() {
   // this single-row query.
   const { photo: initialPhoto, isLoading: initialPhotoLoading } = usePhotoById(id);
   const { photos, isLoading: photosLoading } = usePhotosOfChild(initialPhoto?.child_id);
+  const { child } = useActiveChild();
 
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -233,9 +235,14 @@ export default function FotoVollbildScreen() {
     [width, signedUrls],
   );
 
+  // Computed live from the child's current birth_at/birth_tz, not trusted
+  // from the photo's stored age_days — see
+  // features/photos/identity.ts#groupPhotosByDay's doc comment.
+  const currentPhotoAgeDays = currentPhoto && child ? ageInDays(currentPhoto.occurred_at, child.birthAtUtcIso, child.birthTz) : null;
+
   const headerSubtitle = currentPhoto
     ? [
-        currentPhoto.age_days !== null ? formatAgeLabel(currentPhoto.age_days) : null,
+        currentPhotoAgeDays !== null ? formatAgeLabel(currentPhotoAgeDays) : null,
         formatPositionLabel(currentIndex ?? 0, photos.length),
       ]
         .filter(Boolean)

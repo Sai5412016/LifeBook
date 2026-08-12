@@ -41,6 +41,33 @@ export function shouldNotifyAfterImport(importedCount: number): boolean {
   return importedCount > 0;
 }
 
+/** German label for the settings screen's "Schlüssel vorhanden?" line. */
+export function describeTokenPresence(present: boolean | null): string {
+  if (present === null) {
+    return 'Noch nicht geprüft';
+  }
+  return present ? 'Vorhanden' : 'Fehlt';
+}
+
+/**
+ * Turns a Supabase/Postgrest error into readable, DIAGNOSTIC text — includes
+ * the Postgres error code when present (e.g. "42501" = a row-level-security
+ * rejection, "23505" = a unique-constraint clash), because "letzter Fehler
+ * im Klartext" needs to be specific enough to actually debug, not just
+ * "etwas ist schiefgegangen".
+ */
+export function describeSupabaseError(error: { message: string; code?: string | null }): string {
+  return error.code ? `${error.message} (Code ${error.code})` : error.message;
+}
+
+/** Turns an unknown thrown value into readable text, for a catch block that must never itself throw. */
+export function describeUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
 export type NotifyHouseholdKind = 'photos';
 
 export type NotifyHouseholdRequest = {

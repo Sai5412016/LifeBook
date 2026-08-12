@@ -22,3 +22,24 @@ export type CreateHouseholdResult = {
   householdId: string;
   childId: string;
 };
+
+/**
+ * Everything the child-edit screen can change. Birth date/time are always
+ * supplied together (the form always shows/edits both) and are combined
+ * against the child's EXISTING `birth_tz` — editing the timezone itself is
+ * not part of this screen. `null` for the optional measurements/place/avatar
+ * clears the field; the form always sends its current value for the ones it
+ * doesn't touch, so there is no separate "leave unchanged" sentinel needed.
+ */
+export type ChildEditInput = {
+  firstName: string;
+  /** "YYYY-MM-DD", interpreted in the child's existing `birth_tz`. */
+  birthDate: string;
+  /** "HH:mm", interpreted in the child's existing `birth_tz`. */
+  birthTime: string;
+  birthWeightG: number | null;
+  birthLengthMm: number | null;
+  birthHeadMm: number | null;
+  birthPlace: string | null;
+  avatarPhotoId: string | null;
+};

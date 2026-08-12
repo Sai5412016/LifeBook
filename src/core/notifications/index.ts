@@ -1,17 +1,22 @@
 /**
  * core/notifications — push notification registration and the household
  * "something happened" ping. Device- and network-touching; the decisions
- * behind it (German labels, when to notify, the request shape) are pure
- * logic in ./logic, tested there.
+ * behind it (German labels, when to notify, the request shape, error
+ * formatting) are pure logic in ./logic, tested there.
  *
- * NEVER BLOCKS THE APP
- * ---------------------
+ * NEVER BLOCKS THE APP, BUT NEVER SILENT EITHER
+ * -----------------------------------------------
  * A parent who declines the permission prompt, or a device with no Google
  * Play services, must get a fully working app regardless — LifeBook's core
  * job (offline photo/event tracking) has nothing to do with push. Every
- * exported function here therefore swallows its own errors: it logs and
- * returns rather than throwing, so a caller never needs a try/catch of its
- * own to stay safe.
+ * exported function here therefore swallows its own errors: it never
+ * throws, so a caller never needs a try/catch of its own to stay safe.
+ *
+ * "Swallow" used to mean "console.error and nothing else" — which is
+ * exactly how push_tokens ended up empty on two signed-in devices with no
+ * way to tell why (see 2026-08-12 investigation). Every failure path now
+ * ALSO records itself in ./diagnostics, which the settings screen reads —
+ * still never blocks the start, but no longer invisible either.
  */
 
 import Constants from 'expo-constants';
@@ -21,10 +26,13 @@ import { Platform } from 'react-native';
 
 import { nowUtcIso } from '@/core/time';
 
+import { setPushDiagnostics } from './diagnostics';
 import { supabase } from '../supabase';
 import { ENV } from '../env';
 import {
   buildNotifyHouseholdRequest,
+  describeSupabaseError,
+  describeUnknownError,
   type NotifyHouseholdKind,
   type PushPermissionStatus,
 } from './logic';
@@ -47,8 +55,26 @@ async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
-function resolveProjectId(): string | null {
-  return Constants.expoConfig?.extra?.eas?.projectId ?? null;
+/**
+ * `Constants.expoConfig.extra.eas.projectId` is the documented path
+ * `getExpoPushTokenAsync` needs (app.json → `extra.eas.projectId`, present
+ * and verified in this project). Split into two checks — config missing
+ * entirely vs. present but without the field — because they point at very
+ * different causes (a stripped/misconfigured runtime manifest vs. an
+ * app.json typo) and the diagnostic text should say which.
+ */
+function resolveProjectId(): { projectId: string | null; diagnostic: string | null } {
+  if (!Constants.expoConfig) {
+    return { projectId: null, diagnostic: 'Constants.expoConfig ist leer (Runtime-Manifest fehlt)' };
+  }
+  const projectId = Constants.expoConfig.extra?.eas?.projectId;
+  if (!projectId) {
+    return {
+      projectId: null,
+      diagnostic: 'Keine EAS-Projekt-ID gefunden (app.json → extra.eas.projectId)',
+    };
+  }
+  return { projectId, diagnostic: null };
 }
 
 /** Current permission status, for the settings screen. Never throws — 'undetermined' on any failure. */
@@ -62,8 +88,40 @@ export async function getPushPermissionStatus(): Promise<PushPermissionStatus> {
   }
 }
 
-/** Inserts a push token row, or refreshes `updated_at` if this exact token is already on file for this user. */
-async function upsertPushToken(userId: string, token: string, platform: string): Promise<void> {
+/**
+ * Whether `userId` has at least one push_tokens row on file, read straight
+ * from the database rather than inferred from this session's own attempts —
+ * a token registered in an earlier app session is still "vorhanden" even if
+ * nothing ran this session. Never throws; a read failure is reported back
+ * as a diagnostic string instead, same shape everywhere in this module.
+ */
+export async function hasPushTokenRegistered(
+  userId: string,
+): Promise<{ present: boolean; error: string | null }> {
+  try {
+    const { data, error } = await supabase.from('push_tokens').select('id').eq('user_id', userId).limit(1);
+    if (error) {
+      return { present: false, error: describeSupabaseError(error) };
+    }
+    return { present: (data?.length ?? 0) > 0, error: null };
+  } catch (error) {
+    return { present: false, error: describeUnknownError(error) };
+  }
+}
+
+/**
+ * Inserts a push token row, or refreshes `updated_at` if this exact token is
+ * already on file for this user. Returns a diagnostic string on failure —
+ * the caller (registerForPushNotifications) is what actually surfaces it,
+ * this function stays a plain data operation.
+ *
+ * SELECT-then-INSERT/UPDATE, not `.upsert()`: this project has already hit
+ * an RLS/`ON CONFLICT` interaction bug once (see CLAUDE.md Fallstrick 1) —
+ * `push_tokens`'s "only your own rows" rule doesn't have that exact
+ * bootstrap problem, but the explicit form is what makes a genuine RLS
+ * rejection show up as a plain, attributable INSERT/UPDATE error either way.
+ */
+async function upsertPushToken(userId: string, token: string, platform: string): Promise<string | null> {
   const now = nowUtcIso();
 
   const { data: existing, error: selectError } = await supabase
@@ -74,8 +132,7 @@ async function upsertPushToken(userId: string, token: string, platform: string):
     .maybeSingle();
 
   if (selectError) {
-    console.error('[LifeBook] Push-Token konnte nicht geprüft werden', selectError.message);
-    return;
+    return describeSupabaseError(selectError);
   }
 
   if (existing) {
@@ -83,10 +140,7 @@ async function upsertPushToken(userId: string, token: string, platform: string):
       .from('push_tokens')
       .update({ updated_at: now })
       .eq('id', existing.id);
-    if (updateError) {
-      console.error('[LifeBook] Push-Token konnte nicht aktualisiert werden', updateError.message);
-    }
-    return;
+    return updateError ? describeSupabaseError(updateError) : null;
   }
 
   const { error: insertError } = await supabase.from('push_tokens').insert({
@@ -96,27 +150,26 @@ async function upsertPushToken(userId: string, token: string, platform: string):
     created_at: now,
     updated_at: now,
   });
-  if (insertError) {
-    console.error('[LifeBook] Push-Token konnte nicht gespeichert werden', insertError.message);
-  }
+  return insertError ? describeSupabaseError(insertError) : null;
 }
 
 /**
  * Requests the notification permission (if not already decided) and, once
- * granted, registers this device's Expo push token for `userId`.
+ * granted, registers this device's Expo push token for `userId`. Records
+ * every step in ./diagnostics — see the module doc comment.
  *
  * Called after a successful sign-in/sign-up — NOT at cold start, so a parent
  * is never asked for a permission before they've even reached the app; and
  * again from the settings screen's "Berechtigung erneut anfragen" action.
- *
- * Silent on every failure path (simulator, permission denied, no network,
- * misconfigured project id, …): logged, never thrown — see the module doc
- * comment above.
  */
 export async function registerForPushNotifications(userId: string): Promise<void> {
+  const lastCheckedAt = nowUtcIso();
+  setPushDiagnostics({ lastCheckedAt });
+
   try {
     if (!Device.isDevice) {
       // Simulators/emulators have no push capability — not an error, just nothing to do.
+      setPushDiagnostics({ lastError: 'Simulator/Emulator ohne Push-Fähigkeit', tokenPresent: false });
       return;
     }
 
@@ -127,22 +180,50 @@ export async function registerForPushNotifications(userId: string): Promise<void
       existingStatus === 'granted'
         ? existingStatus
         : (await Notifications.requestPermissionsAsync()).status;
+    setPushDiagnostics({ permissionStatus: finalStatus });
 
     if (finalStatus !== 'granted') {
-      console.log('[LifeBook] Push-Berechtigung nicht erteilt', finalStatus);
+      setPushDiagnostics({ lastError: 'Berechtigung nicht erteilt', tokenPresent: false });
       return;
     }
 
-    const projectId = resolveProjectId();
+    const { projectId, diagnostic: projectIdError } = resolveProjectId();
+    setPushDiagnostics({ projectId });
     if (!projectId) {
-      console.error('[LifeBook] Push-Registrierung: keine EAS projectId gefunden');
+      console.error('[LifeBook] Push-Registrierung:', projectIdError);
+      setPushDiagnostics({ lastError: projectIdError, tokenPresent: false });
       return;
     }
 
-    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-    await upsertPushToken(userId, token, Platform.OS);
+    let token: string;
+    try {
+      const result = await Notifications.getExpoPushTokenAsync({ projectId });
+      token = result.data;
+    } catch (error) {
+      // The single most common real-world cause here: Expo Go (SDK 53+) no
+      // longer supports remote push at all — this throws with a message
+      // naming Expo Go explicitly, which is exactly why it's shown verbatim
+      // rather than replaced with a generic "failed" text.
+      const message = describeUnknownError(error);
+      console.error('[LifeBook] Push-Schlüssel konnte nicht geholt werden', error);
+      setPushDiagnostics({ tokenPresent: false, lastError: `Push-Schlüssel: ${message}` });
+      return;
+    }
+
+    setPushDiagnostics({ tokenPresent: true });
+
+    const writeError = await upsertPushToken(userId, token, Platform.OS);
+    if (writeError) {
+      console.error('[LifeBook] Push-Token konnte nicht gespeichert werden', writeError);
+      setPushDiagnostics({ tokenPresent: false, lastError: `Speichern: ${writeError}` });
+      return;
+    }
+
+    setPushDiagnostics({ lastError: null });
   } catch (error) {
+    const message = describeUnknownError(error);
     console.error('[LifeBook] Push-Registrierung fehlgeschlagen', error);
+    setPushDiagnostics({ lastError: message });
   }
 }
 
@@ -164,7 +245,7 @@ export async function unregisterPushToken(userId: string): Promise<void> {
       return;
     }
 
-    const projectId = resolveProjectId();
+    const { projectId } = resolveProjectId();
     if (!projectId) {
       return;
     }
@@ -173,7 +254,7 @@ export async function unregisterPushToken(userId: string): Promise<void> {
 
     const { error } = await supabase.from('push_tokens').delete().eq('user_id', userId).eq('token', token);
     if (error) {
-      console.error('[LifeBook] Push-Token konnte nicht entfernt werden', error.message);
+      console.error('[LifeBook] Push-Token konnte nicht entfernt werden', describeSupabaseError(error));
     }
   } catch (error) {
     console.error('[LifeBook] Push-Token-Entfernung fehlgeschlagen', error);
@@ -218,9 +299,11 @@ export async function notifyHousehold(
   }
 }
 
+export { usePushDiagnostics, type PushDiagnostics } from './diagnostics';
 export {
   canRequestPushPermission,
   describePushPermissionStatus,
+  describeTokenPresence,
   shouldNotifyAfterImport,
   type PushPermissionStatus,
 } from './logic';

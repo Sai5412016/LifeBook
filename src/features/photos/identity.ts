@@ -169,7 +169,6 @@ export function resolveFullscreenUri(
 type GroupablePhoto = {
   local_date: string;
   occurred_at: string;
-  age_days: number | null;
 };
 
 /**
@@ -177,10 +176,15 @@ type GroupablePhoto = {
  * a day. Grouping uses `local_date` (frozen at insert from the capture timezone),
  * never a recomputed date — so a photo taken at 23:50 stays on that evening even
  * if the family later moves timezones.
+ *
+ * Deliberately carries no age — a section's age-on-that-day is computed live
+ * by the caller from `children.birth_at` (via `core/time#ageInDays`) instead
+ * of trusting any photo's stored `age_days`, so it stays correct even after a
+ * birth date/time correction. See features/household/repository.ts#updateChild.
  */
 export function groupPhotosByDay<T extends GroupablePhoto>(
   rows: readonly T[],
-): { localDate: string; ageDays: number | null; photos: T[] }[] {
+): { localDate: string; photos: T[] }[] {
   const byDate = new Map<string, T[]>();
 
   for (const row of rows) {
@@ -196,7 +200,6 @@ export function groupPhotosByDay<T extends GroupablePhoto>(
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([localDate, photos]) => ({
       localDate,
-      ageDays: photos.find((p) => p.age_days !== null)?.age_days ?? null,
       photos: [...photos].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
     }));
 }

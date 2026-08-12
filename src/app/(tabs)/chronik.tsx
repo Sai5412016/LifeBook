@@ -302,7 +302,10 @@ export default function ChronikScreen() {
         <SectionList
           sections={sections.map((section) => ({
             title: section.localDate,
-            ageDays: section.ageDays,
+            // Computed live from the child's current birth_at/birth_tz, not
+            // trusted from any photo's stored age_days — see
+            // features/photos/identity.ts#groupPhotosByDay's doc comment.
+            ageDays: child ? ageInDays(section.photos[0].occurred_at, child.birthAtUtcIso, child.birthTz) : null,
             data: chunk(section.photos, COLUMNS),
           }))}
           keyExtractor={(row, index) => row[0]?.id ?? String(index)}

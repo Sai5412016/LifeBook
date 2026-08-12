@@ -55,6 +55,15 @@ export type PhotoRow = {
   local_uri: string | null;
   content_hash: string;
   captured_at: string | null;
+  /**
+   * Snapshot of the child's age at import time — frozen, never recomputed
+   * (Spec §7's `local_date` rule). NOT used for display: a birth date/time
+   * correction (see features/household#updateChild) would leave every
+   * existing photo's stored value wrong, and rewriting them all is a
+   * separate, expensive operation. Screens instead compute age live from
+   * `children.birth_at` + the photo's own `occurred_at` — see
+   * repository.ts's doc comment for the reasoning.
+   */
   age_days: number | null;
   width: number | null;
   height: number | null;
@@ -71,8 +80,6 @@ export type PhotoRow = {
 export type PhotoDaySection = {
   /** YYYY-MM-DD in the capture timezone. */
   localDate: string;
-  /** Age of the child on that day, in whole days. Null if birth is unknown. */
-  ageDays: number | null;
   photos: PhotoRow[];
 };
 
