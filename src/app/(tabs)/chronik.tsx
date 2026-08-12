@@ -247,14 +247,29 @@ export default function ChronikScreen() {
               </Pressable>
             </ThemedView>
           ) : (
-            <>
-              <ThemedText type="title">{child ? child.firstName : 'Chronik'}</ThemedText>
-              {todayAge ? (
-                <ThemedText type="small" themeColor="textSecondary">
-                  Heute · {todayAge}
-                </ThemedText>
-              ) : null}
-            </>
+            <View style={styles.titleRow}>
+              <View>
+                <ThemedText type="title">{child ? child.firstName : 'Chronik'}</ThemedText>
+                {todayAge ? (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Heute · {todayAge}
+                  </ThemedText>
+                ) : null}
+              </View>
+              {/*
+                Zweiter Weg zu den Einstellungen, unabhängig vom Zahnrad auf
+                der Startseite (Reiter 1) — siehe src/app/einstellungen.tsx'
+                Dateikopf für den Grund, warum ein einzelner kaputter Knopf
+                den Bildschirm sonst unerreichbar machen kann.
+              */}
+              <Pressable
+                onPress={() => router.push('/einstellungen')}
+                style={styles.settingsButton}
+                hitSlop={12}
+                accessibilityLabel="Einstellungen">
+                <ThemedText style={styles.gearIcon}>⚙</ThemedText>
+              </Pressable>
+            </View>
           )}
         </ThemedView>
 
@@ -432,6 +447,11 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, paddingHorizontal: Spacing.three },
   header: { gap: Spacing.one, paddingTop: Spacing.three },
   selectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Guarantees a >=44x44pt touch target regardless of the glyph's own
+  // rendered box, same as the gear icon on the home screen.
+  settingsButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  gearIcon: { fontSize: 24 },
   actions: { gap: Spacing.two, paddingVertical: Spacing.three },
   message: { paddingHorizontal: Spacing.one, paddingTop: Spacing.two },
   pendingRow: {

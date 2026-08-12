@@ -84,7 +84,11 @@ export default function StartScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.header}>
             <View style={styles.headerSpacer} />
-            <Pressable onPress={() => router.push('/explore')} hitSlop={12} accessibilityLabel="Einstellungen">
+            <Pressable
+              onPress={() => router.push('/einstellungen')}
+              style={styles.settingsButton}
+              hitSlop={12}
+              accessibilityLabel="Einstellungen">
               <ThemedText style={styles.gearIcon}>⚙</ThemedText>
             </Pressable>
           </View>
@@ -230,6 +234,10 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.one,
   },
   headerSpacer: { width: 24 },
+  // Guarantees a >=44x44pt touch target regardless of the glyph's own
+  // rendered box — hitSlop alone would extend touch beyond the view's
+  // layout bounds, but this makes the guarantee explicit either way.
+  settingsButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   gearIcon: { fontSize: 24 },
   avatar: {
     width: '100%',

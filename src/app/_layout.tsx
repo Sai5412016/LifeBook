@@ -123,7 +123,7 @@ function DbAndAuthGate({ children }: { children: ReactNode }) {
  * the endpoint in a tight loop if it fails synchronously.
  *
  * Explicit disconnect on sign-out is handled at the sign-out call site (see
- * (tabs)/explore.tsx AccountRow), not here — documented, not silently skipped.
+ * einstellungen.tsx AccountRow), not here — documented, not silently skipped.
  */
 function PowerSyncConnector({ db }: { db: PowerSyncDatabase }) {
   const { status } = useAuth();

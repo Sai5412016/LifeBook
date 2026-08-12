@@ -5,6 +5,27 @@
  * problems had to be visible during bring-up (bug found 2026-08-08). Now that
  * the home screen is the photo chronology, they live here instead: still one tap
  * away, no longer in the way.
+ *
+ * ROUTE MOVED HERE 2026-08-13 (was src/app/(tabs)/explore.tsx)
+ * ---------------------------------------------------------------
+ * The gear icon on the home screen (and now Chronik too) navigated to
+ * `/explore`, and nothing happened — no crash, no navigation, no error.
+ * Root cause, traced in the installed `expo-router` package itself
+ * (build/layouts/withLayoutContext.js#useSortedScreens): `NativeTabs` is
+ * built with `useOnlyUserDefinedScreens = true`, which means ANY route file
+ * inside a `NativeTabs` layout directory that has no corresponding
+ * `<NativeTabs.Trigger>` is filtered out of that navigator's screens
+ * entirely — not just hidden from the tab bar, genuinely unreachable via
+ * `router.push`, silently. This was true even for a Trigger with an
+ * explicit `hidden` prop (it still lands in `protectedScreens`, which this
+ * code path never re-includes). `explore.tsx` lost its Trigger when
+ * settings left the tab bar (commit 02f8717) and became exactly that: a
+ * file that exists but the tab navigator has never heard of.
+ *
+ * Fix: this screen now lives OUTSIDE the `(tabs)` group, as a plain
+ * root-level stack route — the same pattern `kind/bearbeiten.tsx` and
+ * `menschen/*` already use successfully. A stack screen has no such
+ * Trigger requirement.
  */
 
 import { usePowerSync, useStatus } from '@powersync/react-native';
@@ -14,7 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { connectPowerSync } from '@/core/db';
 import {
@@ -249,7 +270,10 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.three,
     paddingTop: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.four,
+    // No BottomTabInset here anymore: as a root-level stack screen (see the
+    // module doc comment) this covers the tab bar entirely when pushed,
+    // exactly like kind/bearbeiten.tsx and menschen/* already do.
+    paddingBottom: Spacing.five,
   },
   card: {
     gap: Spacing.one,
