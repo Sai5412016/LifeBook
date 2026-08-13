@@ -296,3 +296,86 @@ export function groupPhotosByDay<T extends GroupablePhoto>(
       photos: [...photos].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at)),
     }));
 }
+
+export type MediumBackfillProgress = {
+  /** Photos that already have a medium rendition. */
+  prepared: number;
+  /** Every photo being tracked (the caller's query already excludes deleted ones). */
+  total: number;
+};
+
+/**
+ * Counts how many of the given photos already have a medium rendition.
+ *
+ * Fehler 2, 2026-08-14: a `SUM(CASE WHEN medium_key IS NOT NULL THEN 1 ELSE
+ * 0 END)` computed inside the SQL query showed "107 von 108" on a device
+ * where only 1 photo actually had a medium key — the count and the label
+ * had silently swapped meaning somewhere between the query and the screen.
+ * Counting in plain, testable JS with named fields (`prepared`/`total`,
+ * not two positional numbers a caller could transpose) removes the
+ * opaque SQL expression as a place for that to happen again.
+ */
+export function countMediumBackfillProgress(
+  photos: readonly { medium_key: string | null }[],
+): MediumBackfillProgress {
+  const prepared = photos.reduce((count, photo) => count + (photo.medium_key ? 1 : 0), 0);
+  return { prepared, total: photos.length };
+}
+
+/**
+ * The Einstellungen "Vorbereitet: X von Y" line, or null once there is
+ * nothing left to prepare (no photos at all, or every one already has a
+ * medium rendition) — a progress line permanently stuck at "108 von 108" is
+ * just noise, not information.
+ */
+export function formatMediumBackfillLabel(progress: MediumBackfillProgress): string | null {
+  if (progress.total === 0) {
+    return null;
+  }
+  if (progress.prepared >= progress.total) {
+    return 'Alle Fotos vorbereitet';
+  }
+  return `Vorbereitet: ${progress.prepared} von ${progress.total}`;
+}
+
+/** Split a day's photos into fixed-width rows for the Chronik grid. */
+export function chunkPhotos<T>(items: readonly T[], columns: number): T[][] {
+  const rows: T[][] = [];
+  for (let index = 0; index < items.length; index += columns) {
+    rows.push(items.slice(index, index + columns));
+  }
+  return rows;
+}
+
+export type PhotoGridPosition = {
+  sectionIndex: number;
+  /** Row index within that day's CHUNKED rows (see chunkPhotos), not a raw photo index. */
+  itemIndex: number;
+};
+
+/**
+ * Where a specific photo sits in the Chronik's SectionList — which day
+ * section, and which chunked row within it.
+ *
+ * 2026-08-14 (Fehler 1 follow-up): the fullscreen viewer can be swiped
+ * several photos away from wherever it was opened before "Zurück" is
+ * pressed. Chronik's OWN scroll position stays untouched while the viewer
+ * is open (that's the fix — see app/_layout.tsx's NavigationGate), so on
+ * return it would still show the ORIGINAL tap target, not wherever the
+ * user actually ended up. This is what lets Chronik scroll itself to the
+ * right row instead — see photos/lastViewed.ts for how the viewer reports
+ * that final photo back.
+ */
+export function locatePhotoInSections<T extends { id: string }>(
+  sections: readonly { photos: readonly T[] }[],
+  photoId: string,
+  columns: number,
+): PhotoGridPosition | null {
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+    const photoIndex = sections[sectionIndex].photos.findIndex((photo) => photo.id === photoId);
+    if (photoIndex !== -1) {
+      return { sectionIndex, itemIndex: Math.floor(photoIndex / columns) };
+    }
+  }
+  return null;
+}

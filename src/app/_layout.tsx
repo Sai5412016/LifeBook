@@ -1,6 +1,6 @@
 import { PowerSyncContext, useStatus } from '@powersync/react-native';
 import type { PowerSyncDatabase } from '@powersync/react-native';
-import { DarkTheme, DefaultTheme, Redirect, Slot, ThemeProvider, useSegments } from 'expo-router';
+import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
@@ -203,7 +203,23 @@ function PowerSyncConnector({ db }: { db: PowerSyncDatabase }) {
  *   signedIn, no household yet → (onboarding) group
  *   signedIn, has a household  → (tabs) group
  * Re-evaluated on every navigation via useSegments(); returns <Redirect> instead
- * of <Slot> whenever the current route group doesn't match the required one.
+ * of <Stack> whenever the current route group doesn't match the required one.
+ *
+ * 2026-08-14: was `<Slot />` here, which turned every "own screen on top" route
+ * outside `(tabs)` (foto/[id], kind/bearbeiten, menschen/*, einstellungen) into
+ * a full replacement instead of a push. `Slot`'s underlying navigator only ever
+ * RENDERS the single currently-active route (see expo-router's
+ * views/Navigator.js#SlotNavigator) — it tracks history internally, but never
+ * keeps the previous screen's component tree mounted underneath. Navigating
+ * from Chronik into the fullscreen viewer therefore unmounted the ENTIRE
+ * `(tabs)` navigator (losing every tab's state, not just Chronik's scroll
+ * position), and `router.back()` — even though it correctly popped that
+ * internal history — remounted `(tabs)` from scratch, which always opens on
+ * its own default tab (Startseite), regardless of which tab had been active.
+ * `<Stack>` keeps prior screens mounted underneath a pushed one, which is what
+ * both "back always returns to Startseite" and "Chronik loses its scroll
+ * position" actually needed. `headerShown: false` because every screen here
+ * already renders its own header/chrome — same as (auth)/(onboarding) below.
  */
 function NavigationGate() {
   const { status, session } = useAuth();
@@ -222,7 +238,7 @@ function NavigationGate() {
     if (group !== '(auth)') {
       return <Redirect href="/sign-in" />;
     }
-    return <Slot />;
+    return <Stack screenOptions={{ headerShown: false }} />;
   }
 
   // status === 'signedIn' from here on.
@@ -236,14 +252,14 @@ function NavigationGate() {
     if (group !== '(onboarding)') {
       return <Redirect href="/household" />;
     }
-    return <Slot />;
+    return <Stack screenOptions={{ headerShown: false }} />;
   }
 
   if (group === '(auth)' || group === '(onboarding)') {
     return <Redirect href="/" />;
   }
 
-  return <Slot />;
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
 
 function FullScreenSpinner() {

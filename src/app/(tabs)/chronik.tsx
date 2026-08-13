@@ -14,8 +14,8 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,9 +34,10 @@ import { useAuth } from '@/core/auth/session-store';
 import { ageInDays, formatDayLabel, nowUtcIso } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
-import { formatAgeLabel } from '@/features/photos/identity';
+import { chunkPhotos, formatAgeLabel, locatePhotoInSections } from '@/features/photos/identity';
 import { PickCancelledError, describeImport, importPhotos } from '@/features/photos/import';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
+import { takeLastViewedPhotoId } from '@/features/photos/lastViewed';
 import { deleteQuietly } from '@/features/photos/media';
 import { softDeletePhoto, usePendingUploadCount, usePhotoSections } from '@/features/photos/repository';
 import {
@@ -61,6 +62,7 @@ export default function ChronikScreen() {
   const { width } = useWindowDimensions();
   const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
   const { accent, dangerText } = useUiColors();
+  const sectionListRef = useRef<SectionList<PhotoRow[]>>(null);
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -81,6 +83,32 @@ export default function ChronikScreen() {
   const selectedPhotos = useMemo(
     () => allPhotos.filter((photo) => selectedIds.includes(photo.id)),
     [allPhotos, selectedIds],
+  );
+
+  // Fehler 1, 2026-08-14: on returning from the fullscreen viewer, scroll to
+  // whichever photo was actually last shown there — which, after swiping,
+  // can differ from the one originally tapped (photos/lastViewed.ts). A
+  // no-op whenever the viewer was never opened (nothing recorded) or the
+  // photo since got deleted (locatePhotoInSections returns null).
+  useFocusEffect(
+    useCallback(() => {
+      const photoId = takeLastViewedPhotoId();
+      if (!photoId) {
+        return;
+      }
+      const position = locatePhotoInSections(sections, photoId, COLUMNS);
+      if (!position) {
+        return;
+      }
+      requestAnimationFrame(() => {
+        sectionListRef.current?.scrollToLocation({
+          sectionIndex: position.sectionIndex,
+          itemIndex: position.itemIndex,
+          animated: false,
+          viewPosition: 0.3,
+        });
+      });
+    }, [sections]),
   );
 
   const handleExitSelection = useCallback(() => {
@@ -315,13 +343,17 @@ export default function ChronikScreen() {
         ) : null}
 
         <SectionList
+          ref={sectionListRef}
           sections={sections.map((section) => ({
             title: section.localDate,
             // Computed live from the child's current birth_at/birth_tz, not
             // trusted from any photo's stored age_days — see
             // features/photos/identity.ts#groupPhotosByDay's doc comment.
             ageDays: child ? ageInDays(section.photos[0].occurred_at, child.birthAtUtcIso, child.birthTz) : null,
-            data: chunk(section.photos, COLUMNS),
+            // Same chunking the focus-scroll above locates against
+            // (identity.ts#locatePhotoInSections) — both MUST agree on row
+            // boundaries, hence the shared helper instead of two copies.
+            data: chunkPhotos(section.photos, COLUMNS),
           }))}
           keyExtractor={(row, index) => row[0]?.id ?? String(index)}
           stickySectionHeadersEnabled={false}
@@ -439,14 +471,6 @@ function PhotoTile({
   );
 }
 
-/** Split a day's photos into fixed-width rows for the grid. */
-function chunk<T>(items: T[], size: number): T[][] {
-  const rows: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    rows.push(items.slice(index, index + size));
-  }
-  return rows;
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

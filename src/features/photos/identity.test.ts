@@ -4,12 +4,16 @@ import {
   buildMediumKey,
   buildOriginalKey,
   buildThumbKey,
+  chunkPhotos,
   composeContentHash,
+  countMediumBackfillProgress,
   dedupeByHash,
   extensionForMime,
   formatAgeLabel,
+  formatMediumBackfillLabel,
   groupPhotosByDay,
   isOccurredAtEstimated,
+  locatePhotoInSections,
   resolveFullscreenUri,
   shouldResignUrl,
 } from './identity';
@@ -252,5 +256,100 @@ describe('groupPhotosByDay', () => {
 
   it('returns nothing for an empty album', () => {
     expect(groupPhotosByDay([])).toEqual([]);
+  });
+});
+
+describe('countMediumBackfillProgress', () => {
+  const photo = (medium_key: string | null) => ({ medium_key });
+
+  it('nothing prepared', () => {
+    expect(countMediumBackfillProgress([photo(null), photo(null), photo(null)])).toEqual({
+      prepared: 0,
+      total: 3,
+    });
+  });
+
+  it('everything prepared', () => {
+    expect(countMediumBackfillProgress([photo('a'), photo('b')])).toEqual({
+      prepared: 2,
+      total: 2,
+    });
+  });
+
+  it('somewhere in between', () => {
+    // The exact case from the bug report: 108 photos, 4 with a medium_key.
+    const photos = [
+      ...Array.from({ length: 4 }, () => photo('some-key')),
+      ...Array.from({ length: 104 }, () => photo(null)),
+    ];
+    expect(countMediumBackfillProgress(photos)).toEqual({ prepared: 4, total: 108 });
+  });
+
+  it('an empty album', () => {
+    expect(countMediumBackfillProgress([])).toEqual({ prepared: 0, total: 0 });
+  });
+});
+
+describe('formatMediumBackfillLabel', () => {
+  it('shows nothing prepared out of the total', () => {
+    expect(formatMediumBackfillLabel({ prepared: 0, total: 108 })).toBe('Vorbereitet: 0 von 108');
+  });
+
+  it('shows the in-between count — never a swapped pair', () => {
+    expect(formatMediumBackfillLabel({ prepared: 4, total: 108 })).toBe('Vorbereitet: 4 von 108');
+  });
+
+  it('says everything is done instead of showing "108 von 108"', () => {
+    expect(formatMediumBackfillLabel({ prepared: 108, total: 108 })).toBe('Alle Fotos vorbereitet');
+  });
+
+  it('returns null for an empty album — no line at all', () => {
+    expect(formatMediumBackfillLabel({ prepared: 0, total: 0 })).toBeNull();
+  });
+});
+
+describe('chunkPhotos', () => {
+  it('splits into fixed-width rows', () => {
+    expect(chunkPhotos([1, 2, 3, 4, 5, 6], 3)).toEqual([
+      [1, 2, 3],
+      [4, 5, 6],
+    ]);
+  });
+
+  it('leaves a shorter final row', () => {
+    expect(chunkPhotos([1, 2, 3, 4, 5], 3)).toEqual([[1, 2, 3], [4, 5]]);
+  });
+
+  it('returns nothing for an empty list', () => {
+    expect(chunkPhotos([], 3)).toEqual([]);
+  });
+});
+
+describe('locatePhotoInSections', () => {
+  const photo = (id: string) => ({ id });
+  const sections = [
+    { photos: [photo('a'), photo('b'), photo('c'), photo('d')] },
+    { photos: [photo('e'), photo('f')] },
+  ];
+
+  it('finds a photo in the first row of its section', () => {
+    expect(locatePhotoInSections(sections, 'a', 3)).toEqual({ sectionIndex: 0, itemIndex: 0 });
+  });
+
+  it('finds a photo in a LATER row within its section', () => {
+    // columns=3: a,b,c are row 0, d is row 1.
+    expect(locatePhotoInSections(sections, 'd', 3)).toEqual({ sectionIndex: 0, itemIndex: 1 });
+  });
+
+  it('finds a photo in a later section', () => {
+    expect(locatePhotoInSections(sections, 'f', 3)).toEqual({ sectionIndex: 1, itemIndex: 0 });
+  });
+
+  it('returns null for a photo not in any section (deleted, or a different child)', () => {
+    expect(locatePhotoInSections(sections, 'nope', 3)).toBeNull();
+  });
+
+  it('returns null for an empty list of sections', () => {
+    expect(locatePhotoInSections([], 'a', 3)).toBeNull();
   });
 });

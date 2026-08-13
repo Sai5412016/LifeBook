@@ -22,7 +22,14 @@ import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { newId } from '@/core/db/ids';
 import { ageInDays, applyOccurredAtCorrection, nowUtcIso, toLocalDate } from '@/core/time';
 
-import { buildMediumKey, buildOriginalKey, buildThumbKey, groupPhotosByDay } from './identity';
+import {
+  buildMediumKey,
+  buildOriginalKey,
+  buildThumbKey,
+  countMediumBackfillProgress,
+  groupPhotosByDay,
+  type MediumBackfillProgress,
+} from './identity';
 import type { PhotoCandidate, PhotoDaySection, PhotoRow } from './types';
 
 /** Columns every read selects, so callers always get a complete PhotoRow. */
@@ -340,17 +347,14 @@ export function usePendingUploadCount(): number {
  * "Vorbereitet: 12 von 107" line in Einstellungen — without it there is no
  * way to tell from outside whether the silent background healing
  * (./storage.ts#healMissingMedium) is actually doing anything.
+ *
+ * Counts in JS via identity.ts#countMediumBackfillProgress, not a SQL
+ * aggregate — see that function's own doc comment for why (Fehler 2,
+ * 2026-08-14).
  */
-export function useMediumBackfillProgress(): { done: number; total: number } {
-  const { data } = useQuery<{ done: number | null; total: number }>(
-    `SELECT
-        SUM(CASE WHEN medium_key IS NOT NULL THEN 1 ELSE 0 END) AS done,
-        COUNT(*) AS total
-       FROM photos
-      WHERE deleted_at IS NULL`,
+export function useMediumBackfillProgress(): MediumBackfillProgress {
+  const { data } = useQuery<{ medium_key: string | null }>(
+    `SELECT medium_key FROM photos WHERE deleted_at IS NULL`,
   );
-  return {
-    done: Number(data?.[0]?.done ?? 0),
-    total: Number(data?.[0]?.total ?? 0),
-  };
+  return countMediumBackfillProgress(data ?? []);
 }

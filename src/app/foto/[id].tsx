@@ -51,6 +51,7 @@ import {
   usePhotoById,
   usePhotosOfChild,
 } from '@/features/photos/repository';
+import { setLastViewedPhotoId } from '@/features/photos/lastViewed';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { healMissingMedium, removeStoredObjects } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
@@ -149,6 +150,13 @@ export default function FotoVollbildScreen() {
       .filter((key): key is string => Boolean(key));
   }, [currentIndex, photos]);
   const signedUrls = useSignedUrls(windowKeys);
+
+  // Fehler 1, 2026-08-14: reports which photo is actually on screen back to
+  // Chronik (photos/lastViewed.ts), so "Zurück" after swiping several photos
+  // forward scrolls to the one last viewed — not the one originally tapped.
+  useEffect(() => {
+    setLastViewedPhotoId(currentPhoto?.id ?? null);
+  }, [currentPhoto]);
 
   // Aufgabe 3, 2026-08-13: the moment a photo without a medium rendition is
   // shown, heal it in the background — see storage.ts#healMissingMedium for

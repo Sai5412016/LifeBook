@@ -55,6 +55,7 @@ import { supabase } from '@/core/supabase';
 import { formatTimeLabel } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
+import { formatMediumBackfillLabel } from '@/features/photos/identity';
 import { useMediumBackfillProgress, usePendingUploadCount } from '@/features/photos/repository';
 
 function SyncStatusRow() {
@@ -105,7 +106,7 @@ function SyncStatusRow() {
 
 function PhotoStatusRow() {
   const pending = usePendingUploadCount();
-  const { done, total } = useMediumBackfillProgress();
+  const backfillLabel = formatMediumBackfillLabel(useMediumBackfillProgress());
 
   return (
     <ThemedView type="backgroundElement" style={styles.card}>
@@ -120,9 +121,9 @@ function PhotoStatusRow() {
       <ThemedText type="small" themeColor="textSecondary">
         Originale werden standardmäßig nur im WLAN übertragen.
       </ThemedText>
-      {total > 0 ? (
+      {backfillLabel ? (
         <ThemedText type="small" themeColor="textSecondary">
-          Vorbereitet: {done} von {total}
+          {backfillLabel}
         </ThemedText>
       ) : null}
     </ThemedView>
