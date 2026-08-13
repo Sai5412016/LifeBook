@@ -100,6 +100,13 @@ export type PhotoRow = {
   bytes: number | null;
   thumb_key: string | null;
   thumb_uploaded_at: string | null;
+  /**
+   * NULL for every photo imported before this column existed (2026-08-13) —
+   * self-heals in the background the next time it's opened in the
+   * fullscreen viewer, see features/photos/storage.ts#healMissingMedium.
+   */
+  medium_key: string | null;
+  medium_uploaded_at: string | null;
   original_key: string | null;
   original_uploaded_at: string | null;
   availability: PhotoAvailability;

@@ -42,6 +42,17 @@ export function windowIndices(currentIndex: number, total: number, radius: numbe
   return indices;
 }
 
+/**
+ * Up to `radius` indices immediately before AND after `currentIndex` —
+ * excludes `currentIndex` itself, which is already on screen. The fullscreen
+ * viewer's prefetch neighborhood (Aufgabe 4d, 2026-08-13): a swipe can go
+ * either direction from wherever the user currently is, so both sides are
+ * always covered, not just whichever way the last swipe happened to go.
+ */
+export function neighborIndices(currentIndex: number, total: number, radius: number): number[] {
+  return windowIndices(currentIndex, total, radius).filter((index) => index !== currentIndex);
+}
+
 /** "14 von 90" — an unobtrusive position readout for the header. */
 export function formatPositionLabel(currentIndex: number, total: number): string {
   return `${currentIndex + 1} von ${total}`;

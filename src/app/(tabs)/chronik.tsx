@@ -154,7 +154,7 @@ export default function ChronikScreen() {
               // der Datenbank trotzdem gültig — protokollieren und
               // weitermachen statt abzubrechen.
               try {
-                await removeStoredObjects(photo.thumb_key, photo.original_key);
+                await removeStoredObjects(photo.thumb_key, photo.medium_key, photo.original_key);
               } catch (error) {
                 console.error('[LifeBook] Speicherobjekte konnten nicht entfernt werden', error);
               }
@@ -407,6 +407,12 @@ function PhotoTile({
   // Local file first: it exists until the original is safely uploaded, and it
   // needs neither network nor a signed URL.
   const uri = photo.local_uri ?? signedUrl;
+  // The thumbnail's own object key, so its cache entry survives both a
+  // signed-URL renewal AND the local→remote handoff once the original
+  // upload completes — see identity.ts#resolveFullscreenUri's doc comment
+  // for the full reasoning (grid tiles apply the same idea, just simpler:
+  // there is only ever one rendition to key on here).
+  const cacheKey = photo.thumb_key ?? photo.id;
   const { accent } = useUiColors();
 
   return (
@@ -414,9 +420,10 @@ function PhotoTile({
       <ThemedView type="backgroundElement" style={[styles.tile, { width: size, height: size }]}>
         {uri ? (
           <Image
-            source={{ uri }}
+            source={{ uri, cacheKey }}
             style={styles.tileImage}
             contentFit="cover"
+            cachePolicy="memory-disk"
             transition={120}
           />
         ) : null}

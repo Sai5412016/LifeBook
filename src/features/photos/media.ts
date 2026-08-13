@@ -33,6 +33,10 @@ import type { OccurredAtSource, PhotoCandidate } from './types';
 const THUMB_MAX_EDGE = 640;
 /** JPEG quality of the preview. 0.6 lands around 30–50 KB at 640 px. */
 const THUMB_QUALITY = 0.6;
+/** Longest edge of the mid-size rendition (Aufgabe 1, 2026-08-13), in pixels. */
+const MEDIUM_MAX_EDGE = 1600;
+/** JPEG quality of the mid-size rendition. */
+const MEDIUM_QUALITY = 0.75;
 
 /** Raised when the user closed the picker without choosing anything. */
 export class PickCancelledError extends Error {
@@ -213,19 +217,59 @@ export async function pickPhotos(tz: string): Promise<PhotoCandidate[]> {
   return candidates;
 }
 
+/** Shared rendering step behind every generated rendition (thumbnail, medium). */
+async function resizeAndSaveJpeg(
+  sourceUri: string,
+  resize: { width: number } | { height: number } | null,
+  quality: number,
+): Promise<string> {
+  const context = ImageManipulator.manipulate(sourceUri);
+  const sized = resize ? context.resize(resize) : context;
+  const rendered = await sized.renderAsync();
+  const saved = await rendered.saveAsync({
+    format: SaveFormat.JPEG,
+    compress: quality,
+  });
+  return saved.uri;
+}
+
 /**
  * Render a small JPEG preview into the cache directory and return its path.
  * The caller uploads it and may then delete it — it is a cache artefact, not
  * something the user's device needs to keep.
  */
 export async function createThumbnail(sourceUri: string): Promise<string> {
-  const context = ImageManipulator.manipulate(sourceUri);
-  const rendered = await context.resize({ width: THUMB_MAX_EDGE }).renderAsync();
-  const saved = await rendered.saveAsync({
-    format: SaveFormat.JPEG,
-    compress: THUMB_QUALITY,
-  });
-  return saved.uri;
+  return resizeAndSaveJpeg(sourceUri, { width: THUMB_MAX_EDGE }, THUMB_QUALITY);
+}
+
+/**
+ * Render the mid-size rendition (Aufgabe 1, 2026-08-13): same building block
+ * as `createThumbnail`, but orientation-aware. A thumbnail is always shown
+ * center-cropped to a square tile, so which side gets set doesn't matter;
+ * the medium image fills the WHOLE fullscreen frame (`contentFit="contain"`),
+ * so "längste Kante 1600 px" has to mean the actual longest edge — fixing
+ * `width` alone would leave a portrait photo's height uncapped.
+ *
+ * Never upscales: `dimensions` is the source's own width/height (from the
+ * picker, or the stored row for a legacy self-heal). When the longest edge
+ * is already at or under the target, this only recompresses — enlarging an
+ * already-small image (a screenshot, say) would waste bytes rather than
+ * save them.
+ */
+export async function createMediumImage(
+  sourceUri: string,
+  dimensions: { width: number; height: number } | null,
+): Promise<string> {
+  const longestEdge = dimensions ? Math.max(dimensions.width, dimensions.height) : null;
+  if (longestEdge !== null && longestEdge <= MEDIUM_MAX_EDGE) {
+    return resizeAndSaveJpeg(sourceUri, null, MEDIUM_QUALITY);
+  }
+
+  const resize =
+    dimensions && dimensions.height > dimensions.width
+      ? { height: MEDIUM_MAX_EDGE }
+      : { width: MEDIUM_MAX_EDGE };
+  return resizeAndSaveJpeg(sourceUri, resize, MEDIUM_QUALITY);
 }
 
 /**

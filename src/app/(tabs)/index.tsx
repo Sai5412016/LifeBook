@@ -50,11 +50,15 @@ export default function StartScreen() {
   const stripPhotos = photos.slice(0, PHOTO_STRIP_COUNT);
 
   const signedUrls = useSignedUrls([
+    avatarPhoto?.medium_key,
     avatarPhoto?.original_key,
     ...stripPhotos.map((photo) => photo.thumb_key),
     ...people.map((person) => person.photo_key),
   ]);
-  const avatarUri = avatarPhoto ? resolveFullscreenUri(avatarPhoto, signedUrls) : undefined;
+  // Same resolution chain as the fullscreen viewer (local → medium →
+  // original) — this hero image is exactly as large on screen, so it
+  // benefits from the same rendition, not just the grid's thumbnail.
+  const avatarDisplay = avatarPhoto ? resolveFullscreenUri(avatarPhoto, signedUrls) : undefined;
 
   if (childLoading) {
     return (
@@ -93,8 +97,14 @@ export default function StartScreen() {
             </Pressable>
           </View>
 
-          {avatarUri ? (
-            <Image source={{ uri: avatarUri }} style={styles.avatar} contentFit="cover" transition={120} />
+          {avatarDisplay ? (
+            <Image
+              source={{ uri: avatarDisplay.uri, cacheKey: avatarDisplay.cacheKey }}
+              style={styles.avatar}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={120}
+            />
           ) : (
             <ThemedView type="backgroundElement" style={styles.avatar} />
           )}
@@ -205,12 +215,19 @@ function PersonStripTile({ person, signedUrl }: { person: PersonRow; signedUrl: 
 
 function PhotoStripTile({ photo, signedUrl }: { photo: PhotoRow; signedUrl: string | undefined }) {
   const uri = photo.local_uri ?? signedUrl;
+  const cacheKey = photo.thumb_key ?? photo.id;
 
   return (
     <Pressable onPress={() => router.push(`/foto/${photo.id}`)}>
       <ThemedView type="backgroundElement" style={styles.stripTile}>
         {uri ? (
-          <Image source={{ uri }} style={styles.stripTileImage} contentFit="cover" transition={120} />
+          <Image
+            source={{ uri, cacheKey }}
+            style={styles.stripTileImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={120}
+          />
         ) : null}
       </ThemedView>
     </Pressable>

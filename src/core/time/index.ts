@@ -75,6 +75,15 @@ export const toUtcIso = (date: Date): string => date.toISOString();
 export const epochMillisToUtcIso = (millis: number): string => new Date(millis).toISOString();
 
 /**
+ * `utcIso` shifted forward (or back, for a negative `seconds`) by whole
+ * seconds. 2026-08-13: added for the signed-URL cache (photos/storage.ts) to
+ * compute an entry's own expiry instant — `new Date(...)` stays confined to
+ * this module even for that arithmetic.
+ */
+export const addSecondsToUtcIso = (utcIso: string, seconds: number): string =>
+  new Date(parseISO(utcIso).getTime() + seconds * 1000).toISOString();
+
+/**
  * German day heading for a stored `local_date` (YYYY-MM-DD), e.g.
  * "Mittwoch, 5. August 2026".
  *

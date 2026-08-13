@@ -85,7 +85,7 @@ export default function PersonEditScreen() {
             // Datenbank trotzdem gültig.
             if (person.photo_key) {
               try {
-                await removeStoredObjects(person.photo_key, null);
+                await removeStoredObjects(person.photo_key, null, null);
               } catch (removeError) {
                 console.error('[LifeBook] Personenfoto konnte nicht entfernt werden', removeError);
               }

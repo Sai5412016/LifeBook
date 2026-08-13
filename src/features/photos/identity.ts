@@ -13,6 +13,8 @@
  * the only identity that survives, so that is what we key on.
  */
 
+import { secondsBetween } from '@/core/time';
+
 import type { OccurredAtSource } from './types';
 
 /**
@@ -110,6 +112,22 @@ export function buildThumbKey(householdId: string, photoId: string): string {
   return `${householdId}/${photoId}/thumb.jpg`;
 }
 
+/**
+ * Storage path of the mid-size rendition. Layout: {householdId}/{photoId}/medium.jpg
+ *
+ * 2026-08-13: added so the fullscreen viewer no longer has to load the
+ * multi-megabyte original just to fill the screen (106 photos / 628 MB
+ * measured live — the original was the whole reason opening a photo was
+ * slow). Always JPEG for the same reason as the thumbnail: a format that
+ * silently fails to encode on one platform is worse than the few percent
+ * WebP would save.
+ */
+export function buildMediumKey(householdId: string, photoId: string): string {
+  assertPathSafe(householdId, 'householdId');
+  assertPathSafe(photoId, 'photoId');
+  return `${householdId}/${photoId}/medium.jpg`;
+}
+
 /** Storage path of the untouched original. Layout: {householdId}/{photoId}/orig.{ext} */
 export function buildOriginalKey(
   householdId: string,
@@ -163,26 +181,82 @@ export function isOccurredAtEstimated(source: OccurredAtSource | null): boolean 
 
 type FullscreenPhotoKeys = {
   local_uri: string | null;
+  medium_key: string | null;
   original_key: string | null;
 };
 
+/** What to render for a photo, and which object it actually is. */
+export type ResolvedPhotoDisplay = {
+  uri: string;
+  /**
+   * The object storage key `uri` corresponds to — even when `uri` is a local
+   * file:// path, not the object's own remote URL. This is what
+   * expo-image's `cacheKey` gets set to (Aufgabe 4b): a signed URL is
+   * re-issued on every expiry and a freshly imported photo's `uri` starts as
+   * a local file and later becomes a remote one once uploaded — same photo,
+   * same bytes, different string both times. Tagging every rendition with
+   * the one thing that DOESN'T change (the object key) is what lets the
+   * on-device image cache survive both kinds of churn instead of treating
+   * each new `uri` as a different picture and re-downloading it.
+   */
+  cacheKey: string;
+};
+
 /**
- * Which URI the fullscreen viewer should show: the local staged file while it
- * still exists on this device (instant, no network round trip), otherwise the
- * signed URL for the original in object storage. Mirrors the same preference
- * the grid tiles use for their thumbnail, just against `original_key`.
+ * Which object the fullscreen viewer should show, first match wins:
+ * 1. the local staged file, while it still exists on this device (instant,
+ *    no network round trip);
+ * 2. the mid-size rendition (medium_key) — enough resolution to fill a
+ *    phone screen without the multi-megabyte original;
+ * 3. the original, as the final fallback (no medium yet — either still
+ *    uploading, or an older photo that predates this column and hasn't
+ *    self-healed yet, see ./storage.ts#healMissingMedium).
+ *
+ * Mirrors the grid tiles' own local-first preference, just extended with the
+ * medium step they don't need (a thumbnail tile never had to fall back to
+ * anything larger).
  */
 export function resolveFullscreenUri(
   photo: FullscreenPhotoKeys,
   signedUrls: ReadonlyMap<string, string>,
-): string | undefined {
+): ResolvedPhotoDisplay | undefined {
+  const remoteKey = photo.medium_key ?? photo.original_key;
+
   if (photo.local_uri) {
-    return photo.local_uri;
+    // Falls back to the local path itself only in the (practically
+    // unreachable) case where a row has neither key yet — still shows the
+    // photo, just without the cross-rendition cache alignment above.
+    return { uri: photo.local_uri, cacheKey: remoteKey ?? photo.local_uri };
   }
+
+  if (photo.medium_key) {
+    const mediumUrl = signedUrls.get(photo.medium_key);
+    if (mediumUrl) {
+      return { uri: mediumUrl, cacheKey: photo.medium_key };
+    }
+  }
+
   if (!photo.original_key) {
     return undefined;
   }
-  return signedUrls.get(photo.original_key);
+  const originalUrl = signedUrls.get(photo.original_key);
+  return originalUrl ? { uri: originalUrl, cacheKey: photo.original_key } : undefined;
+}
+
+/**
+ * Whether a cached signed URL must be re-signed before being handed out
+ * again — pure time comparison, the actual cache (storage.ts) is the only
+ * caller. `safetyMarginSeconds` means the deciding instant is `now +
+ * margin`, not `now` itself: a URL with a few seconds left but not enough to
+ * safely finish loading an image counts as expired too, so a slow load can
+ * never have its URL go invalid partway through (Aufgabe 4a).
+ */
+export function shouldResignUrl(
+  expiresAtUtcIso: string,
+  nowUtcIso: string,
+  safetyMarginSeconds: number,
+): boolean {
+  return secondsBetween(nowUtcIso, expiresAtUtcIso) <= safetyMarginSeconds;
 }
 
 type GroupablePhoto = {

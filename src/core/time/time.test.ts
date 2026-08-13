@@ -3,6 +3,7 @@ import {
   toLocalDate,
   toDashboardDate,
   ageInDays,
+  addSecondsToUtcIso,
   applyOccurredAtCorrection,
   combineLocalDateAndTime,
   epochMillisToUtcIso,
@@ -155,6 +156,24 @@ describe('epochMillisToUtcIso', () => {
 
   it('handles 0 (the epoch itself)', () => {
     expect(epochMillisToUtcIso(0)).toBe('1970-01-01T00:00:00.000Z');
+  });
+});
+
+describe('addSecondsToUtcIso', () => {
+  it('shifts an instant forward by whole seconds', () => {
+    expect(addSecondsToUtcIso('2026-08-08T12:00:00.000Z', 3600)).toBe('2026-08-08T13:00:00.000Z');
+  });
+
+  it('shifts backward for a negative offset', () => {
+    expect(addSecondsToUtcIso('2026-08-08T12:00:00.000Z', -60)).toBe('2026-08-08T11:59:00.000Z');
+  });
+
+  it('is a no-op for zero seconds', () => {
+    expect(addSecondsToUtcIso('2026-08-08T12:00:00.000Z', 0)).toBe('2026-08-08T12:00:00.000Z');
+  });
+
+  it('carries across a day boundary', () => {
+    expect(addSecondsToUtcIso('2026-08-08T23:59:50.000Z', 20)).toBe('2026-08-09T00:00:10.000Z');
   });
 });
 

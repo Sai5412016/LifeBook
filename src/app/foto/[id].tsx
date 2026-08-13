@@ -52,19 +52,22 @@ import {
   usePhotosOfChild,
 } from '@/features/photos/repository';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
-import { removeStoredObjects } from '@/features/photos/storage';
+import { healMissingMedium, removeStoredObjects } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
 import {
   clampIndex,
   formatPositionLabel,
   indexAfterDeletion,
   indexOfPhoto,
+  neighborIndices,
   windowIndices,
 } from '@/features/photos/viewer';
 import { KeyboardSafeScreen, TextField } from '@/ui';
 
 /** Signed URLs are kept warm for the current photo plus this many on each side. */
 const SIGNED_URL_WINDOW_RADIUS = 3;
+/** Aufgabe 4d: how many neighbors on EACH side get their image bytes prefetched while swiping. */
+const PREFETCH_RADIUS = 2;
 
 // Same format/validation as kind/bearbeiten.tsx's birth date/time fields —
 // no native date picker (a new native module, see CLAUDE.md Fallstrick 5).
@@ -140,10 +143,44 @@ export default function FotoVollbildScreen() {
     return windowIndices(currentIndex, photos.length, SIGNED_URL_WINDOW_RADIUS)
       .map((index) => photos[index])
       .filter((entry): entry is PhotoRow => !!entry && !entry.local_uri)
-      .map((entry) => entry.original_key)
+      // Both keys, not just original: resolveFullscreenUri prefers medium
+      // once it has a signed URL for it, so that has to be in the batch too.
+      .flatMap((entry) => [entry.medium_key, entry.original_key])
       .filter((key): key is string => Boolean(key));
   }, [currentIndex, photos]);
   const signedUrls = useSignedUrls(windowKeys);
+
+  // Aufgabe 3, 2026-08-13: the moment a photo without a medium rendition is
+  // shown, heal it in the background — see storage.ts#healMissingMedium for
+  // the WLAN-only / one-at-a-time / never-throws contract. Fires again every
+  // time this SAME photo is reopened until it succeeds, so a photo skipped
+  // because another heal was already running gets picked up eventually.
+  useEffect(() => {
+    if (!currentPhoto || currentPhoto.medium_key) {
+      return;
+    }
+    void healMissingMedium(db, currentPhoto);
+  }, [db, currentPhoto]);
+
+  // Aufgabe 4d: prefetch the two neighbors on EACH side of whatever is
+  // currently shown, so swiping either direction shows the next photo
+  // instantly instead of waiting on its signed URL + download. Runs off
+  // `signedUrls` too since a neighbor's medium/original URL may only just
+  // have resolved.
+  useEffect(() => {
+    if (currentIndex === null) {
+      return;
+    }
+    for (const index of neighborIndices(currentIndex, photos.length, PREFETCH_RADIUS)) {
+      const display = resolveFullscreenUri(photos[index], signedUrls);
+      if (!display) {
+        continue;
+      }
+      Image.loadAsync({ uri: display.uri, cacheKey: display.cacheKey }).catch((error) => {
+        console.error('[LifeBook] Vorabladen eines Nachbarfotos fehlgeschlagen', error);
+      });
+    }
+  }, [currentIndex, photos, signedUrls]);
 
   const handleShare = useCallback(async () => {
     if (!currentPhoto) {
@@ -175,7 +212,7 @@ export default function FotoVollbildScreen() {
       // weiche Löschen in der Datenbank trotzdem gültig — protokollieren und
       // weitermachen statt abzubrechen.
       try {
-        await removeStoredObjects(currentPhoto.thumb_key, currentPhoto.original_key);
+        await removeStoredObjects(currentPhoto.thumb_key, currentPhoto.medium_key, currentPhoto.original_key);
       } catch (error) {
         console.error('[LifeBook] Speicherobjekte konnten nicht entfernt werden', error);
       }
@@ -284,13 +321,19 @@ export default function FotoVollbildScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: PhotoRow }) => {
-      const uri = resolveFullscreenUri(item, signedUrls);
+      const display = resolveFullscreenUri(item, signedUrls);
       return (
         <View style={{ width, height: '100%' }}>
           {/* Kein Spinner hier: ein noch ungeladenes Bild soll ruhig
               erscheinen, nicht wackeln, während schnell durchgeblättert wird. */}
-          {uri ? (
-            <Image source={{ uri }} style={styles.image} contentFit="contain" transition={120} />
+          {display ? (
+            <Image
+              source={{ uri: display.uri, cacheKey: display.cacheKey }}
+              style={styles.image}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              transition={120}
+            />
           ) : (
             <View style={styles.image} />
           )}

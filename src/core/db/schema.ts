@@ -268,6 +268,13 @@ function buildAppSchema() {
       // access rules match on, so it must never change shape.
       thumb_key: column.text, // {household_id}/{photo_id}/thumb.webp
       thumb_uploaded_at: column.text,
+      // 2026-08-13: a mid-size rendition for the fullscreen viewer, so it no
+      // longer has to load the multi-MB original just to fill the screen.
+      // NULL for every photo imported before this column existed — those
+      // self-heal in the background (WLAN-only) the next time they're
+      // opened, see features/photos/storage.ts#healMissingMedium.
+      medium_key: column.text, // {household_id}/{photo_id}/medium.jpg
+      medium_uploaded_at: column.text,
       original_key: column.text, // {household_id}/{photo_id}/orig.{ext}
       original_uploaded_at: column.text, // NULL = upload still pending
       availability: column.text, // available | missing

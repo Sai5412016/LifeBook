@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildMediumKey,
   buildOriginalKey,
   buildThumbKey,
   composeContentHash,
@@ -10,6 +11,7 @@ import {
   groupPhotosByDay,
   isOccurredAtEstimated,
   resolveFullscreenUri,
+  shouldResignUrl,
 } from './identity';
 
 const hash = (n: string) => composeContentHash(`sha-${n}`, 1000);
@@ -58,6 +60,7 @@ describe('dedupeByHash', () => {
 describe('storage keys', () => {
   it('puts the household id first — the access rules match on that segment', () => {
     expect(buildThumbKey('hh1', 'p1')).toBe('hh1/p1/thumb.jpg');
+    expect(buildMediumKey('hh1', 'p1')).toBe('hh1/p1/medium.jpg');
     expect(buildOriginalKey('hh1', 'p1', 'image/png')).toBe('hh1/p1/orig.png');
   });
 
@@ -74,6 +77,7 @@ describe('storage keys', () => {
     ['', 'p1'],
   ])('refuses ids that could escape the household folder (%s, %s)', (hh, pid) => {
     expect(() => buildThumbKey(hh, pid)).toThrow(/unsafe/);
+    expect(() => buildMediumKey(hh, pid)).toThrow(/unsafe/);
     expect(() => buildOriginalKey(hh, pid, 'image/jpeg')).toThrow(/unsafe/);
   });
 });
@@ -96,28 +100,103 @@ describe('formatAgeLabel', () => {
 });
 
 describe('resolveFullscreenUri', () => {
-  it('prefers the local staged file over a signed URL', () => {
-    const photo = { local_uri: 'file:///staged.jpg', original_key: 'hh1/p1/orig.jpg' };
-    const signedUrls = new Map([['hh1/p1/orig.jpg', 'https://signed/orig.jpg']]);
+  // "alle drei vorhanden": local file, a resolved medium URL AND a resolved
+  // original URL all available at once — local still wins.
+  it('prefers the local staged file over either signed URL', () => {
+    const photo = { local_uri: 'file:///staged.jpg', medium_key: 'hh1/p1/medium.jpg', original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([
+      ['hh1/p1/medium.jpg', 'https://signed/medium.jpg'],
+      ['hh1/p1/orig.jpg', 'https://signed/orig.jpg'],
+    ]);
 
-    expect(resolveFullscreenUri(photo, signedUrls)).toBe('file:///staged.jpg');
+    expect(resolveFullscreenUri(photo, signedUrls)).toEqual({
+      uri: 'file:///staged.jpg',
+      cacheKey: 'hh1/p1/medium.jpg',
+    });
   });
 
-  it('falls back to the signed URL of the original once the local file is gone', () => {
-    const photo = { local_uri: null, original_key: 'hh1/p1/orig.jpg' };
-    const signedUrls = new Map([['hh1/p1/orig.jpg', 'https://signed/orig.jpg']]);
+  it('tags the local file with the eventual remote key it will become, so the cache survives the handoff', () => {
+    const photo = { local_uri: 'file:///staged.jpg', medium_key: null, original_key: 'hh1/p1/orig.jpg' };
 
-    expect(resolveFullscreenUri(photo, signedUrls)).toBe('https://signed/orig.jpg');
+    expect(resolveFullscreenUri(photo, new Map())).toEqual({
+      uri: 'file:///staged.jpg',
+      cacheKey: 'hh1/p1/orig.jpg',
+    });
   });
 
-  it('returns undefined when the signed URL has not resolved yet', () => {
-    const photo = { local_uri: null, original_key: 'hh1/p1/orig.jpg' };
+  it('prefers the medium rendition once the local file is gone', () => {
+    const photo = { local_uri: null, medium_key: 'hh1/p1/medium.jpg', original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([
+      ['hh1/p1/medium.jpg', 'https://signed/medium.jpg'],
+      ['hh1/p1/orig.jpg', 'https://signed/orig.jpg'],
+    ]);
+
+    expect(resolveFullscreenUri(photo, signedUrls)).toEqual({
+      uri: 'https://signed/medium.jpg',
+      cacheKey: 'hh1/p1/medium.jpg',
+    });
+  });
+
+  // "nur Original": no medium key on the row at all (a legacy photo that
+  // predates the column and hasn't self-healed yet) — falls straight to it.
+  it('falls back to the original when the row has no medium key', () => {
+    const photo = { local_uri: null, medium_key: null, original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([['hh1/p1/orig.jpg', 'https://signed/orig.jpg']]);
+
+    expect(resolveFullscreenUri(photo, signedUrls)).toEqual({
+      uri: 'https://signed/orig.jpg',
+      cacheKey: 'hh1/p1/orig.jpg',
+    });
+  });
+
+  it('falls back to the original when the medium key exists but has not signed yet', () => {
+    const photo = { local_uri: null, medium_key: 'hh1/p1/medium.jpg', original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([['hh1/p1/orig.jpg', 'https://signed/orig.jpg']]);
+
+    expect(resolveFullscreenUri(photo, signedUrls)).toEqual({
+      uri: 'https://signed/orig.jpg',
+      cacheKey: 'hh1/p1/orig.jpg',
+    });
+  });
+
+  // "nur Vorschau": only some unrelated (thumbnail-like) key has resolved —
+  // fullscreen never falls back to it, so nothing renders yet.
+  it('ignores a resolved URL for a key that is not this photo\'s medium or original', () => {
+    const photo = { local_uri: null, medium_key: 'hh1/p1/medium.jpg', original_key: 'hh1/p1/orig.jpg' };
+    const signedUrls = new Map([['hh1/p1/thumb.jpg', 'https://signed/thumb.jpg']]);
+
+    expect(resolveFullscreenUri(photo, signedUrls)).toBeUndefined();
+  });
+
+  // "nichts": no local file, no keys at all.
+  it('returns undefined when there is nothing to show', () => {
+    const photo = { local_uri: null, medium_key: null, original_key: null };
 
     expect(resolveFullscreenUri(photo, new Map())).toBeUndefined();
   });
+});
 
-  it('returns undefined when there is neither a local file nor an original key', () => {
-    expect(resolveFullscreenUri({ local_uri: null, original_key: null }, new Map())).toBeUndefined();
+describe('shouldResignUrl', () => {
+  it('is false while comfortably before expiry', () => {
+    expect(shouldResignUrl('2026-08-08T13:00:00Z', '2026-08-08T12:00:00Z', 60)).toBe(false);
+  });
+
+  it('is true once expired', () => {
+    expect(shouldResignUrl('2026-08-08T12:00:00Z', '2026-08-08T12:00:01Z', 60)).toBe(true);
+  });
+
+  it('is true inside the safety margin, even though not technically expired yet', () => {
+    // 30s left on a 60s margin — still counts as "must re-sign", so a slow
+    // image load can never have its URL go invalid mid-request.
+    expect(shouldResignUrl('2026-08-08T12:00:30Z', '2026-08-08T12:00:00Z', 60)).toBe(true);
+  });
+
+  it('is true exactly at the safety margin boundary', () => {
+    expect(shouldResignUrl('2026-08-08T12:01:00Z', '2026-08-08T12:00:00Z', 60)).toBe(true);
+  });
+
+  it('is false one second outside the safety margin', () => {
+    expect(shouldResignUrl('2026-08-08T12:01:01Z', '2026-08-08T12:00:00Z', 60)).toBe(false);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   formatPositionLabel,
   indexAfterDeletion,
   indexOfPhoto,
+  neighborIndices,
   windowIndices,
 } from './viewer';
 
@@ -69,6 +70,30 @@ describe('windowIndices', () => {
 
   it('returns nothing for an empty list', () => {
     expect(windowIndices(0, 0, 3)).toEqual([]);
+  });
+});
+
+describe('neighborIndices', () => {
+  it('returns up to `radius` indices on both sides, excluding currentIndex itself', () => {
+    expect(neighborIndices(10, 100, 2)).toEqual([8, 9, 11, 12]);
+  });
+
+  it('covers the right side even though the last move was a swipe left, and vice versa', () => {
+    // Direction of the last swipe is irrelevant — both neighborhoods are
+    // always included, since the next swipe can go either way.
+    expect(neighborIndices(10, 100, 2)).toEqual(expect.arrayContaining([9, 11]));
+  });
+
+  it('clips at the start of the album', () => {
+    expect(neighborIndices(1, 100, 2)).toEqual([0, 2, 3]);
+  });
+
+  it('clips at the end of the album', () => {
+    expect(neighborIndices(98, 100, 2)).toEqual([96, 97, 99]);
+  });
+
+  it('returns nothing for a single-photo album', () => {
+    expect(neighborIndices(0, 1, 2)).toEqual([]);
   });
 });
 

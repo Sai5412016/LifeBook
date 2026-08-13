@@ -22,7 +22,7 @@ import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { newId } from '@/core/db/ids';
 import { ageInDays, applyOccurredAtCorrection, nowUtcIso, toLocalDate } from '@/core/time';
 
-import { buildOriginalKey, buildThumbKey, groupPhotosByDay } from './identity';
+import { buildMediumKey, buildOriginalKey, buildThumbKey, groupPhotosByDay } from './identity';
 import type { PhotoCandidate, PhotoDaySection, PhotoRow } from './types';
 
 /** Columns every read selects, so callers always get a complete PhotoRow. */
@@ -30,7 +30,8 @@ const PHOTO_COLUMNS = `
   id, household_id, child_id, occurred_at, tz, local_date, created_by,
   created_at, updated_at, deleted_at, source, local_uri, content_hash,
   captured_at, occurred_at_source, age_days, width, height, mime, bytes,
-  thumb_key, thumb_uploaded_at, original_key, original_uploaded_at, availability
+  thumb_key, thumb_uploaded_at, medium_key, medium_uploaded_at,
+  original_key, original_uploaded_at, availability
 `;
 
 /**
@@ -59,7 +60,13 @@ export type InsertPhotosInput = {
   /** Birth instant of the child, for the per-photo age. */
   birthAtUtcIso: string | null;
   /** Candidates paired with the persistent staging URI of each file. */
-  entries: { photoId: string; candidate: PhotoCandidate; stagedUri: string; thumbKey: string }[];
+  entries: {
+    photoId: string;
+    candidate: PhotoCandidate;
+    stagedUri: string;
+    thumbKey: string;
+    mediumKey: string;
+  }[];
 };
 
 /**
@@ -72,6 +79,12 @@ export type InsertPhotosInput = {
  * produced it, and `occurred_at_source` for which stage won. `local_date`
  * and `age_days` are frozen here and never recomputed (Spec §7), so the
  * timeline stays stable across moves and DST.
+ *
+ * `medium_key` is written here too, same as `thumb_key`/`original_key` —
+ * deterministic from household+photo id, so it exists from the first
+ * moment even though the actual bytes aren't uploaded until the upload
+ * queue gets to it (`medium_uploaded_at` starts NULL, mirroring the other
+ * two renditions).
  */
 export async function insertPhotos(
   db: AbstractPowerSyncDatabase,
@@ -80,7 +93,7 @@ export async function insertPhotos(
   const now = nowUtcIso();
 
   await db.writeTransaction(async (tx) => {
-    for (const { photoId, candidate, stagedUri, thumbKey } of input.entries) {
+    for (const { photoId, candidate, stagedUri, thumbKey, mediumKey } of input.entries) {
       const occurredAt = candidate.occurredAtUtcIso;
       const localDate = toLocalDate(occurredAt, input.tz);
       const age = input.birthAtUtcIso
@@ -92,8 +105,9 @@ export async function insertPhotos(
            id, household_id, child_id, occurred_at, tz, local_date, created_by,
            created_at, updated_at, deleted_at, source, local_uri, content_hash,
            captured_at, occurred_at_source, age_days, width, height, mime, bytes,
-           thumb_key, thumb_uploaded_at, original_key, original_uploaded_at, availability
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'device_gallery', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 'available')`,
+           thumb_key, thumb_uploaded_at, medium_key, medium_uploaded_at,
+           original_key, original_uploaded_at, availability
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'device_gallery', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, NULL, 'available')`,
         [
           photoId,
           input.householdId,
@@ -114,6 +128,7 @@ export async function insertPhotos(
           candidate.mime,
           candidate.bytes,
           thumbKey,
+          mediumKey,
           buildOriginalKey(input.householdId, photoId, candidate.mime),
         ],
       );
@@ -122,12 +137,18 @@ export async function insertPhotos(
 }
 
 /**
- * Allocate the id and preview key for a photo before it is written.
+ * Allocate the id and rendition keys for a photo before it is written.
  * Needed up front because the staged file is named after the id.
  */
-export function prepareEntry(householdId: string): { photoId: string; thumbKey: string } {
+export function prepareEntry(
+  householdId: string,
+): { photoId: string; thumbKey: string; mediumKey: string } {
   const photoId = newId();
-  return { photoId, thumbKey: buildThumbKey(householdId, photoId) };
+  return {
+    photoId,
+    thumbKey: buildThumbKey(householdId, photoId),
+    mediumKey: buildMediumKey(householdId, photoId),
+  };
 }
 
 /**
@@ -142,7 +163,7 @@ export async function loadPendingUploads(
     `SELECT ${PHOTO_COLUMNS} FROM photos
       WHERE deleted_at IS NULL
         AND local_uri IS NOT NULL
-        AND (thumb_uploaded_at IS NULL OR original_uploaded_at IS NULL)
+        AND (thumb_uploaded_at IS NULL OR medium_uploaded_at IS NULL OR original_uploaded_at IS NULL)
       ORDER BY created_at ASC`,
   );
 }
@@ -156,6 +177,26 @@ export async function markThumbUploaded(
   await db.execute(
     'UPDATE photos SET thumb_uploaded_at = ?, updated_at = ? WHERE id = ?',
     [now, now, photoId],
+  );
+}
+
+/**
+ * Mark the mid-size rendition as stored. Takes `mediumKey` explicitly rather
+ * than assuming the row already has one: for a freshly imported photo it
+ * does (set at insert, see `insertPhotos`), but for an older row healed in
+ * the background (Aufgabe 3, ./storage.ts#healMissingMedium) this call is
+ * what sets `medium_key` for the very first time — both cases are the same
+ * write.
+ */
+export async function markMediumUploaded(
+  db: AbstractPowerSyncDatabase,
+  photoId: string,
+  mediumKey: string,
+): Promise<void> {
+  const now = nowUtcIso();
+  await db.execute(
+    'UPDATE photos SET medium_key = ?, medium_uploaded_at = ?, updated_at = ? WHERE id = ?',
+    [mediumKey, now, now, photoId],
   );
 }
 
@@ -291,4 +332,25 @@ export function usePendingUploadCount(): number {
       WHERE deleted_at IS NULL AND local_uri IS NOT NULL AND original_uploaded_at IS NULL`,
   );
   return data?.[0]?.n ?? 0;
+}
+
+/**
+ * Reactive progress of the medium-rendition backfill (Aufgabe 3): how many
+ * photos already have a `medium_key` versus the total. Drives the
+ * "Vorbereitet: 12 von 107" line in Einstellungen — without it there is no
+ * way to tell from outside whether the silent background healing
+ * (./storage.ts#healMissingMedium) is actually doing anything.
+ */
+export function useMediumBackfillProgress(): { done: number; total: number } {
+  const { data } = useQuery<{ done: number | null; total: number }>(
+    `SELECT
+        SUM(CASE WHEN medium_key IS NOT NULL THEN 1 ELSE 0 END) AS done,
+        COUNT(*) AS total
+       FROM photos
+      WHERE deleted_at IS NULL`,
+  );
+  return {
+    done: Number(data?.[0]?.done ?? 0),
+    total: Number(data?.[0]?.total ?? 0),
+  };
 }

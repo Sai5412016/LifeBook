@@ -18,16 +18,35 @@ import { Directory, File, Paths, UploadType } from 'expo-file-system';
 import * as Network from 'expo-network';
 
 import { ENV } from '@/core/env';
+import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
 
-import { extensionForMime } from './identity';
-import { createThumbnail, deleteQuietly } from './media';
-import { loadPendingUploads, markOriginalUploaded, markThumbUploaded } from './repository';
+import { buildMediumKey, extensionForMime, shouldResignUrl } from './identity';
+import { createMediumImage, createThumbnail, deleteQuietly } from './media';
+import {
+  loadPendingUploads,
+  markMediumUploaded,
+  markOriginalUploaded,
+  markThumbUploaded,
+} from './repository';
+import type { PhotoRow } from './types';
 
 export const PHOTOS_BUCKET = 'photos';
 
 /** How long a display URL stays valid. Long enough to scroll, short enough to leak little. */
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+/**
+ * Cache-control for the three photo renditions (thumb/medium/original),
+ * Aufgabe 1: their object key already contains the photo id, so the bytes
+ * behind a given key never change — a one-year max-age costs nothing and
+ * saves paying for the same transfer twice on every CDN edge that would
+ * otherwise treat them as fresh-each-time. Deliberately NOT the default for
+ * `uploadToPhotosBucket` in general: features/people overwrites its portrait
+ * at the SAME key on every change, where a long cache-control would just
+ * mean a stale photo sticking around.
+ */
+const IMMUTABLE_CACHE_CONTROL_SECONDS = 60 * 60 * 24 * 365;
 
 export class StorageUploadError extends Error {
   constructor(
@@ -64,7 +83,12 @@ async function requireAccessToken(): Promise<string> {
  * uploads a person's portrait through this same function rather than
  * duplicating the auth-header/retry-safe upload request.
  */
-export async function uploadToPhotosBucket(localUri: string, key: string, mime: string): Promise<void> {
+export async function uploadToPhotosBucket(
+  localUri: string,
+  key: string,
+  mime: string,
+  cacheControlSeconds: number = SIGNED_URL_TTL_SECONDS,
+): Promise<void> {
   const token = await requireAccessToken();
   const file = new File(localUri);
 
@@ -82,7 +106,7 @@ export async function uploadToPhotosBucket(localUri: string, key: string, mime: 
       // Retries must not fail on "object already exists" — an upload that timed
       // out client-side may well have landed server-side.
       'x-upsert': 'true',
-      'cache-control': `max-age=${SIGNED_URL_TTL_SECONDS}`,
+      'cache-control': `max-age=${cacheControlSeconds}`,
     },
   });
 
@@ -103,6 +127,7 @@ export async function isOnWifi(): Promise<boolean> {
 
 export type UploadRunResult = {
   thumbnails: number;
+  mediums: number;
   originals: number;
   failed: number;
   /** Originals deliberately left for later because there is no Wi-Fi. */
@@ -146,6 +171,7 @@ async function executeUploadQueue(
 
   const result: UploadRunResult = {
     thumbnails: 0,
+    mediums: 0,
     originals: 0,
     failed: 0,
     deferred: 0,
@@ -162,11 +188,31 @@ async function executeUploadQueue(
         // the import-time preview lives in the OS cache and may be long gone.
         const thumbUri = await createThumbnail(photo.local_uri);
         try {
-          await uploadToPhotosBucket(thumbUri, photo.thumb_key, 'image/jpeg');
+          await uploadToPhotosBucket(thumbUri, photo.thumb_key, 'image/jpeg', IMMUTABLE_CACHE_CONTROL_SECONDS);
           await markThumbUploaded(db, photo.id);
           result.thumbnails += 1;
         } finally {
           deleteQuietly(thumbUri);
+        }
+      }
+
+      // Between thumb and original ON PURPOSE: a failure here throws and
+      // skips the original upload below for this run (same as a thumb
+      // failure already did) — that keeps `local_uri` intact until the
+      // medium has actually landed, so the fullscreen viewer's fallback
+      // chain (identity.ts#resolveFullscreenUri) never needs to reach past
+      // a local file into a medium object that doesn't exist yet.
+      if (!photo.medium_uploaded_at && photo.medium_key) {
+        const mediumUri = await createMediumImage(
+          photo.local_uri,
+          photo.width && photo.height ? { width: photo.width, height: photo.height } : null,
+        );
+        try {
+          await uploadToPhotosBucket(mediumUri, photo.medium_key, 'image/jpeg', IMMUTABLE_CACHE_CONTROL_SECONDS);
+          await markMediumUploaded(db, photo.id, photo.medium_key);
+          result.mediums += 1;
+        } finally {
+          deleteQuietly(mediumUri);
         }
       }
 
@@ -175,7 +221,12 @@ async function executeUploadQueue(
           result.deferred += 1;
           continue;
         }
-        await uploadToPhotosBucket(photo.local_uri, photo.original_key, photo.mime ?? 'image/jpeg');
+        await uploadToPhotosBucket(
+          photo.local_uri,
+          photo.original_key,
+          photo.mime ?? 'image/jpeg',
+          IMMUTABLE_CACHE_CONTROL_SECONDS,
+        );
         await markOriginalUploaded(db, photo.id);
         // Only now is it safe to drop the staged copy: the bytes exist elsewhere.
         deleteQuietly(photo.local_uri);
@@ -227,12 +278,60 @@ export async function createSignedUrls(keys: string[]): Promise<Map<string, stri
   return urls;
 }
 
-/** Remove both objects of a photo. Best-effort — a leftover object is cleaned up later. */
+/**
+ * Aufgabe 4a, 2026-08-13: signed URLs cached at MODULE scope, not per-screen
+ * state. Before this, every hook instance (i.e. every screen mount) started
+ * from an empty cache and re-signed everything it needed — and since
+ * expo-image caches by URI, a freshly re-signed URL for the same object
+ * counted as a brand new image and reloaded it from scratch. A module-level
+ * `Map` survives remounts, so navigating Chronik → Vollbild → back → Vollbild
+ * again re-signs nothing that hasn't actually expired.
+ */
+const signedUrlCache = new Map<string, { url: string; expiresAtUtcIso: string }>();
+
+/** Safety window for `shouldResignUrl` — see its own doc comment in ./identity.ts. */
+const SIGNED_URL_SAFETY_MARGIN_SECONDS = 60;
+
+/**
+ * Like `createSignedUrls`, but backed by the shared module cache above: only
+ * keys that are missing or expiring within the safety margin actually reach
+ * Supabase. Keys that fail to sign are simply left out of both the result
+ * and the cache, so the next call retries them — same "absent, not thrown"
+ * contract as `createSignedUrls`.
+ */
+export async function getCachedSignedUrls(keys: readonly string[]): Promise<Map<string, string>> {
+  const now = nowUtcIso();
+  const result = new Map<string, string>();
+  const stale: string[] = [];
+
+  for (const key of keys) {
+    const cached = signedUrlCache.get(key);
+    if (cached && !shouldResignUrl(cached.expiresAtUtcIso, now, SIGNED_URL_SAFETY_MARGIN_SECONDS)) {
+      result.set(key, cached.url);
+    } else {
+      stale.push(key);
+    }
+  }
+
+  if (stale.length > 0) {
+    const fetched = await createSignedUrls(stale);
+    const expiresAtUtcIso = addSecondsToUtcIso(now, SIGNED_URL_TTL_SECONDS);
+    fetched.forEach((url, key) => {
+      signedUrlCache.set(key, { url, expiresAtUtcIso });
+      result.set(key, url);
+    });
+  }
+
+  return result;
+}
+
+/** Remove every stored rendition of a photo. Best-effort — a leftover object is cleaned up later. */
 export async function removeStoredObjects(
   thumbKey: string | null,
+  mediumKey: string | null,
   originalKey: string | null,
 ): Promise<void> {
-  const keys = [thumbKey, originalKey].filter((key): key is string => Boolean(key));
+  const keys = [thumbKey, mediumKey, originalKey].filter((key): key is string => Boolean(key));
   if (keys.length === 0) {
     return;
   }
@@ -385,4 +484,70 @@ export async function prepareShareBatch(
   }
 
   return { files, failedCount, cancelled: false };
+}
+
+/* ────────────────────────────── Self-heal (Aufgabe 3, 2026-08-13) ────────────────────────────── */
+
+/** At most one photo healed at a time (task requirement) — a plain module-level flag. */
+let healInFlight = false;
+
+/**
+ * Generates and uploads the missing mid-size rendition for a photo that
+ * predates the `medium_key` column, entirely in the background. Called from
+ * the fullscreen viewer right after a photo without a medium is shown; on
+ * the NEXT time that same photo is opened, `resolveFullscreenUri` finds a
+ * medium and the viewer loads instantly instead of the multi-MB original.
+ *
+ * Every condition below is from the task, not a guess:
+ * - WLAN only — reuses `isOnWifi()`, the exact same check the ordinary
+ *   upload queue already gates originals on, rather than inventing a
+ *   second network-type check that could drift from it.
+ * - At most one photo at a time — the module-level flag above. A call that
+ *   arrives while one is already running simply no-ops; swiping fast
+ *   through many un-healed photos heals them one at a time, whichever one
+ *   happens to be open the next time the flag is free.
+ * - Fully silent and never throws: every failure is caught and logged
+ *   here, not left for the caller — a flaky connection must not surface as
+ *   an error state on a screen whose only job was to show a photo.
+ */
+export async function healMissingMedium(
+  db: AbstractPowerSyncDatabase,
+  photo: Pick<
+    PhotoRow,
+    'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height'
+  >,
+): Promise<void> {
+  if (photo.medium_key || !photo.original_key || healInFlight) {
+    return;
+  }
+  if (!(await isOnWifi())) {
+    return;
+  }
+
+  healInFlight = true;
+  let resolved: ResolvedShareFile | null = null;
+  try {
+    resolved = await resolveOriginalForSharing(photo);
+    const mediumUri = await createMediumImage(
+      resolved.uri,
+      photo.width && photo.height ? { width: photo.width, height: photo.height } : null,
+    );
+    try {
+      const mediumKey = buildMediumKey(photo.household_id, photo.id);
+      await uploadToPhotosBucket(mediumUri, mediumKey, 'image/jpeg', IMMUTABLE_CACHE_CONTROL_SECONDS);
+      await markMediumUploaded(db, photo.id, mediumKey);
+    } finally {
+      deleteQuietly(mediumUri);
+    }
+  } catch (error) {
+    console.error('[LifeBook] Mittlere Fassung konnte nicht nachträglich erzeugt werden', {
+      photoId: photo.id,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    if (resolved) {
+      cleanupSharedFiles([resolved]);
+    }
+    healInFlight = false;
+  }
 }

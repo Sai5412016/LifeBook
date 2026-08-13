@@ -52,13 +52,13 @@ export async function importPhotos(
 
   for (const candidate of fresh) {
     try {
-      const { photoId, thumbKey } = prepareEntry(input.householdId);
+      const { photoId, thumbKey, mediumKey } = prepareEntry(input.householdId);
       const stagedUri = await stagePickedPhoto(
         candidate.localUri,
         photoId,
         extensionForMime(candidate.mime),
       );
-      entries.push({ photoId, candidate, stagedUri, thumbKey });
+      entries.push({ photoId, candidate, stagedUri, thumbKey, mediumKey });
     } catch (error) {
       failed += 1;
       console.error('[LifeBook] Foto konnte nicht übernommen werden', {
