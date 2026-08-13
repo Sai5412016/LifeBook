@@ -8,6 +8,7 @@
 
 import Share from 'react-native-share';
 
+import { formatShareDiagnostic, resolveShareMimeType } from './sharing';
 import {
   cleanupSharedFiles,
   prepareShareBatch,
@@ -20,6 +21,19 @@ export class ShareCancelledError extends Error {
   constructor() {
     super('sharing cancelled before the originals finished loading');
     this.name = 'ShareCancelledError';
+  }
+}
+
+/**
+ * Raised when `Share.open()` itself rejects — `message` is the full
+ * diagnostic text (see sharing.ts#formatShareDiagnostic): the underlying
+ * error plus the exact path and byte size of every file that was handed to
+ * it, meant to be shown to the user directly, not just logged.
+ */
+export class ShareOpenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ShareOpenError';
   }
 }
 
@@ -59,10 +73,17 @@ export async function sharePhotos(
   try {
     await Share.open({
       urls: files.map((file) => file.uri),
+      // Explicit rather than left for react-native-share to sniff from each
+      // file's extension — see sharing.ts#resolveShareMimeType.
+      type: resolveShareMimeType(photos.map((photo) => photo.mime)),
       // A cancelled share sheet (the user just closed it) is a normal outcome
       // here, not an error to report — only a failed LOAD is.
       failOnCancel: false,
     });
+  } catch (error) {
+    throw new ShareOpenError(
+      formatShareDiagnostic(files, error instanceof Error ? error.message : String(error)),
+    );
   } finally {
     cleanupSharedFiles(files);
   }

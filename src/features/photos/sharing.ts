@@ -79,3 +79,38 @@ export function formatShareFailureSummary(failedCount: number, totalCount: numbe
     ? '1 Foto konnte nicht geladen werden und wurde übersprungen.'
     : `${failedCount} Fotos konnten nicht geladen werden und wurden übersprungen.`;
 }
+
+/**
+ * The `type` passed to react-native-share's `Share.open()` — explicit
+ * rather than left for the library to guess from each file's extension
+ * (Vermutung 3 from the Fehlersuche, 2026-08-14: an unset/guessed mime type
+ * can stop a receiving app from recognising the payload at all). Every
+ * photo shares one mime type in practice, but a mixed batch degrades to a
+ * wildcard instead of guessing wrong.
+ */
+export function resolveShareMimeType(mimes: readonly (string | null | undefined)[]): string {
+  const unique = new Set(mimes.filter((mime): mime is string => Boolean(mime)));
+  if (unique.size === 1) {
+    return [...unique][0];
+  }
+  return 'image/*';
+}
+
+export type ShareDiagnosticFile = { uri: string; bytes: number };
+
+/**
+ * Diagnostic detail for when `Share.open()` itself fails — the exact path
+ * and size of every file that was actually handed to the OS share sheet,
+ * plus the underlying error text, shown to the user (not just logged) so a
+ * "chooser opens, nothing happens, no error" failure is diagnosable from a
+ * bug report alone, the same standard set for push-notification diagnostics
+ * (see CLAUDE.md) after that exact silent-failure pattern cost time twice
+ * before.
+ */
+export function formatShareDiagnostic(files: readonly ShareDiagnosticFile[], errorMessage: string): string {
+  if (files.length === 0) {
+    return errorMessage;
+  }
+  const fileLines = files.map((file) => `${file.uri} (${file.bytes} Bytes)`).join('\n');
+  return `${errorMessage}\n\n${fileLines}`;
+}

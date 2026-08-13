@@ -196,7 +196,7 @@ export default function FotoVollbildScreen() {
     }
     const outcome = await share([currentPhoto]);
     if (outcome.status === 'error') {
-      Alert.alert('Teilen fehlgeschlagen', 'Bitte später erneut versuchen.');
+      Alert.alert('Teilen fehlgeschlagen', outcome.message);
       return;
     }
     if (outcome.status === 'done' && outcome.failedCount > 0) {

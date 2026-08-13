@@ -354,25 +354,47 @@ export type ShareableOriginal = {
 
 export type ResolvedShareFile = {
   uri: string;
+  /** Actual size of the file at `uri`, in bytes — surfaced in the diagnostic message on failure (see share.ts). */
+  bytes: number;
   /**
-   * True when `uri` was downloaded into the sharing cache and must be
-   * deleted once the share sheet has been handed the file. False when `uri`
-   * IS `local_uri` — the same file this device is still holding for its own
-   * pending upload — which must never be deleted here; only the upload
-   * queue (storage.ts#executeUploadQueue) retires that file, once the bytes
-   * are confirmed safe in object storage.
+   * Always true now (2026-08-14): `uri` is a COPY in the sharing cache, made
+   * from `local_uri` if the original is still staged, or downloaded if not
+   * — see resolveOriginalForSharing's doc comment for why it is never
+   * `local_uri` directly any more. Safe to delete once the share sheet has
+   * the file; the staged upload (if any) is untouched, since we only ever
+   * read from it here, never moved or referenced it directly.
    */
   isTemporary: boolean;
 };
 
 /**
- * Directory holding originals fetched only for a share operation. Separate
- * from `photos-pending` (media.ts) on purpose: those files are staged
- * uploads this device still owns; these are throwaway copies of photos this
- * device does NOT hold locally, fetched purely to hand to the OS share
- * sheet and deleted right after. Built lazily for the same reason as every
- * other native-call-holding directory in this feature — see
- * media.ts#getStagingDirectory.
+ * Directory holding every file handed to the OS share sheet — copies of a
+ * still-staged original AND downloads of an already-uploaded one alike.
+ *
+ * WHY EVERYTHING GOES THROUGH HERE NOW (Fehlersuche 2026-08-14)
+ * ---------------------------------------------------------------
+ * react-native-share's bundled Android FileProvider only declares the app's
+ * CACHE directory as shareable with other apps (its
+ * share_download_paths.xml: `<cache-path path="/" />`, no `<files-path>`
+ * entry at all). A still-staged original lives under `Paths.document`
+ * instead (media.ts#getStagingDirectory) — OUTSIDE every declared root.
+ * Handing that path straight to `Share.open()` (the previous behaviour) made
+ * `FileProvider.getUriForFile()` throw inside react-native-share's own
+ * `RNSharePathUtil#compatUriFromFile` — which SWALLOWS that exception (only
+ * a `System.out.println`, never rethrown, never reaching this app's JS) and
+ * returns `null` instead. The share intent is then dispatched with a
+ * missing attachment: the chooser opens, the app the user picks (WhatsApp)
+ * receives nothing usable and does nothing, and nothing in JS ever sees an
+ * error — exactly the reported symptom. Copying every file into THIS
+ * directory first (already covered by the library's own default FileProvider
+ * config) sidesteps the whole failure mode without touching react-native-
+ * share or any native/manifest config — which would change the fingerprint.
+ *
+ * Separate from `photos-pending` (media.ts) on purpose: those are staged
+ * uploads this device still owns; these are throwaway copies made purely to
+ * hand to the OS share sheet, deleted right after. Built lazily for the
+ * same reason as every other native-call-holding directory in this feature
+ * — see media.ts#getStagingDirectory.
  */
 let shareCacheDirectory: Directory | null = null;
 
@@ -384,11 +406,30 @@ function getShareCacheDirectory(): Directory {
 }
 
 /**
+ * Verifies the file actually exists and has real content before it is ever
+ * handed to the share sheet — Vermutung 1 from the Fehlersuche: a failed
+ * fetch must not silently hand over a missing or empty file. Throws with the
+ * exact path in the message either way, so a failure here is diagnosable
+ * from the error text alone.
+ */
+function requireResolvedShareFile(uri: string, isTemporary: boolean): ResolvedShareFile {
+  const info = new File(uri).info();
+  if (!info.exists) {
+    throw new Error(`photos: Datei für das Teilen fehlt: ${uri}`);
+  }
+  const bytes = info.size ?? 0;
+  if (bytes === 0) {
+    throw new Error(`photos: Datei für das Teilen ist leer: ${uri}`);
+  }
+  return { uri, bytes, isTemporary };
+}
+
+/**
  * Resolve a local file path for a photo's ORIGINAL, ready to hand to the OS
- * share sheet. If the original is still staged on this device (`local_uri`
- * set — not yet uploaded, or the upload just hasn't finished), that file is
- * used directly, no network needed. Otherwise it is downloaded from object
- * storage into the sharing cache.
+ * share sheet — always a fresh copy inside `getShareCacheDirectory()` (see
+ * its own doc comment for why). If the original is still staged on this
+ * device (`local_uri` set), that file is copied with no network needed;
+ * otherwise it is downloaded from object storage.
  *
  * `signal` lets a caller abort an in-progress download when the user cancels
  * the loading screen (see ./sharing's `formatShareProgressLabel` and the
@@ -398,9 +439,20 @@ export async function resolveOriginalForSharing(
   photo: ShareableOriginal,
   options: { signal?: AbortSignal } = {},
 ): Promise<ResolvedShareFile> {
-  if (photo.local_uri) {
-    return { uri: photo.local_uri, isTemporary: false };
+  const directory = getShareCacheDirectory();
+  if (!directory.info().exists) {
+    directory.create({ intermediates: true });
   }
+  const destination = new File(directory, `${photo.id}.${extensionForMime(photo.mime)}`);
+  if (destination.info().exists) {
+    destination.delete();
+  }
+
+  if (photo.local_uri) {
+    await new File(photo.local_uri).copy(destination);
+    return requireResolvedShareFile(destination.uri, true);
+  }
+
   if (!photo.original_key) {
     throw new Error(`photos: no original available to share for photo ${photo.id}`);
   }
@@ -411,18 +463,12 @@ export async function resolveOriginalForSharing(
     throw new Error(`photos: could not sign the original to share for photo ${photo.id}`);
   }
 
-  const directory = getShareCacheDirectory();
-  if (!directory.info().exists) {
-    directory.create({ intermediates: true });
-  }
-
-  const destination = new File(directory, `${photo.id}.${extensionForMime(photo.mime)}`);
   const downloaded = await File.downloadFileAsync(signedUrl, destination, {
     idempotent: true,
     signal: options.signal,
   });
 
-  return { uri: downloaded.uri, isTemporary: true };
+  return requireResolvedShareFile(downloaded.uri, true);
 }
 
 /** Deletes only the files this share operation itself downloaded — never a staged upload. */

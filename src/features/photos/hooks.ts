@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ShareCancelledError, sharePhotos } from './share';
+import { ShareCancelledError, ShareOpenError, sharePhotos } from './share';
 import { checkShareBatchSize, formatMobileDataWarning, shouldWarnAboutMobileData } from './sharing';
 import { getCachedSignedUrls, isOnWifi, type ShareableOriginal, type ShareBatchProgress } from './storage';
 
@@ -50,8 +50,14 @@ export type SharePhotosOutcome =
   | { status: 'rejected'; message: string }
   /** The loading screen was cancelled before the share sheet opened. */
   | { status: 'cancelled' }
-  /** Loading failed outright (not a per-photo skip — see `failedCount` below for that). */
-  | { status: 'error' }
+  /**
+   * Loading failed outright (not a per-photo skip — see `failedCount` below
+   * for that). `message` is the full diagnostic text when available (path,
+   * byte size, underlying cause — see sharing.ts#formatShareDiagnostic) so
+   * a failure the OS share sheet itself swallowed is still visible to the
+   * user, not just the console.
+   */
+  | { status: 'error'; message: string }
   | {
       status: 'done';
       shared: number;
@@ -103,7 +109,15 @@ export function useSharePhotos(): {
         return { status: 'cancelled' };
       }
       console.error('[LifeBook] Teilen fehlgeschlagen', error);
-      return { status: 'error' };
+      return {
+        status: 'error',
+        message:
+          error instanceof ShareOpenError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Unbekannter Fehler beim Teilen.',
+      };
     } finally {
       setProgress(null);
       controllerRef.current = null;

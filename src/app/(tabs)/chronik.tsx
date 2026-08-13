@@ -146,7 +146,7 @@ export default function ChronikScreen() {
       case 'cancelled':
         break;
       case 'error':
-        setMessage('Teilen fehlgeschlagen. Details stehen im Protokoll.');
+        setMessage(outcome.message);
         break;
       case 'done': {
         const failureNote = formatShareFailureSummary(outcome.failedCount, selectedPhotos.length);

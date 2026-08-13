@@ -4,8 +4,10 @@ import {
   MAX_SHARE_BATCH,
   checkShareBatchSize,
   formatMobileDataWarning,
+  formatShareDiagnostic,
   formatShareFailureSummary,
   formatShareProgressLabel,
+  resolveShareMimeType,
   shouldWarnAboutMobileData,
 } from './sharing';
 
@@ -85,5 +87,49 @@ describe('formatShareFailureSummary', () => {
 
   it('has dedicated wording when every photo in a larger batch fails', () => {
     expect(formatShareFailureSummary(4, 4)).toBe('Keines der ausgewählten Fotos konnte geladen werden.');
+  });
+});
+
+describe('resolveShareMimeType', () => {
+  it('uses the single shared mime type', () => {
+    expect(resolveShareMimeType(['image/jpeg', 'image/jpeg'])).toBe('image/jpeg');
+  });
+
+  it('falls back to a wildcard for a mixed batch', () => {
+    expect(resolveShareMimeType(['image/jpeg', 'image/png'])).toBe('image/*');
+  });
+
+  it('ignores missing mime types when a single real one is present', () => {
+    expect(resolveShareMimeType(['image/heic', null, undefined])).toBe('image/heic');
+  });
+
+  it('falls back to a wildcard when nothing is known', () => {
+    expect(resolveShareMimeType([null, undefined])).toBe('image/*');
+  });
+
+  it('falls back to a wildcard for an empty batch', () => {
+    expect(resolveShareMimeType([])).toBe('image/*');
+  });
+});
+
+describe('formatShareDiagnostic', () => {
+  it('lists each file with its path and byte size beneath the error', () => {
+    expect(
+      formatShareDiagnostic(
+        [
+          { uri: 'file:///cache/photos-sharing/a.jpg', bytes: 204800 },
+          { uri: 'file:///cache/photos-sharing/b.jpg', bytes: 512000 },
+        ],
+        'Activity not found',
+      ),
+    ).toBe(
+      'Activity not found\n\n' +
+        'file:///cache/photos-sharing/a.jpg (204800 Bytes)\n' +
+        'file:///cache/photos-sharing/b.jpg (512000 Bytes)',
+    );
+  });
+
+  it('returns just the error message when there are no files to list', () => {
+    expect(formatShareDiagnostic([], 'Activity not found')).toBe('Activity not found');
   });
 });
