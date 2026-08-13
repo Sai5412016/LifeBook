@@ -32,6 +32,18 @@ laufen über EAS). iOS ist vorbereitet, aber nicht getestet.
    Feature-Code. Alle Instants sind ISO-8601 UTC. `local_date` wird beim Einfügen
    einmal berechnet und **nie** neu berechnet, damit „die Nacht vom 3." über
    Umzüge und Zeitumstellungen stabil bleibt.
+   **Eine Ausnahme (seit 2026-08-13):** eine ausdrückliche Nutzerkorrektur
+   eines gespeicherten Zeitpunkts (z. B. das Aufnahmedatum eines Fotos).
+   Dort ändert sich die Bedeutung der Zeile absichtlich — anders als bei
+   einer automatischen Neuberechnung im Hintergrund, vor der Regel 2
+   eigentlich schützt. In diesem einen Fall werden der Zeitpunkt UND
+   `local_date` gemeinsam, in derselben Schreiboperation neu gesetzt (siehe
+   `core/time#applyOccurredAtCorrection`, verwendet in
+   `features/photos/repository.ts#correctPhotoOccurredAt`) — sonst zeigt der
+   Bildschirm ein neues Datum, aber die Chronik sortiert weiter unter dem
+   alten ein, was schlimmer ist als vor der Korrektur. Die Zeitzone dafür
+   ist immer die gespeicherte `tz`-Spalte der Zeile, nie die aktuelle
+   Geräte-Zeitzone.
 3. **Reine Logik von Gerätecode trennen.** Module mit Expo-Importen sind nicht
    testbar. Muster: `identity.ts` (rein, getestet) neben `media.ts` (Gerät).
 4. **Abweichungen von der Spec werden dokumentiert, nicht verschwiegen.** Als
@@ -45,6 +57,12 @@ laufen über EAS). iOS ist vorbereitet, aber nicht getestet.
    nacktes TextInput außerhalb von KeyboardSafeScreen ist ein Fehler, auch
    wenn er im Emulator nicht auffällt — Emulatoren blenden häufig gar keine
    Tastatur ein.
+8. **Was für jeden angemeldeten Nutzer gelten soll, hängt am Anmeldezustand,
+   nicht am Anmeldevorgang.** Die Push-Registrierung stand nur hinter dem
+   interaktiven Anmeldeformular und lief deshalb bei wiederkehrenden
+   Nutzern mit bestehender Sitzung nie — der Normalfall ab dem zweiten Tag.
+   Solche Effekte gehören an den Auth-Zustand im Wurzel-Layout, nach dem
+   Muster von `PushRegistrationEffect` und `PowerSyncConnector`.
 
 ## Verifizierte Fallstricke — nicht erneut hineinlaufen
 

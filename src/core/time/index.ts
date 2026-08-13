@@ -65,6 +65,16 @@ export const exifWallClockToUtcIso = (
 export const toUtcIso = (date: Date): string => date.toISOString();
 
 /**
+ * Epoch milliseconds → ISO-8601 UTC. For timestamps that are already a
+ * precise instant with no timezone ambiguity to resolve (a file's own
+ * modification time, Android MediaStore's `creationTime`) — unlike EXIF's
+ * timezone-less wall clock, there is no interpretation step here, only a
+ * format conversion. Kept in core/time regardless, so `new Date(...)` stays
+ * confined to this one module even for that trivial a case.
+ */
+export const epochMillisToUtcIso = (millis: number): string => new Date(millis).toISOString();
+
+/**
  * German day heading for a stored `local_date` (YYYY-MM-DD), e.g.
  * "Mittwoch, 5. August 2026".
  *
@@ -122,6 +132,35 @@ export const combineLocalDateAndTime = (
  */
 export const toLocalDate = (occurredAtUtcIso: string, tz: string): string =>
   formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'yyyy-MM-dd');
+
+/**
+ * 2026-08-13: THE ONE EXCEPTION to "`local_date` is derived once and never
+ * recomputed" (see the module doc comment above). That rule protects against
+ * `local_date` drifting on its own — a device timezone change, a background
+ * recompute — while the row's actual meaning stays the same. An explicit
+ * user correction of a photo's date/time is the opposite case: the meaning
+ * itself just changed, on purpose, and `local_date` MUST follow it in the
+ * very same write. Leaving the old `local_date` in place after such a
+ * correction would be worse than before it — the displayed date and the
+ * day the chronology files the photo under would openly disagree.
+ *
+ * Combines a corrected local date + time into the new `occurred_at`, then
+ * immediately re-derives `local_date` from THAT result and the SAME `tz` —
+ * one call, one answer, so a caller can never write one without the other.
+ * `tz` must be the photo's own stored `tz`, never the device's current
+ * timezone (see features/photos/repository.ts#correctPhotoOccurredAt).
+ */
+export const applyOccurredAtCorrection = (
+  localDate: string,
+  time: string,
+  tz: string,
+): { occurredAtUtcIso: string; localDate: string } | null => {
+  const occurredAtUtcIso = combineLocalDateAndTime(localDate, time, tz);
+  if (!occurredAtUtcIso) {
+    return null;
+  }
+  return { occurredAtUtcIso, localDate: toLocalDate(occurredAtUtcIso, tz) };
+};
 
 /**
  * The dashboard day a UTC instant belongs to, given a day-start hour (default 06:00

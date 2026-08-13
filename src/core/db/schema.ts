@@ -241,12 +241,21 @@ function buildAppSchema() {
 
   const photos = new Table(
     {
-      ...eventColumns, // occurred_at = capture time (from EXIF)
+      ...eventColumns, // occurred_at = best-known capture time, see occurred_at_source
       source: column.text, // device_gallery | imported
       media_store_id: column.text, // Android MediaStore reference (unstable!)
       local_uri: column.text,
       content_hash: column.text, // SHA-256 of first 1 MB + file size
-      captured_at: column.text, // from EXIF, may be NULL
+      captured_at: column.text, // from EXIF specifically, may be NULL
+      // 2026-08-13: which fallback stage actually produced `occurred_at` —
+      // exif | media_library | file_mtime | import_time | user_corrected.
+      // A screenshot or messenger-saved image has no EXIF at all; before
+      // this column existed, that silently fell back to "now", writing a
+      // WRONG date into the chronology with nothing to show it was guessed.
+      // See features/photos/media.ts#resolveOccurredAt for the fallback
+      // chain and features/photos/identity.ts#isOccurredAtEstimated for
+      // which of these count as "geschätzt" on screen.
+      occurred_at_source: column.text,
       age_days: column.integer, // computed against children.birth_at
       width: column.integer,
       height: column.integer,

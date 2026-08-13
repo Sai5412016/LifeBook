@@ -27,6 +27,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Modal,
   Pressable,
   StyleSheet,
   View,
@@ -37,13 +38,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { ageInDays, formatDayLabel } from '@/core/time';
+import { ageInDays, formatDayLabel, formatTimeLabel } from '@/core/time';
 import { useActiveChild } from '@/features/household/repository';
-import { formatAgeLabel, resolveFullscreenUri } from '@/features/photos/identity';
+import { formatAgeLabel, isOccurredAtEstimated, resolveFullscreenUri } from '@/features/photos/identity';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { deleteQuietly } from '@/features/photos/media';
-import { softDeletePhoto, usePhotoById, usePhotosOfChild } from '@/features/photos/repository';
+import {
+  correctPhotoOccurredAt,
+  softDeletePhoto,
+  usePhotoById,
+  usePhotosOfChild,
+} from '@/features/photos/repository';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { removeStoredObjects } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
@@ -54,9 +61,15 @@ import {
   indexOfPhoto,
   windowIndices,
 } from '@/features/photos/viewer';
+import { KeyboardSafeScreen, TextField } from '@/ui';
 
 /** Signed URLs are kept warm for the current photo plus this many on each side. */
 const SIGNED_URL_WINDOW_RADIUS = 3;
+
+// Same format/validation as kind/bearbeiten.tsx's birth date/time fields —
+// no native date picker (a new native module, see CLAUDE.md Fallstrick 5).
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export default function FotoVollbildScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -76,6 +89,12 @@ export default function FotoVollbildScreen() {
   const [currentIndex, setCurrentIndex] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
+
+  const [editingDate, setEditingDate] = useState(false);
+  const [dateInput, setDateInput] = useState('');
+  const [timeInput, setTimeInput] = useState('');
+  const [dateError, setDateError] = useState<string | null>(null);
+  const [savingDate, setSavingDate] = useState(false);
 
   const resolvedInitialIndex = indexOfPhoto(photos, id);
 
@@ -180,6 +199,52 @@ export default function FotoVollbildScreen() {
     }
   }, [db, currentPhoto, currentIndex, photos.length]);
 
+  // Prefilled from the CURRENT photo's own local_date/tz — the same values
+  // it is actually filed under, not a recomputation from anything else.
+  const handleOpenDateEditor = useCallback(() => {
+    if (!currentPhoto) {
+      return;
+    }
+    setDateInput(currentPhoto.local_date);
+    setTimeInput(formatTimeLabel(currentPhoto.occurred_at, currentPhoto.tz));
+    setDateError(null);
+    setEditingDate(true);
+  }, [currentPhoto]);
+
+  const handleSaveDate = useCallback(async () => {
+    if (!currentPhoto) {
+      return;
+    }
+    setDateError(null);
+
+    if (!DATE_RE.test(dateInput)) {
+      setDateError('Datum bitte im Format JJJJ-MM-TT eingeben.');
+      return;
+    }
+    if (!TIME_RE.test(timeInput)) {
+      setDateError('Uhrzeit bitte im Format HH:MM eingeben.');
+      return;
+    }
+
+    setSavingDate(true);
+    try {
+      const applied = await correctPhotoOccurredAt(db, currentPhoto, {
+        localDate: dateInput,
+        time: timeInput,
+      });
+      if (!applied) {
+        setDateError('Datum/Uhrzeit konnten nicht verarbeitet werden.');
+        return;
+      }
+      setEditingDate(false);
+    } catch (error) {
+      console.error('[LifeBook] Aufnahmedatum konnte nicht korrigiert werden', error);
+      setDateError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
+    } finally {
+      setSavingDate(false);
+    }
+  }, [db, currentPhoto, dateInput, timeInput]);
+
   // Der Text ist bewusst deutlich: "weiches Löschen" trifft nur die
   // Datenbankzeile, die Dateien im Speicher werden hart entfernt (siehe
   // handleDelete) — ohne Datei ist die Zeile für die Familie wertlos, das
@@ -249,6 +314,11 @@ export default function FotoVollbildScreen() {
         .join(' · ')
     : '';
 
+  // Nur in der Vollbildansicht, nie in der Kachelansicht — dort würde es
+  // nur stören (siehe Aufgabenstellung). "Dezent": kleine, gedämpfte
+  // Schrift, keine Warnfarbe — ein geschätztes Datum ist kein Fehler.
+  const dateIsEstimated = currentPhoto ? isOccurredAtEstimated(currentPhoto.occurred_at_source) : false;
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -258,12 +328,15 @@ export default function FotoVollbildScreen() {
           </Pressable>
 
           {currentPhoto ? (
-            <View style={styles.headerInfo}>
+            <Pressable style={styles.headerInfo} onPress={handleOpenDateEditor} hitSlop={8}>
               <ThemedText style={styles.headerTitle} numberOfLines={1}>
-                {formatDayLabel(currentPhoto.local_date)}
+                {formatDayLabel(currentPhoto.local_date)} ✎
               </ThemedText>
               <ThemedText style={styles.headerSubtitle}>{headerSubtitle}</ThemedText>
-            </View>
+              {dateIsEstimated ? (
+                <ThemedText style={styles.estimatedBadge}>Datum geschätzt</ThemedText>
+              ) : null}
+            </Pressable>
           ) : (
             <View style={styles.headerInfo} />
           )}
@@ -326,6 +399,56 @@ export default function FotoVollbildScreen() {
           )}
         </View>
       </SafeAreaView>
+
+      <Modal
+        visible={editingDate}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setEditingDate(false)}>
+        <ThemedView style={styles.editRoot}>
+          <KeyboardSafeScreen
+            header={
+              <View style={styles.editHeader}>
+                <Pressable onPress={() => setEditingDate(false)} hitSlop={12} disabled={savingDate}>
+                  <ThemedText type="link" themeColor="textSecondary">
+                    Abbrechen
+                  </ThemedText>
+                </Pressable>
+                <ThemedText type="smallBold">Aufnahmedatum</ThemedText>
+                <Pressable onPress={handleSaveDate} hitSlop={12} disabled={savingDate}>
+                  <ThemedText type="linkPrimary">{savingDate ? '…' : 'Speichern'}</ThemedText>
+                </Pressable>
+              </View>
+            }
+            contentContainerStyle={styles.editContent}>
+            <View style={styles.editRow}>
+              <View style={styles.editField}>
+                <TextField
+                  label="Datum (JJJJ-MM-TT)"
+                  value={dateInput}
+                  onChangeText={setDateInput}
+                  keyboardType="numbers-and-punctuation"
+                  autoCapitalize="none"
+                />
+              </View>
+              <View style={styles.editField}>
+                <TextField
+                  label="Uhrzeit (HH:MM)"
+                  value={timeInput}
+                  onChangeText={setTimeInput}
+                  keyboardType="numbers-and-punctuation"
+                  autoCapitalize="none"
+                />
+              </View>
+            </View>
+            {dateError ? (
+              <ThemedText type="small" themeColor="dangerText">
+                {dateError}
+              </ThemedText>
+            ) : null}
+          </KeyboardSafeScreen>
+        </ThemedView>
+      </Modal>
     </View>
   );
 }
@@ -347,6 +470,7 @@ const styles = StyleSheet.create({
   headerInfo: { flex: 1, alignItems: 'center' },
   headerTitle: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   headerSubtitle: { color: '#B0B4BA', fontSize: 12 },
+  estimatedBadge: { color: '#B0B4BA', fontSize: 11, fontStyle: 'italic', marginTop: 2 },
   progressRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -358,4 +482,15 @@ const styles = StyleSheet.create({
   imageArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', height: '100%' },
   placeholderText: { color: '#B0B4BA' },
+  editRoot: { flex: 1 },
+  editHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  editContent: { gap: Spacing.three, paddingHorizontal: Spacing.three, paddingBottom: Spacing.five },
+  editRow: { flexDirection: 'row', gap: Spacing.two },
+  editField: { flex: 1 },
 });

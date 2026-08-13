@@ -12,6 +12,25 @@
 export type PhotoSource = 'device_gallery' | 'imported';
 
 /**
+ * Which fallback stage actually produced `occurred_at`/`PhotoRow.occurred_at`
+ * — see features/photos/media.ts#resolveOccurredAt for the fallback chain
+ * this records, in order:
+ * - 'exif'          — EXIF DateTimeOriginal/Digitized/DateTime.
+ * - 'media_library'  — Android MediaStore's own creation time, via the
+ *                      picker's assetId (only when MediaLibrary permission
+ *                      already happens to be granted — never requested for
+ *                      this).
+ * - 'file_mtime'     — the picked file's own last-modified time.
+ * - 'import_time'    — none of the above worked; the moment of import.
+ * - 'user_corrected' — an explicit correction via
+ *                      features/photos/repository.ts#correctPhotoOccurredAt.
+ * See features/photos/identity.ts#isOccurredAtEstimated for which of these
+ * count as "Datum geschätzt" on screen — everything except the first and
+ * the last.
+ */
+export type OccurredAtSource = 'exif' | 'media_library' | 'file_mtime' | 'import_time' | 'user_corrected';
+
+/**
  * Whether the ORIGINAL file is still reachable at `local_uri` on THIS device.
  * Irrelevant for other devices — they always read from object storage.
  */
@@ -31,8 +50,12 @@ export type PhotoCandidate = {
   width: number;
   height: number;
   bytes: number;
-  /** ISO-8601 UTC capture time from EXIF; null when the file carries none. */
+  /** ISO-8601 UTC capture time from EXIF specifically; null when the file carries none. Stored as-is in `captured_at`. */
   capturedAtUtcIso: string | null;
+  /** The RESOLVED capture instant after the full fallback chain — never null, feeds `occurred_at`. */
+  occurredAtUtcIso: string;
+  /** Which stage of the chain actually produced `occurredAtUtcIso` — feeds `occurred_at_source`. */
+  occurredAtSource: OccurredAtSource;
   /** Stable content identity, `<sha256-of-first-MB>:<bytes>`. */
   contentHash: string;
   /** Only ever filled when the user opted in to location data. */
@@ -55,6 +78,12 @@ export type PhotoRow = {
   local_uri: string | null;
   content_hash: string;
   captured_at: string | null;
+  /**
+   * Existing rows imported before this column existed read back as NULL —
+   * treated as an estimate by isOccurredAtEstimated (the honest answer:
+   * we don't actually know, so it must not be trusted as measured either).
+   */
+  occurred_at_source: OccurredAtSource | null;
   /**
    * Snapshot of the child's age at import time — frozen, never recomputed
    * (Spec §7's `local_date` rule). NOT used for display: a birth date/time

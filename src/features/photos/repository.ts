@@ -20,7 +20,7 @@ import { useQuery } from '@powersync/react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
 import { newId } from '@/core/db/ids';
-import { ageInDays, nowUtcIso, toLocalDate } from '@/core/time';
+import { ageInDays, applyOccurredAtCorrection, nowUtcIso, toLocalDate } from '@/core/time';
 
 import { buildOriginalKey, buildThumbKey, groupPhotosByDay } from './identity';
 import type { PhotoCandidate, PhotoDaySection, PhotoRow } from './types';
@@ -29,7 +29,7 @@ import type { PhotoCandidate, PhotoDaySection, PhotoRow } from './types';
 const PHOTO_COLUMNS = `
   id, household_id, child_id, occurred_at, tz, local_date, created_by,
   created_at, updated_at, deleted_at, source, local_uri, content_hash,
-  captured_at, age_days, width, height, mime, bytes,
+  captured_at, occurred_at_source, age_days, width, height, mime, bytes,
   thumb_key, thumb_uploaded_at, original_key, original_uploaded_at, availability
 `;
 
@@ -66,10 +66,12 @@ export type InsertPhotosInput = {
  * Insert freshly imported photos in one local transaction, so an interrupted
  * import never leaves half an album behind.
  *
- * `occurred_at` prefers the EXIF capture time and falls back to "now" — a photo
- * with no capture tag still belongs somewhere in the chronology, and today is the
- * only honest guess. `local_date` and `age_days` are frozen here and never
- * recomputed (Spec §7), so the timeline stays stable across moves and DST.
+ * `occurred_at` is the candidate's already-resolved instant — see
+ * ./media.ts#resolveOccurredAt for the fallback chain (EXIF, then
+ * MediaLibrary, then file modification time, then import time) that
+ * produced it, and `occurred_at_source` for which stage won. `local_date`
+ * and `age_days` are frozen here and never recomputed (Spec §7), so the
+ * timeline stays stable across moves and DST.
  */
 export async function insertPhotos(
   db: AbstractPowerSyncDatabase,
@@ -79,7 +81,7 @@ export async function insertPhotos(
 
   await db.writeTransaction(async (tx) => {
     for (const { photoId, candidate, stagedUri, thumbKey } of input.entries) {
-      const occurredAt = candidate.capturedAtUtcIso ?? now;
+      const occurredAt = candidate.occurredAtUtcIso;
       const localDate = toLocalDate(occurredAt, input.tz);
       const age = input.birthAtUtcIso
         ? ageInDays(occurredAt, input.birthAtUtcIso, input.tz)
@@ -89,9 +91,9 @@ export async function insertPhotos(
         `INSERT INTO photos (
            id, household_id, child_id, occurred_at, tz, local_date, created_by,
            created_at, updated_at, deleted_at, source, local_uri, content_hash,
-           captured_at, age_days, width, height, mime, bytes,
+           captured_at, occurred_at_source, age_days, width, height, mime, bytes,
            thumb_key, thumb_uploaded_at, original_key, original_uploaded_at, availability
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'device_gallery', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 'available')`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'device_gallery', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, 'available')`,
         [
           photoId,
           input.householdId,
@@ -105,6 +107,7 @@ export async function insertPhotos(
           stagedUri,
           candidate.contentHash,
           candidate.capturedAtUtcIso,
+          candidate.occurredAtSource,
           age,
           candidate.width,
           candidate.height,
@@ -175,6 +178,48 @@ export async function markOriginalUploaded(
       WHERE id = ?`,
     [now, now, photoId],
   );
+}
+
+/**
+ * Applies a user-entered correction to a photo's capture date/time.
+ *
+ * 2026-08-13: THE ONE EXCEPTION to "`local_date` is derived once and never
+ * recomputed" (CLAUDE.md Architekturregel 2 / Master-Spec §7) — see
+ * core/time#applyOccurredAtCorrection's own doc comment for the full
+ * reasoning. `occurred_at` and `local_date` are written together in this
+ * SAME statement so the row can never end up with one changed and not the
+ * other. `tz` comes from `photo.tz` — the zone the photo was ALREADY filed
+ * under — never `deviceTimeZone()`: correcting a photo from a trip means
+ * entering the date as it was there, not reinterpreting it in whatever
+ * zone the correcting device happens to be in right now.
+ *
+ * `occurred_at_source` becomes `'user_corrected'` — once a person has
+ * confirmed a date, it is no longer a guess (see
+ * ./identity.ts#isOccurredAtEstimated), regardless of what fallback stage
+ * produced the value it's replacing.
+ *
+ * Returns false for a malformed date/time (the screen's own validation
+ * should already have caught it before calling this) instead of writing a
+ * bogus instant.
+ */
+export async function correctPhotoOccurredAt(
+  db: AbstractPowerSyncDatabase,
+  photo: Pick<PhotoRow, 'id' | 'tz'>,
+  input: { localDate: string; time: string },
+): Promise<boolean> {
+  const corrected = applyOccurredAtCorrection(input.localDate, input.time, photo.tz);
+  if (!corrected) {
+    return false;
+  }
+
+  const now = nowUtcIso();
+  await db.execute(
+    `UPDATE photos
+        SET occurred_at = ?, local_date = ?, occurred_at_source = 'user_corrected', updated_at = ?
+      WHERE id = ?`,
+    [corrected.occurredAtUtcIso, corrected.localDate, now, photo.id],
+  );
+  return true;
 }
 
 /** Soft-delete, mirroring the convention used by every other event table. */

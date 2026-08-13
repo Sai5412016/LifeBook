@@ -10,19 +10,24 @@
  * photos?" dialog. Less permission, less scare, less to justify under GDPR —
  * data minimisation by construction rather than by promise.
  *
- * The trade-off is that we cannot auto-scan for new photos. A later step can add
- * expo-media-library (already configured in app.json) behind an explicit opt-in.
+ * The trade-off is that we cannot auto-scan for new photos.
+ *
+ * 2026-08-13 — expo-media-library IS now used, but only read-only, per-asset,
+ * best-effort, and NEVER behind a fresh permission prompt (see
+ * resolveOccurredAt below) — this is not the "full gallery access" opt-in the
+ * paragraph above was about; it stays data-minimising by construction.
  */
 
 import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library/legacy';
 
-import { exifWallClockToUtcIso } from '@/core/time';
+import { epochMillisToUtcIso, exifWallClockToUtcIso, nowUtcIso } from '@/core/time';
 
 import { HASH_SAMPLE_BYTES, composeContentHash } from './identity';
-import type { PhotoCandidate } from './types';
+import type { OccurredAtSource, PhotoCandidate } from './types';
 
 /** Longest edge of the generated preview, in pixels. */
 const THUMB_MAX_EDGE = 640;
@@ -81,12 +86,89 @@ export function exifCapturedAt(
 }
 
 /**
+ * Best-effort read of Android's own MediaStore creation time for a picked
+ * asset, via the assetId the system picker already hands back. Deliberately
+ * checks CURRENT permission only (`getPermissionsAsync`, never
+ * `requestPermissionsAsync`) — a photo import must never surface a NEW
+ * permission prompt just to guess a date, per the fallback chain's own
+ * design (see resolveOccurredAt). Returns null for anything that stops this
+ * from working: permission never granted, asset since deleted from the
+ * gallery, a picker that returned no assetId — every one of those just
+ * means this stage has nothing to offer, not that the import should fail.
+ */
+async function mediaLibraryCreationTime(assetId: string): Promise<string | null> {
+  try {
+    const permission = await MediaLibrary.getPermissionsAsync();
+    if (!permission.granted) {
+      return null;
+    }
+    const info = await MediaLibrary.getAssetInfoAsync(assetId);
+    return info.creationTime ? epochMillisToUtcIso(info.creationTime) : null;
+  } catch (error) {
+    console.error('[LifeBook] MediaLibrary-Aufnahmedatum nicht verfügbar', error);
+    return null;
+  }
+}
+
+/** The picked file's own last-modified time — the least reliable stage, tried only once nothing better is available. */
+function fileModificationTime(localUri: string): string | null {
+  try {
+    const info = new File(localUri).info();
+    return info.exists && info.modificationTime ? epochMillisToUtcIso(info.modificationTime) : null;
+  } catch (error) {
+    console.error('[LifeBook] Änderungsdatum der Datei nicht verfügbar', error);
+    return null;
+  }
+}
+
+/**
+ * Resolves the best available capture instant for a picked photo, first
+ * verifiable source wins:
+ *   1. EXIF (already parsed by the caller — a camera photo almost always has it).
+ *   2. Android's MediaStore creation time, via expo-media-library.
+ *   3. The picked file's own modification time.
+ *   4. The moment of import — the last resort, not the first.
+ *
+ * WHY THIS EXISTS
+ * ----------------
+ * A screenshot or a photo received over a messenger carries no EXIF at all.
+ * Before this chain, that silently fell through to "now" — writing a WRONG
+ * date into the chronology (not just a missing one) with nothing on screen
+ * to show it had been guessed (found 2026-08-13: a screenshot imported that
+ * day, actually taken the day before, landed on "today" with no trace of
+ * why). Every stage below `exif` is recorded in `occurredAtSource` so the
+ * screen can say so — see ./identity.ts#isOccurredAtEstimated.
+ */
+export async function resolveOccurredAt(
+  exifCapturedAtUtcIso: string | null,
+  assetId: string | null,
+  localUri: string,
+): Promise<{ occurredAtUtcIso: string; source: OccurredAtSource }> {
+  if (exifCapturedAtUtcIso) {
+    return { occurredAtUtcIso: exifCapturedAtUtcIso, source: 'exif' };
+  }
+
+  if (assetId) {
+    const fromLibrary = await mediaLibraryCreationTime(assetId);
+    if (fromLibrary) {
+      return { occurredAtUtcIso: fromLibrary, source: 'media_library' };
+    }
+  }
+
+  const fromMtime = fileModificationTime(localUri);
+  if (fromMtime) {
+    return { occurredAtUtcIso: fromMtime, source: 'file_mtime' };
+  }
+
+  return { occurredAtUtcIso: nowUtcIso(), source: 'import_time' };
+}
+
+/**
  * Open the system picker and return the chosen images with metadata already
  * extracted. Throws PickCancelledError when the user backs out.
  *
- * `exif: true` is what gives us the real capture date — without it the only date
- * available is "when the file landed in the cache", which would put every
- * imported photo on today's date and destroy the chronology.
+ * `exif: true` is what gives us the real capture date when it exists — for
+ * everything else there is the fallback chain in resolveOccurredAt.
  */
 export async function pickPhotos(tz: string): Promise<PhotoCandidate[]> {
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -106,16 +188,21 @@ export async function pickPhotos(tz: string): Promise<PhotoCandidate[]> {
 
   for (const asset of result.assets) {
     const { hash, bytes } = await computeContentHash(asset.uri);
+    const assetId = asset.assetId ?? null;
+    const capturedAtUtcIso = exifCapturedAt(asset.exif, tz);
+    const { occurredAtUtcIso, source } = await resolveOccurredAt(capturedAtUtcIso, assetId, asset.uri);
 
     candidates.push({
       localUri: asset.uri,
-      assetId: asset.assetId ?? null,
+      assetId,
       fileName: asset.fileName ?? null,
       mime: asset.mimeType ?? 'image/jpeg',
       width: asset.width,
       height: asset.height,
       bytes: asset.fileSize ?? bytes,
-      capturedAtUtcIso: exifCapturedAt(asset.exif, tz),
+      capturedAtUtcIso,
+      occurredAtUtcIso,
+      occurredAtSource: source,
       contentHash: hash,
       // Location stays out of the database unless the user opts in; the original
       // file itself is stored untouched, GPS tags included (see repository docs).

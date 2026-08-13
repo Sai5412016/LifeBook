@@ -3,7 +3,9 @@ import {
   toLocalDate,
   toDashboardDate,
   ageInDays,
+  applyOccurredAtCorrection,
   combineLocalDateAndTime,
+  epochMillisToUtcIso,
   exifWallClockToUtcIso,
   formatDayLabel,
   formatDuration,
@@ -143,6 +145,61 @@ describe('combineLocalDateAndTime', () => {
 
   it('returns null for an unknown timezone rather than a wrong instant', () => {
     expect(combineLocalDateAndTime('2026-08-08', '14:32', 'Mars/Olympus')).toBeNull();
+  });
+});
+
+describe('epochMillisToUtcIso', () => {
+  it('converts epoch milliseconds to an ISO-8601 UTC string', () => {
+    expect(epochMillisToUtcIso(1786190400000)).toBe('2026-08-08T12:00:00.000Z');
+  });
+
+  it('handles 0 (the epoch itself)', () => {
+    expect(epochMillisToUtcIso(0)).toBe('1970-01-01T00:00:00.000Z');
+  });
+});
+
+describe('applyOccurredAtCorrection', () => {
+  it('recomputes local_date from the corrected date/time and timezone together', () => {
+    expect(applyOccurredAtCorrection('2026-08-08', '14:32', BERLIN)).toEqual({
+      occurredAtUtcIso: '2026-08-08T12:32:00.000Z',
+      localDate: '2026-08-08',
+    });
+  });
+
+  it('moves the photo to a new day when the correction crosses a day boundary', () => {
+    // The whole point of recomputing local_date together with occurred_at:
+    // correcting FROM one day TO another must actually change which day
+    // the chronology groups the photo under, not just what it displays.
+    const original = applyOccurredAtCorrection('2026-08-08', '10:00', BERLIN)!;
+    const corrected = applyOccurredAtCorrection('2026-08-05', '10:00', BERLIN)!;
+    expect(original.localDate).toBe('2026-08-08');
+    expect(corrected.localDate).toBe('2026-08-05');
+  });
+
+  it('stays correct across the spring DST transition (2026-03-29, Europe/Berlin)', () => {
+    // Berlin springs forward at 02:00 -> 03:00 CEST on this date; 10:00
+    // local is safely after the transition, already at +02:00.
+    expect(applyOccurredAtCorrection('2026-03-29', '10:00', BERLIN)).toEqual({
+      occurredAtUtcIso: '2026-03-29T08:00:00.000Z',
+      localDate: '2026-03-29',
+    });
+  });
+
+  it('stays on the correct side of midnight across the DST transition night', () => {
+    // 23:50 local on the eve of the transition is still CET (+01:00) —
+    // the transition itself happens at 02:00 the FOLLOWING morning.
+    expect(applyOccurredAtCorrection('2026-03-28', '23:50', BERLIN)).toEqual({
+      occurredAtUtcIso: '2026-03-28T22:50:00.000Z',
+      localDate: '2026-03-28',
+    });
+  });
+
+  it('returns null for a malformed date, without touching local_date at all', () => {
+    expect(applyOccurredAtCorrection('not-a-date', '10:00', BERLIN)).toBeNull();
+  });
+
+  it('returns null for an unknown timezone rather than a wrong instant', () => {
+    expect(applyOccurredAtCorrection('2026-08-08', '10:00', 'Mars/Olympus')).toBeNull();
   });
 });
 

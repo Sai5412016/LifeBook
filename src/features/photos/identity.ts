@@ -13,6 +13,8 @@
  * the only identity that survives, so that is what we key on.
  */
 
+import type { OccurredAtSource } from './types';
+
 /**
  * How many leading bytes feed the hash. Hashing the whole file would be exact
  * but costs seconds per photo on a mid-range phone; the first megabyte of a JPEG
@@ -144,6 +146,19 @@ export function formatAgeLabel(ageDays: number | null | undefined): string {
   }
   const years = Math.floor(ageDays / 365);
   return years === 1 ? '1 Jahr' : `${years} Jahre`;
+}
+
+/**
+ * Whether a photo's `occurred_at` was actually measured rather than guessed
+ * — drives the "Datum geschätzt" hint in the fullscreen viewer (deliberately
+ * NOT shown in the grid, where it would only clutter a tile). Only EXIF and
+ * an explicit user correction count as certain; MediaLibrary/file-mtime/
+ * import-time are all fallbacks, and a legacy row with no source recorded
+ * (`null`, imported before this column existed) is treated the same way —
+ * "unknown" must never read as "confirmed".
+ */
+export function isOccurredAtEstimated(source: OccurredAtSource | null): boolean {
+  return source !== 'exif' && source !== 'user_corrected';
 }
 
 type FullscreenPhotoKeys = {

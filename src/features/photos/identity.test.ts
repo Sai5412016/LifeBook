@@ -8,6 +8,7 @@ import {
   extensionForMime,
   formatAgeLabel,
   groupPhotosByDay,
+  isOccurredAtEstimated,
   resolveFullscreenUri,
 } from './identity';
 
@@ -117,6 +118,27 @@ describe('resolveFullscreenUri', () => {
 
   it('returns undefined when there is neither a local file nor an original key', () => {
     expect(resolveFullscreenUri({ local_uri: null, original_key: null }, new Map())).toBeUndefined();
+  });
+});
+
+describe('isOccurredAtEstimated', () => {
+  it('is not estimated when it came from EXIF', () => {
+    expect(isOccurredAtEstimated('exif')).toBe(false);
+  });
+
+  it('is not estimated once a user has confirmed it via a correction', () => {
+    expect(isOccurredAtEstimated('user_corrected')).toBe(false);
+  });
+
+  it.each(['media_library', 'file_mtime', 'import_time'] as const)(
+    'is estimated for the %s fallback',
+    (source) => {
+      expect(isOccurredAtEstimated(source)).toBe(true);
+    },
+  );
+
+  it('treats a legacy row with no recorded source as estimated, not confirmed', () => {
+    expect(isOccurredAtEstimated(null)).toBe(true);
   });
 });
 
