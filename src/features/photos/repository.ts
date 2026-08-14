@@ -358,3 +358,26 @@ export function useMediumBackfillProgress(): MediumBackfillProgress {
   );
   return countMediumBackfillProgress(data ?? []);
 }
+
+/** Every field storage.ts#healMissingMedium and identity.ts#selectMediumBackfillCandidates need for one photo. */
+export type MediumBackfillCandidatePhoto = Pick<
+  PhotoRow,
+  'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height' | 'bytes'
+>;
+
+/**
+ * Reactive: every photo still missing a medium rendition, oldest first
+ * (same convention as `loadPendingUploads`) — the "Alle Fotos vorbereiten"
+ * button's actual work queue. Re-runs as photos get healed, so a run that
+ * was cancelled or interrupted simply has fewer candidates the next time
+ * it's started — no separate "resume" bookkeeping needed.
+ */
+export function useMediumBackfillCandidatePhotos(): MediumBackfillCandidatePhoto[] {
+  const { data } = useQuery<MediumBackfillCandidatePhoto>(
+    `SELECT id, household_id, local_uri, original_key, medium_key, mime, width, height, bytes
+       FROM photos
+      WHERE deleted_at IS NULL AND medium_key IS NULL
+      ORDER BY created_at ASC`,
+  );
+  return data ?? [];
+}

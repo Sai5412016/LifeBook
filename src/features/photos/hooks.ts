@@ -7,11 +7,42 @@
  * re-sign, and therefore re-download, every photo on every remount.
  */
 
+import * as Network from 'expo-network';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ShareCancelledError, ShareOpenError, sharePhotos } from './share';
 import { checkShareBatchSize, formatMobileDataWarning, shouldWarnAboutMobileData } from './sharing';
 import { getCachedSignedUrls, isOnWifi, type ShareableOriginal, type ShareBatchProgress } from './storage';
+
+/**
+ * Reactive Wi-Fi state — the "Alle Fotos vorbereiten" button's disabled
+ * state needs to know this live, not just check once at tap time. Reuses
+ * `isOnWifi()` (the exact same check the upload queue and single-photo heal
+ * already gate on) on every network change instead of duplicating its
+ * WIFI-type/isConnected logic here.
+ */
+export function useIsOnWifi(): boolean {
+  const [onWifi, setOnWifi] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      isOnWifi().then((value) => {
+        if (!cancelled) {
+          setOnWifi(value);
+        }
+      });
+    };
+    refresh();
+    const subscription = Network.addNetworkStateListener(refresh);
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, []);
+
+  return onWifi;
+}
 
 /**
  * Resolve display URLs for a set of object keys, backed by the shared

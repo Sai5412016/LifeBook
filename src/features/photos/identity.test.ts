@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  advanceMediumBackfillRun,
   buildMediumKey,
   buildOriginalKey,
   buildThumbKey,
@@ -11,12 +12,18 @@ import {
   dedupeByHash,
   extensionForMime,
   formatAgeLabel,
+  formatEstimatedDownloadSize,
+  formatMediumBackfillConfirmation,
   formatMediumBackfillLabel,
   groupPhotosByDay,
+  isMediumBackfillRunComplete,
   isOccurredAtEstimated,
   locatePhotoInSections,
+  nextMediumBackfillId,
   resolveFullscreenUri,
+  selectMediumBackfillCandidates,
   shouldResignUrl,
+  startMediumBackfillRun,
 } from './identity';
 
 const hash = (n: string) => composeContentHash(`sha-${n}`, 1000);
@@ -306,6 +313,116 @@ describe('formatMediumBackfillLabel', () => {
 
   it('returns null for an empty album — no line at all', () => {
     expect(formatMediumBackfillLabel({ prepared: 0, total: 0 })).toBeNull();
+  });
+});
+
+describe('selectMediumBackfillCandidates', () => {
+  const photo = (id: string, bytes: number | null) => ({ id, bytes });
+
+  it('averages the known sizes', () => {
+    expect(selectMediumBackfillCandidates([photo('a', 4_000_000), photo('b', 8_000_000)])).toEqual({
+      ids: ['a', 'b'],
+      averageOriginalBytes: 6_000_000,
+    });
+  });
+
+  it('ignores photos with an unknown size when averaging, but still lists their id', () => {
+    expect(selectMediumBackfillCandidates([photo('a', 4_000_000), photo('b', null)])).toEqual({
+      ids: ['a', 'b'],
+      averageOriginalBytes: 4_000_000,
+    });
+  });
+
+  it('returns a zero average rather than NaN when nothing has a known size', () => {
+    expect(selectMediumBackfillCandidates([photo('a', null), photo('b', 0)])).toEqual({
+      ids: ['a', 'b'],
+      averageOriginalBytes: 0,
+    });
+  });
+
+  it('returns nothing for an empty list', () => {
+    expect(selectMediumBackfillCandidates([])).toEqual({ ids: [], averageOriginalBytes: 0 });
+  });
+});
+
+describe('formatEstimatedDownloadSize', () => {
+  it('formats a typical batch in MB', () => {
+    expect(formatEstimatedDownloadSize(600 * 1024 * 1024)).toBe('600 MB');
+  });
+
+  it('switches to GB past 1024 MB, with one decimal', () => {
+    expect(formatEstimatedDownloadSize(1.2 * 1024 * 1024 * 1024)).toBe('1.2 GB');
+  });
+
+  it('never shows "0 MB" for a genuinely non-zero estimate', () => {
+    expect(formatEstimatedDownloadSize(200 * 1024)).toBe('1 MB');
+  });
+
+  it('shows exactly 0 MB only for a zero estimate', () => {
+    expect(formatEstimatedDownloadSize(0)).toBe('0 MB');
+  });
+});
+
+describe('formatMediumBackfillConfirmation', () => {
+  it('names the count and a computed estimate — not a guessed or hardcoded number', () => {
+    expect(formatMediumBackfillConfirmation(100, 6 * 1024 * 1024)).toBe(
+      '100 Fotos sind noch offen, geschätzt 600 MB werden über WLAN geladen.',
+    );
+  });
+
+  it('has dedicated wording for a single photo', () => {
+    expect(formatMediumBackfillConfirmation(1, 6 * 1024 * 1024)).toBe(
+      '1 Foto ist noch offen, geschätzt 6 MB werden über WLAN geladen.',
+    );
+  });
+});
+
+describe('medium backfill run state machine', () => {
+  it('nichts offen: starts already complete', () => {
+    const state = startMediumBackfillRun([]);
+    expect(isMediumBackfillRunComplete(state)).toBe(true);
+    expect(state.total).toBe(0);
+    expect(nextMediumBackfillId(state)).toBeNull();
+  });
+
+  it('alles offen: runs through every id and ends complete', () => {
+    let state = startMediumBackfillRun(['a', 'b', 'c']);
+    expect(isMediumBackfillRunComplete(state)).toBe(false);
+
+    state = advanceMediumBackfillRun(state, 'healed');
+    state = advanceMediumBackfillRun(state, 'healed');
+    state = advanceMediumBackfillRun(state, 'healed');
+
+    expect(isMediumBackfillRunComplete(state)).toBe(true);
+    expect(state).toEqual({ queue: [], total: 3, healed: 3, failed: 0 });
+  });
+
+  it('Abbruch mitten im Lauf: the untouched ids stay queued, nothing already done is lost', () => {
+    let state = startMediumBackfillRun(['a', 'b', 'c', 'd', 'e']);
+    state = advanceMediumBackfillRun(state, 'healed');
+    state = advanceMediumBackfillRun(state, 'healed');
+    // Simulates cancelling here — the caller just stops calling advance.
+    expect(isMediumBackfillRunComplete(state)).toBe(false);
+    expect(state.queue).toEqual(['c', 'd', 'e']);
+    expect(state.healed).toBe(2);
+    expect(state.total).toBe(5);
+  });
+
+  it('einzelner Fehlschlag unterbricht nicht: the queue keeps moving past a failure', () => {
+    let state = startMediumBackfillRun(['a', 'b', 'c']);
+    state = advanceMediumBackfillRun(state, 'healed');
+    state = advanceMediumBackfillRun(state, 'failed');
+    expect(isMediumBackfillRunComplete(state)).toBe(false);
+    expect(nextMediumBackfillId(state)).toBe('c');
+
+    state = advanceMediumBackfillRun(state, 'healed');
+    expect(isMediumBackfillRunComplete(state)).toBe(true);
+    expect(state).toEqual({ queue: [], total: 3, healed: 2, failed: 1 });
+  });
+
+  it('nextMediumBackfillId always names the front of the queue', () => {
+    const state = startMediumBackfillRun(['first', 'second']);
+    expect(nextMediumBackfillId(state)).toBe('first');
   });
 });
 

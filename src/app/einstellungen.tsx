@@ -29,8 +29,9 @@
  */
 
 import { usePowerSync, useStatus } from '@powersync/react-native';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -55,8 +56,20 @@ import { supabase } from '@/core/supabase';
 import { formatTimeLabel } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
-import { formatMediumBackfillLabel } from '@/features/photos/identity';
-import { useMediumBackfillProgress, usePendingUploadCount } from '@/features/photos/repository';
+import { useIsOnWifi } from '@/features/photos/hooks';
+import {
+  formatMediumBackfillConfirmation,
+  formatMediumBackfillLabel,
+  selectMediumBackfillCandidates,
+  startMediumBackfillRun,
+  type MediumBackfillRunState,
+} from '@/features/photos/identity';
+import {
+  useMediumBackfillCandidatePhotos,
+  useMediumBackfillProgress,
+  usePendingUploadCount,
+} from '@/features/photos/repository';
+import { cancelMediumBackfillRun, runMediumBackfill } from '@/features/photos/storage';
 
 function SyncStatusRow() {
   const status = useStatus();
@@ -104,9 +117,90 @@ function SyncStatusRow() {
   );
 }
 
+/**
+ * The "Alle Fotos vorbereiten" batch run, plus the WLAN gating, confirmation
+ * dialog, live progress, cancel button, and end-of-run failure summary
+ * around it. The actual queue/step/stop DECISIONS all live in
+ * identity.ts's MediumBackfillRunState and storage.ts#runMediumBackfill —
+ * this component only wires them to the screen.
+ */
 function PhotoStatusRow() {
+  const db = usePowerSync();
   const pending = usePendingUploadCount();
   const backfillLabel = formatMediumBackfillLabel(useMediumBackfillProgress());
+  const candidates = useMediumBackfillCandidatePhotos();
+  const onWifi = useIsOnWifi();
+
+  const [runState, setRunState] = useState<MediumBackfillRunState | null>(null);
+  const [resultMessage, setResultMessage] = useState<string | null>(null);
+  // Synchronous guard against a double-start in the gap between the button
+  // press and `runState` actually committing — belt-and-braces alongside
+  // storage.ts's own module-level lock and the button simply not being
+  // rendered anywhere `runState` is already set.
+  const runningRef = useRef(false);
+
+  // Verlässt man Einstellungen …
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        cancelMediumBackfillRun();
+      };
+    }, []),
+  );
+
+  // … oder geht die App in den Hintergrund: beides beendet den Lauf sauber,
+  // statt zu versuchen, Hintergrundarbeit zu erzwingen, die Android ohnehin
+  // stoppt.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') {
+        cancelMediumBackfillRun();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const handleStartAll = useCallback(async () => {
+    if (runningRef.current || candidates.length === 0) {
+      return;
+    }
+    runningRef.current = true;
+    setResultMessage(null);
+    setRunState(startMediumBackfillRun(candidates.map((photo) => photo.id)));
+    try {
+      const result = await runMediumBackfill(db, candidates, setRunState);
+      if (result.failed > 0) {
+        setResultMessage(
+          result.failed === 1
+            ? '1 Foto konnte nicht vorbereitet werden.'
+            : `${result.failed} Fotos konnten nicht vorbereitet werden.`,
+        );
+      }
+    } catch (error) {
+      console.error('[LifeBook] Sammellauf zum Vorbereiten fehlgeschlagen', error);
+    } finally {
+      runningRef.current = false;
+      setRunState(null);
+    }
+  }, [db, candidates]);
+
+  const handleConfirmStartAll = useCallback(() => {
+    if (runningRef.current || candidates.length === 0) {
+      return;
+    }
+    // Der Schätzwert kommt aus der tatsächlichen Durchschnittsgröße der
+    // offenen Fotos, nicht aus einer Annahme — siehe
+    // identity.ts#selectMediumBackfillCandidates.
+    const { averageOriginalBytes } = selectMediumBackfillCandidates(candidates);
+    Alert.alert(
+      'Alle Fotos vorbereiten?',
+      formatMediumBackfillConfirmation(candidates.length, averageOriginalBytes),
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        { text: 'Vorbereiten', onPress: () => void handleStartAll() },
+      ],
+    );
+  }, [candidates, handleStartAll]);
 
   return (
     <ThemedView type="backgroundElement" style={styles.card}>
@@ -122,9 +216,34 @@ function PhotoStatusRow() {
         Originale werden standardmäßig nur im WLAN übertragen.
       </ThemedText>
       {backfillLabel ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          {backfillLabel}
-        </ThemedText>
+        <>
+          <ThemedText type="small" themeColor="textSecondary">
+            {runState ? `Vorbereitet: ${runState.healed + runState.failed} von ${runState.total}` : backfillLabel}
+          </ThemedText>
+          {runState ? (
+            <Pressable onPress={cancelMediumBackfillRun} hitSlop={8}>
+              <ThemedText type="linkPrimary">Abbrechen</ThemedText>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable onPress={handleConfirmStartAll} disabled={!onWifi} hitSlop={8}>
+                <ThemedText type="linkPrimary" themeColor={onWifi ? undefined : 'textSecondary'}>
+                  Alle Fotos vorbereiten
+                </ThemedText>
+              </Pressable>
+              {!onWifi ? (
+                <ThemedText type="small" themeColor="textSecondary">
+                  Kein WLAN aktiv — dafür bitte verbinden.
+                </ThemedText>
+              ) : null}
+            </>
+          )}
+          {resultMessage ? (
+            <ThemedText type="small" themeColor="dangerText">
+              {resultMessage}
+            </ThemedText>
+          ) : null}
+        </>
       ) : null}
     </ThemedView>
   );

@@ -208,6 +208,22 @@ Ebene höher.
 → Bildschirme, die über den Reitern liegen sollen, brauchen im Wurzel-
 Layout einen echten Stapel. Nicht auf `<Slot />` zurückdrehen.
 
+### 10. Zum Teilen gehört die Datei in den Cache-Ordner
+
+Am 13.08.2026 gefunden: react-native-share bringt einen eigenen
+Dateifreigeber mit, der nur zwei Wurzeln freigibt — den Download-Ordner
+und den Cache (share_download_paths.xml, kein files-path-Eintrag). Frisch
+importierte, noch nicht hochgeladene Originale liegen aber unter
+Paths.document. Das native Modul fängt die daraus entstehende Ausnahme mit
+einem System.out.println ab, gibt still null zurück, und dieses null landet
+ungeprüft in der Anhangsliste. Ergebnis: Die Auswahl der Ziel-App öffnet
+sich, der Anhang ist leer, die Empfänger-App tut gar nichts, und in
+JavaScript kommt kein Fehler an.
+
+→ Jede Datei wird vor dem Teilen in den Cache-Ordner kopiert, unabhängig
+davon, wo sie liegt. Und: Ein natives Modul, das schweigt, ist kein Beweis
+dafür, dass nichts passiert ist.
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste

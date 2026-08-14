@@ -338,6 +338,110 @@ export function formatMediumBackfillLabel(progress: MediumBackfillProgress): str
   return `Vorbereitet: ${progress.prepared} von ${progress.total}`;
 }
 
+export type MediumBackfillCandidates = {
+  /** Ids of every photo still missing a medium rendition. */
+  ids: string[];
+  /** This batch's own average ORIGINAL size — what a backfill run actually downloads per photo. */
+  averageOriginalBytes: number;
+};
+
+/**
+ * Summarizes the photos still missing a medium rendition: which ones, and
+ * their average original size — the basis for the "Alle Fotos vorbereiten"
+ * confirmation estimate (task: computed from the album's real data, never a
+ * guessed or hardcoded number). `photos` is expected to already be filtered
+ * to "no medium_key yet" (repository.ts's query does that); this only
+ * summarizes what is left. Photos with an unknown size (`bytes` null or 0 —
+ * shouldn't happen for a real row, but the type allows it) are excluded
+ * from the average rather than treated as zero, which would understate it.
+ */
+export function selectMediumBackfillCandidates(
+  photos: readonly { id: string; bytes: number | null }[],
+): MediumBackfillCandidates {
+  const ids = photos.map((photo) => photo.id);
+  const knownBytes = photos
+    .map((photo) => photo.bytes)
+    .filter((bytes): bytes is number => bytes != null && bytes > 0);
+  const averageOriginalBytes =
+    knownBytes.length > 0 ? knownBytes.reduce((sum, bytes) => sum + bytes, 0) / knownBytes.length : 0;
+  return { ids, averageOriginalBytes };
+}
+
+/** "≈ 600 MB" / "≈ 1.2 GB" — never claims false precision, never shows "0 MB" for a non-empty estimate. */
+export function formatEstimatedDownloadSize(bytes: number): string {
+  if (bytes <= 0) {
+    return '0 MB';
+  }
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes >= 1024) {
+    return `${(megabytes / 1024).toFixed(1)} GB`;
+  }
+  return `${Math.max(1, Math.round(megabytes))} MB`;
+}
+
+/**
+ * The "Alle Fotos vorbereiten" confirmation dialog's body — an honest
+ * account of what the run is about to do, not just a bare "sind Sie
+ * sicher?". `averageOriginalBytes` is `selectMediumBackfillCandidates`'s
+ * own measured average, multiplied out here rather than the caller
+ * guessing or hardcoding a number.
+ */
+export function formatMediumBackfillConfirmation(pendingCount: number, averageOriginalBytes: number): string {
+  const photosLabel = pendingCount === 1 ? '1 Foto ist noch offen' : `${pendingCount} Fotos sind noch offen`;
+  const estimate = formatEstimatedDownloadSize(pendingCount * averageOriginalBytes);
+  return `${photosLabel}, geschätzt ${estimate} werden über WLAN geladen.`;
+}
+
+export type MediumBackfillItemOutcome = 'healed' | 'failed';
+
+export type MediumBackfillRunState = {
+  /** Ids not yet attempted this run, in order. */
+  queue: readonly string[];
+  /** Fixed at the start of the run — how many photos this run set out to prepare. */
+  total: number;
+  healed: number;
+  failed: number;
+};
+
+/**
+ * Ablaufsteuerung for the "Alle Fotos vorbereiten" batch run — pure so
+ * "what's next", "when is it done" and "how does progress count" are
+ * verifiable without a device, a database, or a network. The actual async
+ * work (storage.ts#runMediumBackfill) is a thin loop driven by these four
+ * functions; it decides nothing on its own.
+ */
+export function startMediumBackfillRun(pendingIds: readonly string[]): MediumBackfillRunState {
+  return { queue: pendingIds, total: pendingIds.length, healed: 0, failed: 0 };
+}
+
+/** Nothing left to attempt this run — not the same as "everything succeeded", see `failed`. */
+export function isMediumBackfillRunComplete(state: MediumBackfillRunState): boolean {
+  return state.queue.length === 0;
+}
+
+/** The id that should be attempted next, or null once the run is complete. */
+export function nextMediumBackfillId(state: MediumBackfillRunState): string | null {
+  return state.queue[0] ?? null;
+}
+
+/**
+ * Advances past the item at the front of the queue, recording whether it
+ * succeeded. A failure only increments `failed` and moves on — it does
+ * NOT stop the run, so one bad photo can never block the rest (task
+ * requirement, verified by a dedicated test).
+ */
+export function advanceMediumBackfillRun(
+  state: MediumBackfillRunState,
+  outcome: MediumBackfillItemOutcome,
+): MediumBackfillRunState {
+  return {
+    queue: state.queue.slice(1),
+    total: state.total,
+    healed: state.healed + (outcome === 'healed' ? 1 : 0),
+    failed: state.failed + (outcome === 'failed' ? 1 : 0),
+  };
+}
+
 /** Split a day's photos into fixed-width rows for the Chronik grid. */
 export function chunkPhotos<T>(items: readonly T[], columns: number): T[][] {
   const rows: T[][] = [];

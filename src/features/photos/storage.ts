@@ -21,7 +21,16 @@ import { ENV } from '@/core/env';
 import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
 
-import { buildMediumKey, extensionForMime, shouldResignUrl } from './identity';
+import {
+  advanceMediumBackfillRun,
+  buildMediumKey,
+  extensionForMime,
+  isMediumBackfillRunComplete,
+  nextMediumBackfillId,
+  shouldResignUrl,
+  startMediumBackfillRun,
+  type MediumBackfillRunState,
+} from './identity';
 import { createMediumImage, createThumbnail, deleteQuietly } from './media';
 import {
   loadPendingUploads,
@@ -555,6 +564,13 @@ let healInFlight = false;
  * - Fully silent and never throws: every failure is caught and logged
  *   here, not left for the caller — a flaky connection must not surface as
  *   an error state on a screen whose only job was to show a photo.
+ *
+ * Returns which of three things happened, for callers that DO care (the
+ * batch run below counts them): `'healed'` — actually produced and
+ * uploaded a medium; `'skipped'` — none of the above conditions applied
+ * (already had one, no original, WLAN unavailable, or another heal was
+ * already in flight) — nothing was attempted, so it isn't a failure;
+ * `'failed'` — an attempt was made and it threw.
  */
 export async function healMissingMedium(
   db: AbstractPowerSyncDatabase,
@@ -562,12 +578,12 @@ export async function healMissingMedium(
     PhotoRow,
     'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height'
   >,
-): Promise<void> {
+): Promise<'healed' | 'skipped' | 'failed'> {
   if (photo.medium_key || !photo.original_key || healInFlight) {
-    return;
+    return 'skipped';
   }
   if (!(await isOnWifi())) {
-    return;
+    return 'skipped';
   }
 
   healInFlight = true;
@@ -585,15 +601,106 @@ export async function healMissingMedium(
     } finally {
       deleteQuietly(mediumUri);
     }
+    return 'healed';
   } catch (error) {
     console.error('[LifeBook] Mittlere Fassung konnte nicht nachträglich erzeugt werden', {
       photoId: photo.id,
       message: error instanceof Error ? error.message : String(error),
     });
+    return 'failed';
   } finally {
     if (resolved) {
       cleanupSharedFiles([resolved]);
     }
     healInFlight = false;
+  }
+}
+
+/* ────────────────────────────── Batch backfill ("Alle Fotos vorbereiten") ────────────────────────────── */
+
+export type MediumBackfillRunResult = {
+  healed: number;
+  failed: number;
+  /**
+   * True when the run stopped before every candidate was attempted —
+   * cancelled, backgrounded (cancelMediumBackfillRun), or Wi-Fi dropped
+   * mid-run. Everything counted in `healed` stays healed either way; the
+   * remaining candidates simply aren't in this run's queue any more, and
+   * the NEXT run (medium_key IS NULL, re-queried fresh) picks them back up.
+   */
+  stoppedEarly: boolean;
+};
+
+let backfillAbortController: AbortController | null = null;
+
+/** Whether a batch run is currently in progress — the "Alle Fotos vorbereiten" button reads this to refuse a second start. */
+export function isMediumBackfillRunning(): boolean {
+  return backfillAbortController !== null;
+}
+
+/**
+ * Stops an in-progress batch run at the next item boundary — never
+ * mid-photo. Safe to call even when no run is active.
+ */
+export function cancelMediumBackfillRun(): void {
+  backfillAbortController?.abort();
+}
+
+/**
+ * Runs `healMissingMedium` — the SAME function the opportunistic
+ * fullscreen-viewer heal already uses, not a second implementation — over
+ * every photo in `photos`, one at a time. Sequential on purpose: a hundred
+ * photos at several MB each run in parallel would overrun both memory and
+ * the connection.
+ *
+ * The actual queue/progress bookkeeping is identity.ts's
+ * MediumBackfillRunState — this function is only the async loop around it,
+ * deciding nothing on its own beyond "keep going until the pure state says
+ * stop, or an outside condition says stop instead". Wi-Fi is rechecked
+ * before every single item (same `isOnWifi()` the ordinary upload queue
+ * gates on) rather than only once at the start, so losing Wi-Fi mid-run
+ * ends the run cleanly instead of grinding through the rest as silent
+ * no-ops. A `'skipped'` outcome from `healMissingMedium` (lock contention
+ * with a concurrent opportunistic heal, most likely) is counted as
+ * `failed` here for this run's bookkeeping — rare, and the photo simply
+ * stays a candidate for the next run either way.
+ *
+ * Throws if a run is already active — the caller (the button) is expected
+ * to prevent this in the first place; this is the second line of defence.
+ */
+export async function runMediumBackfill(
+  db: AbstractPowerSyncDatabase,
+  photos: readonly Pick<
+    PhotoRow,
+    'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height'
+  >[],
+  onProgress?: (state: MediumBackfillRunState) => void,
+): Promise<MediumBackfillRunResult> {
+  if (backfillAbortController) {
+    throw new Error('photos: Sammellauf zum Vorbereiten läuft bereits');
+  }
+
+  const controller = new AbortController();
+  backfillAbortController = controller;
+  const byId = new Map(photos.map((photo) => [photo.id, photo]));
+
+  let state = startMediumBackfillRun(photos.map((photo) => photo.id));
+  onProgress?.(state);
+
+  try {
+    while (!isMediumBackfillRunComplete(state)) {
+      if (controller.signal.aborted || !(await isOnWifi())) {
+        return { healed: state.healed, failed: state.failed, stoppedEarly: true };
+      }
+
+      const id = nextMediumBackfillId(state);
+      const photo = id ? byId.get(id) : undefined;
+      const outcome = photo ? await healMissingMedium(db, photo) : 'failed';
+      state = advanceMediumBackfillRun(state, outcome === 'healed' ? 'healed' : 'failed');
+      onProgress?.(state);
+    }
+    return { healed: state.healed, failed: state.failed, stoppedEarly: false };
+  } finally {
+    backfillAbortController = null;
   }
 }
