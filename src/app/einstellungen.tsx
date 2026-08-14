@@ -29,7 +29,7 @@
  */
 
 import { usePowerSync, useStatus } from '@powersync/react-native';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -429,6 +429,16 @@ export default function EinstellungenScreen() {
           <PhotoStatusRow />
           <SyncStatusRow />
           <NotificationStatusRow />
+
+          <Pressable onPress={() => router.push('/freigaben')} hitSlop={8}>
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="smallBold">Freigaben</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Fotos per Link und Zugangscode teilen, ohne dass die Empfänger die App brauchen.
+              </ThemedText>
+            </ThemedView>
+          </Pressable>
+
           <AccountRow />
         </ScrollView>
       </SafeAreaView>
