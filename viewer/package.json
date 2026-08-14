@@ -1,0 +1,6 @@
+{
+  "name": "lifebook-album",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Viewer page for LifeBook guest shares. No dependencies on purpose."
+}
