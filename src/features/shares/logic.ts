@@ -117,7 +117,7 @@ export function generateAccessCode(randomBytes: Uint8Array): string {
  * never by concatenating a URL of its own, so the day a custom domain
  * replaces this one there is exactly one line to change.
  */
-const SHARE_VIEWER_BASE_URL = 'https://lifebook-album-heimlig.vercel.app';
+const SHARE_VIEWER_BASE_URL = 'https://lifebook-album-dabbly.vercel.app';
 
 /** The viewing link handed to a guest — the access CODE is the second factor, entered on the page itself. */
 export function buildShareLink(token: string): string {

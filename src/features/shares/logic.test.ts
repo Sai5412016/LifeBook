@@ -86,7 +86,7 @@ describe('generateAccessCode', () => {
 
 describe('buildShareLink', () => {
   it('joins the Vercel viewer base URL and token via the /a/ path', () => {
-    expect(buildShareLink('abc123')).toBe('https://lifebook-album-heimlig.vercel.app/a/abc123');
+    expect(buildShareLink('abc123')).toBe('https://lifebook-album-dabbly.vercel.app/a/abc123');
   });
 
   it('uses only the token, never a Supabase URL', () => {
@@ -109,7 +109,7 @@ describe('formatShareMessage', () => {
     // 2026-08-14: the "Link und Code weitergeben" message must reflect the
     // current viewer address, not a stale Supabase one.
     const message = formatShareMessage('Sommerurlaub', buildShareLink('abc123'), 'AB12CD');
-    expect(message).toContain('https://lifebook-album-heimlig.vercel.app/a/abc123');
+    expect(message).toContain('https://lifebook-album-dabbly.vercel.app/a/abc123');
   });
 });
 
