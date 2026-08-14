@@ -245,8 +245,14 @@ unverändert gespeichert, inklusive eingebetteter Aufnahmedaten.
 
 - `notify-household` — verschickt Push-Nachrichten an den Haushalt, mit
   Anmeldepflicht.
-- `album` — öffentliche Ansichtsseite für Freigaben, OHNE Anmeldepflicht,
-  bewusst; siehe `supabase/config.toml`. Sie ist die einzige Ausnahme.
+- `album` — öffentliche Datenschnittstelle für Freigaben, OHNE
+  Anmeldepflicht, bewusst; siehe `supabase/config.toml`. Sie ist die
+  einzige Ausnahme. Liefert seit 15.08.2026 nur noch JSON, kein HTML mehr
+  — Supabase liefert HTML auf einer `supabase.co`-Adresse abgeschottet aus
+  (Quelltext statt Seite, zerlegte Umlaute, blockierte Cookies, auf dem
+  Gerät bestätigt). Die eigentliche Ansichtsseite liegt deshalb getrennt
+  unter `viewer/` und läuft bei Vercel (Projekt `lifebook-album`, Team
+  `dabbly`) — nicht zurückbauen zu einer HTML-liefernden Funktion.
 
 ## Befehle
 
