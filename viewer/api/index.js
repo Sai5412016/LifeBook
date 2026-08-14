@@ -84,8 +84,9 @@ const STYLE = `
   .day span { color:#7A6A5E; font-weight:400; }
   figure { margin:0 0 16px; }
   img { width:100%; height:auto; display:block; border-radius:14px; background:#EFE6D5; }
-  figcaption { margin-top:6px; font-size:.8rem; }
+  figcaption { margin-top:8px; font-size:.8rem; }
   figcaption a { color:#E9613A; text-decoration:none; }
+  .note { display:block; color:#3A2E26; font-size:.95rem; margin-bottom:4px; }
   .foot { margin-top:48px; font-size:.82rem; color:#9A8B7E; text-align:center; }
 `;
 
@@ -143,9 +144,14 @@ function gallery(res, data) {
     }
     body += '<figure><img src="' + escapeHtml(photo.url) + '" alt="'
       + escapeHtml(photo.note || 'Foto') + '" loading="lazy">';
-    if (data.allowDownload) {
-      body += '<figcaption><a href="' + escapeHtml(photo.url)
-        + '" target="_blank" rel="noreferrer">Bild speichern</a></figcaption>';
+    if (photo.note || data.allowDownload) {
+      body += '<figcaption>';
+      if (photo.note) body += '<span class="note">' + escapeHtml(photo.note) + '</span>';
+      if (data.allowDownload) {
+        body += '<a href="' + escapeHtml(photo.url)
+          + '" target="_blank" rel="noreferrer">Bild speichern</a>';
+      }
+      body += '</figcaption>';
     }
     body += '</figure>';
   }
