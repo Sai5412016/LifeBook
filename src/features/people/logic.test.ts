@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { ROLE_OPTIONS, describeRole, formatPeriodLabel, initialsForName, sortPeople } from './logic';
+import {
+  ROLE_OPTIONS,
+  describeRole,
+  formatPeriodLabel,
+  initialsForName,
+  isMetToValid,
+  sortPeople,
+  toGermanDate,
+} from './logic';
 
 describe('describeRole', () => {
   it('labels every role in German', () => {
@@ -86,5 +94,37 @@ describe('formatPeriodLabel', () => {
 
   it('is null when neither end is set', () => {
     expect(formatPeriodLabel(null, null)).toBeNull();
+  });
+});
+
+describe('toGermanDate', () => {
+  it('reformats YYYY-MM-DD as DD.MM.YYYY', () => {
+    expect(toGermanDate('2026-08-15')).toBe('15.08.2026');
+  });
+});
+
+describe('isMetToValid', () => {
+  it('is valid when "Bis" is after "Von"', () => {
+    expect(isMetToValid('2026-03-05', '2026-07-20')).toBe(true);
+  });
+
+  it('is valid when "Bis" equals "Von" — a same-day visit', () => {
+    expect(isMetToValid('2026-03-05', '2026-03-05')).toBe(true);
+  });
+
+  it('is invalid when "Bis" is before "Von"', () => {
+    expect(isMetToValid('2026-07-20', '2026-03-05')).toBe(false);
+  });
+
+  it('is valid when "Von" is unset', () => {
+    expect(isMetToValid(null, '2026-07-20')).toBe(true);
+  });
+
+  it('is valid when "Bis" is unset', () => {
+    expect(isMetToValid('2026-03-05', null)).toBe(true);
+  });
+
+  it('is valid when neither is set', () => {
+    expect(isMetToValid(null, null)).toBe(true);
   });
 });

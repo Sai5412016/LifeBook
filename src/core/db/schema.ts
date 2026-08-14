@@ -280,6 +280,15 @@ function buildAppSchema() {
       availability: column.text, // available | missing
       tags: column.text, // JSON array, generated on-device
       ocr_text: column.text, // V2
+      // 2026-08-15: user-entered caption, shown under the photo in the
+      // fullscreen viewer (features/photos/identity.ts#normalizePhotoNote)
+      // and already read by the guest-access viewer
+      // (supabase/functions/album/index.ts) — that side existed first, this
+      // column already existed in Postgres before the app could write to
+      // it. `SELECT *` in sync-rules.yaml already syncs it down; this is
+      // the local schema catching up so the column is actually queryable
+      // here, no sync-rules or Postgres change needed.
+      note: column.text,
     },
     {
       indexes: {

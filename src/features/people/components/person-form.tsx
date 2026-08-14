@@ -3,11 +3,15 @@
  * and src/app/menschen/[id]/bearbeiten.tsx, which differ only in what they do
  * with the result (insert vs. update) and whether a delete action exists.
  *
- * Kein natives Datums-Auswahlfeld, wie schon bei den Geburtsdaten (siehe
- * kind/bearbeiten.tsx) — Text-Eingabe im Format JJJJ-MM-TT, geprüft vor dem
- * Speichern.
+ * 2026-08-15: "Von"/"Bis" now use `@expo/ui`'s community `DateTimePicker`
+ * (already a dependency — see its own doc comment on `DateChoiceField`
+ * below) instead of hand-typed JJJJ-MM-TT text, unlike the birth date/time
+ * fields in kind/bearbeiten.tsx, which stay text entry (a picker chooses a
+ * DAY; birth also needs an exact time of day, which this component doesn't
+ * carry — out of scope for this change).
  */
 
+import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
@@ -15,15 +19,15 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { localDateToPickerDate, nowUtcIso, pickerDateToLocalDate, toLocalDate } from '@/core/time';
+import { deviceTimeZone } from '@/core/time/device';
 import { useSignedUrls } from '@/features/photos/hooks';
 import { Chip, KeyboardSafeScreen, TextField, useUiColors } from '@/ui';
 
 import { PersonPhotoPickCancelledError, pickPersonPhotoUri } from '../photo';
-import { ROLE_OPTIONS } from '../logic';
+import { ROLE_OPTIONS, isMetToValid, toGermanDate } from '../logic';
 import type { PersonRole } from '../types';
 import { PersonAvatar } from './person-avatar';
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type PersonFormSubmitInput = {
   name: string;
@@ -102,12 +106,8 @@ export function PersonForm({
       setValidationError('Bitte einen Namen eingeben.');
       return;
     }
-    if (metFrom.length > 0 && !DATE_RE.test(metFrom)) {
-      setValidationError('„Von" bitte im Format JJJJ-MM-TT eingeben, oder leer lassen.');
-      return;
-    }
-    if (metTo.length > 0 && !DATE_RE.test(metTo)) {
-      setValidationError('„Bis" bitte im Format JJJJ-MM-TT eingeben, oder leer lassen.');
+    if (!isMetToValid(metFrom || null, metTo || null)) {
+      setValidationError('„Bis" darf nicht vor „Von" liegen.');
       return;
     }
 
@@ -184,22 +184,10 @@ export function PersonForm({
 
           <View style={styles.row}>
             <View style={styles.rowField}>
-              <TextField
-                label="Von (JJJJ-MM-TT)"
-                value={metFrom}
-                onChangeText={setMetFrom}
-                keyboardType="numbers-and-punctuation"
-                autoCapitalize="none"
-              />
+              <DateChoiceField label="Von" value={metFrom} onChange={setMetFrom} />
             </View>
             <View style={styles.rowField}>
-              <TextField
-                label="Bis (JJJJ-MM-TT)"
-                value={metTo}
-                onChangeText={setMetTo}
-                keyboardType="numbers-and-punctuation"
-                autoCapitalize="none"
-              />
+              <DateChoiceField label="Bis" value={metTo} onChange={setMetTo} />
             </View>
           </View>
 
@@ -225,6 +213,72 @@ export function PersonForm({
   );
 }
 
+/**
+ * One "Von"/"Bis" field: a row showing the chosen date (or a placeholder),
+ * a "Löschen" link when a date is set (both fields stay optional and
+ * independently clearable — task requirement), and the native picker
+ * dialog itself, mounted only while open.
+ *
+ * `@expo/ui`'s community `DateTimePicker` is a drop-in, cross-platform
+ * wrapper around the platform's own date picker (Material 3 dialog on
+ * Android, the native wheel/calendar on iOS) — checked before building
+ * anything custom, per the task's explicit instruction, and found
+ * suitable: it already ships `mode="date"` plus a `presentation="dialog"`
+ * mode that opens on mount and reports back through `onValueChange`/
+ * `onDismiss`, exactly the "day/month/year, no free typing" interaction
+ * this field needs. `@expo/ui` is already a dependency (used nowhere else
+ * yet) — its native module is therefore already linked into any build,
+ * so using it here adds no new dependency and cannot change the
+ * fingerprint.
+ */
+function DateChoiceField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (localDate: string) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const { dangerText } = useUiColors();
+
+  return (
+    <View style={styles.dateField}>
+      <ThemedText type="small" themeColor="textSecondary">
+        {label}
+      </ThemedText>
+      <Pressable onPress={() => setPickerOpen(true)}>
+        <ThemedView type="backgroundElement" style={styles.dateValueButton}>
+          <ThemedText>{value ? toGermanDate(value) : 'Datum wählen'}</ThemedText>
+        </ThemedView>
+      </Pressable>
+      {value ? (
+        <Pressable onPress={() => onChange('')} hitSlop={8}>
+          <ThemedText type="small" style={{ color: dangerText }}>
+            Löschen
+          </ThemedText>
+        </Pressable>
+      ) : null}
+      {pickerOpen ? (
+        <DateTimePicker
+          mode="date"
+          presentation="dialog"
+          // Startet auf dem bereits gewählten Tag, sonst auf "heute" — reine
+          // UI-Vorbelegung für den Dialog, keine gespeicherte Bedeutung
+          // (siehe core/time#localDateToPickerDate's Dokumentation dazu).
+          value={localDateToPickerDate(value || toLocalDate(nowUtcIso(), deviceTimeZone()))}
+          onValueChange={(_event, date) => {
+            setPickerOpen(false);
+            onChange(pickerDateToLocalDate(date));
+          }}
+          onDismiss={() => setPickerOpen(false)}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
@@ -244,5 +298,12 @@ const styles = StyleSheet.create({
   noteInput: { height: 84, textAlignVertical: 'top', paddingTop: Spacing.two },
   row: { flexDirection: 'row', gap: Spacing.two },
   rowField: { flex: 1 },
+  dateField: { gap: Spacing.one },
+  dateValueButton: {
+    height: 52,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+    borderRadius: Spacing.three,
+  },
   deleteRow: { alignItems: 'center', paddingTop: Spacing.three },
 });

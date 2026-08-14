@@ -110,6 +110,8 @@ export type PhotoRow = {
   original_key: string | null;
   original_uploaded_at: string | null;
   availability: PhotoAvailability;
+  /** User-entered caption, shown under the photo in the fullscreen viewer — see identity.ts#normalizePhotoNote. NULL for no caption, never an empty string. */
+  note: string | null;
 };
 
 /** One day's photos in the chronology, newest day first. */

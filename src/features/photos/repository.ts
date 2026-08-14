@@ -38,7 +38,7 @@ const PHOTO_COLUMNS = `
   created_at, updated_at, deleted_at, source, local_uri, content_hash,
   captured_at, occurred_at_source, age_days, width, height, mime, bytes,
   thumb_key, thumb_uploaded_at, medium_key, medium_uploaded_at,
-  original_key, original_uploaded_at, availability
+  original_key, original_uploaded_at, availability, note
 `;
 
 /**
@@ -347,6 +347,23 @@ export async function loadAllDeletedPhotos(db: AbstractPowerSyncDatabase): Promi
   return db.getAll<PhotoRow>(
     `SELECT ${PHOTO_COLUMNS} FROM photos WHERE deleted_at IS NOT NULL ORDER BY deleted_at ASC`,
   );
+}
+
+/**
+ * Sets or clears a photo's caption (Aufgabe 1, 2026-08-15) — `note: null`
+ * deletes it. Callers should already have run the text through
+ * identity.ts#normalizePhotoNote (trims, caps at
+ * PHOTO_NOTE_MAX_LENGTH, empty → null) — this function does not
+ * re-validate, same as every other single-column update here (e.g.
+ * markThumbUploaded).
+ */
+export async function setPhotoNote(
+  db: AbstractPowerSyncDatabase,
+  photoId: string,
+  note: string | null,
+): Promise<void> {
+  const now = nowUtcIso();
+  await db.execute('UPDATE photos SET note = ?, updated_at = ? WHERE id = ?', [note, now, photoId]);
 }
 
 /** Reactive chronology for one child: day sections, newest first. */

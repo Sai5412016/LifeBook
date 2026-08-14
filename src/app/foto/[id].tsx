@@ -43,15 +43,18 @@ import { Spacing } from '@/constants/theme';
 import { ageInDays, formatDayLabel, formatTimeLabel } from '@/core/time';
 import { useActiveChild } from '@/features/household/repository';
 import {
+  PHOTO_NOTE_MAX_LENGTH,
   chronologicalRank,
   formatAgeLabel,
   isOccurredAtEstimated,
+  normalizePhotoNote,
   resolveFullscreenUri,
 } from '@/features/photos/identity';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { setLastViewedPhotoId } from '@/features/photos/lastViewed';
 import {
   correctPhotoOccurredAt,
+  setPhotoNote,
   softDeletePhoto,
   usePhotoById,
   usePhotosOfChild,
@@ -104,6 +107,11 @@ export default function FotoVollbildScreen() {
   const [timeInput, setTimeInput] = useState('');
   const [dateError, setDateError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState(false);
+
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteInput, setNoteInput] = useState('');
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [savingNote, setSavingNote] = useState(false);
 
   const resolvedInitialIndex = indexOfPhoto(photos, id);
 
@@ -287,6 +295,38 @@ export default function FotoVollbildScreen() {
     }
   }, [db, currentPhoto, dateInput, timeInput]);
 
+  // Aufgabe 1, 2026-08-15: Bildunterschrift. Vorbelegt mit der aktuellen
+  // Notiz (leer, wenn keine vorhanden ist) — dieselbe "zurückhaltend
+  // antippen statt dauerhaftes Formularfeld"-Idee wie das Aufnahmedatum
+  // oben.
+  const handleOpenNoteEditor = useCallback(() => {
+    if (!currentPhoto) {
+      return;
+    }
+    setNoteInput(currentPhoto.note ?? '');
+    setNoteError(null);
+    setEditingNote(true);
+  }, [currentPhoto]);
+
+  const handleSaveNote = useCallback(async () => {
+    if (!currentPhoto) {
+      return;
+    }
+    setNoteError(null);
+    setSavingNote(true);
+    try {
+      // normalizePhotoNote trimmt, kappt bei PHOTO_NOTE_MAX_LENGTH und macht
+      // aus einer Leereingabe null — genau das löscht eine bestehende Notiz.
+      await setPhotoNote(db, currentPhoto.id, normalizePhotoNote(noteInput));
+      setEditingNote(false);
+    } catch (error) {
+      console.error('[LifeBook] Bildunterschrift konnte nicht gespeichert werden', error);
+      setNoteError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
+    } finally {
+      setSavingNote(false);
+    }
+  }, [db, currentPhoto, noteInput]);
+
   // 2026-08-15: der Papierkorb ist jetzt da (src/app/papierkorb.tsx) — das
   // Foto verschwindet aus der Chronik auf beiden Handys, aber die Dateien
   // bleiben 30 Tage im Speicher liegen, wiederherstellbar. Derselbe Text wie
@@ -450,6 +490,20 @@ export default function FotoVollbildScreen() {
             />
           )}
         </View>
+
+        {/* Aufgabe 1, 2026-08-15: Bildunterschrift — unter dem Bild, nicht
+            in der Kachelansicht (siehe selection.ts-Nachbarschaft, die lebt
+            von den Bildern). Zurückhaltender Hinweis, wenn noch keine
+            Notiz da ist, kein dauerhaftes Formularfeld. */}
+        {currentPhoto ? (
+          <Pressable onPress={handleOpenNoteEditor} hitSlop={8} style={styles.noteBar}>
+            {currentPhoto.note ? (
+              <ThemedText style={styles.noteText}>{currentPhoto.note}</ThemedText>
+            ) : (
+              <ThemedText style={styles.notePlaceholder}>Bildunterschrift hinzufügen</ThemedText>
+            )}
+          </Pressable>
+        ) : null}
       </SafeAreaView>
 
       <Modal
@@ -501,6 +555,45 @@ export default function FotoVollbildScreen() {
           </KeyboardSafeScreen>
         </ThemedView>
       </Modal>
+
+      <Modal
+        visible={editingNote}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setEditingNote(false)}>
+        <ThemedView style={styles.editRoot}>
+          <KeyboardSafeScreen
+            header={
+              <View style={styles.editHeader}>
+                <Pressable onPress={() => setEditingNote(false)} hitSlop={12} disabled={savingNote}>
+                  <ThemedText type="link" themeColor="textSecondary">
+                    Abbrechen
+                  </ThemedText>
+                </Pressable>
+                <ThemedText type="smallBold">Bildunterschrift</ThemedText>
+                <Pressable onPress={handleSaveNote} hitSlop={12} disabled={savingNote}>
+                  <ThemedText type="linkPrimary">{savingNote ? '…' : 'Speichern'}</ThemedText>
+                </Pressable>
+              </View>
+            }
+            contentContainerStyle={styles.editContent}>
+            <TextField
+              label="Bildunterschrift"
+              value={noteInput}
+              onChangeText={setNoteInput}
+              multiline
+              numberOfLines={4}
+              maxLength={PHOTO_NOTE_MAX_LENGTH}
+              style={styles.noteFieldInput}
+            />
+            {noteError ? (
+              <ThemedText type="small" themeColor="dangerText">
+                {noteError}
+              </ThemedText>
+            ) : null}
+          </KeyboardSafeScreen>
+        </ThemedView>
+      </Modal>
     </View>
   );
 }
@@ -534,6 +627,9 @@ const styles = StyleSheet.create({
   imageArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', height: '100%' },
   placeholderText: { color: '#B0B4BA' },
+  noteBar: { paddingHorizontal: Spacing.three, paddingVertical: Spacing.two },
+  noteText: { color: '#ffffff', fontSize: 14 },
+  notePlaceholder: { color: '#B0B4BA', fontSize: 14, fontStyle: 'italic' },
   editRoot: { flex: 1 },
   editHeader: {
     flexDirection: 'row',
@@ -545,4 +641,5 @@ const styles = StyleSheet.create({
   editContent: { gap: Spacing.three, paddingHorizontal: Spacing.three, paddingBottom: Spacing.five },
   editRow: { flexDirection: 'row', gap: Spacing.two },
   editField: { flex: 1 },
+  noteFieldInput: { height: 120, textAlignVertical: 'top', paddingTop: Spacing.two },
 });

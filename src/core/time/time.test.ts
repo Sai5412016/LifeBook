@@ -11,6 +11,8 @@ import {
   formatDayLabel,
   formatDuration,
   formatTimeLabel,
+  localDateToPickerDate,
+  pickerDateToLocalDate,
   secondsBetween,
 } from './index';
 
@@ -273,5 +275,26 @@ describe('formatDuration', () => {
   it('rounds to the nearest minute', () => {
     expect(formatDuration(89)).toBe('1 min'); // 1.48 min
     expect(formatDuration(91)).toBe('2 min'); // 1.52 min
+  });
+});
+
+describe('localDateToPickerDate / pickerDateToLocalDate', () => {
+  it('round-trips a local date exactly, regardless of the host timezone', () => {
+    const date = localDateToPickerDate('2026-08-15');
+    expect(pickerDateToLocalDate(date)).toBe('2026-08-15');
+  });
+
+  it('round-trips a date near a year boundary', () => {
+    const date = localDateToPickerDate('2026-12-31');
+    expect(pickerDateToLocalDate(date)).toBe('2026-12-31');
+  });
+
+  it('round-trips a date near a month boundary with single-digit day/month', () => {
+    const date = localDateToPickerDate('2026-01-05');
+    expect(pickerDateToLocalDate(date)).toBe('2026-01-05');
+  });
+
+  it('falls back to the current moment for a malformed input rather than throwing', () => {
+    expect(() => localDateToPickerDate('not-a-date')).not.toThrow();
   });
 });

@@ -228,3 +228,39 @@ export const ageInDays = (
     parseISO(toLocalDate(eventUtcIso, tz)),
     parseISO(toLocalDate(birthUtcIso, tz)),
   );
+
+/**
+ * A plain calendar date (YYYY-MM-DD) as a `Date` holding that same day at
+ * local midnight — for handing to a native date-picker UI component that
+ * expects a `Date` value (2026-08-15: `@expo/ui`'s community
+ * `DateTimePicker`, used by features/people's "Von"/"Bis" fields instead of
+ * free-text entry). NOT instant construction in the Architekturregel-2
+ * sense — the picker's `Date` carries no timezone meaning of its own, it is
+ * only the data type the widget happens to use for a day/month/year
+ * selection. Kept here anyway so `new Date(...)` never appears in feature
+ * code, full stop. Falls back to the current moment for a malformed input,
+ * which a caller should not be able to produce in practice (the only
+ * source is `pickerDateToLocalDate` below, or an already-valid stored
+ * local date).
+ */
+export const localDateToPickerDate = (localDate: string): Date => {
+  const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return new Date();
+  }
+  const [, year, month, day] = match;
+  return new Date(Number(year), Number(month) - 1, Number(day));
+};
+
+/**
+ * Inverse of `localDateToPickerDate` — reads the `Date` the picker widget
+ * handed back using its LOCAL getters (`getFullYear`/`getMonth`/`getDate`),
+ * matching how `localDateToPickerDate` constructed it, so the round trip is
+ * exact regardless of which timezone the device or test runner is in.
+ */
+export const pickerDateToLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};

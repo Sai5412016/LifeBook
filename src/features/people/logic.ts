@@ -52,10 +52,32 @@ export function sortPeople<T extends SortablePerson>(people: readonly T[]): T[] 
   );
 }
 
-const toGermanDate = (localDate: string): string => {
+/**
+ * "DD.MM.YYYY" from an already-localised YYYY-MM-DD date — exported for the
+ * add/edit form's date-choice fields (2026-08-15), which show whatever the
+ * native picker last produced in this same compact form, not just the
+ * detail screen's period label below.
+ */
+export const toGermanDate = (localDate: string): string => {
   const [year, month, day] = localDate.split('-');
   return `${day}.${month}.${year}`;
 };
+
+/**
+ * Whether an optional "Bis" date is acceptable given an optional "Von"
+ * date — false only when BOTH are set and "Bis" falls strictly before
+ * "Von". Either side missing is always valid; both fields stay optional
+ * and independently clearable (2026-08-15 task requirement). Plain string
+ * comparison, not Date parsing: YYYY-MM-DD is fixed-width and zero-padded,
+ * so lexicographic order already IS chronological order — matches this
+ * file's existing no-Date-construction style (see `formatPeriodLabel`).
+ */
+export function isMetToValid(metFromLocalDate: string | null, metToLocalDate: string | null): boolean {
+  if (!metFromLocalDate || !metToLocalDate) {
+    return true;
+  }
+  return metToLocalDate >= metFromLocalDate;
+}
 
 /**
  * Label for the detail screen's "Zeitraum" card, from already-localised

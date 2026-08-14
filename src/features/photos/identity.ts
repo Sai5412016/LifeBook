@@ -558,6 +558,23 @@ export function formatEmptyTrashConfirmation(count: number): string {
   return `${count} Fotos werden jetzt endgültig gelöscht und können nicht wiederhergestellt werden.`;
 }
 
+/* ────────────────────────────── Bildunterschrift (2026-08-15) ────────────────────────────── */
+
+export const PHOTO_NOTE_MAX_LENGTH = 500;
+
+/**
+ * Trims a photo caption and enforces the length cap regardless of how the
+ * text arrived — the edit form's own `maxLength` already stops a user from
+ * TYPING past it, but the invariant belongs here, not only in an input
+ * widget's configuration. A blank (or whitespace-only) result means "no
+ * caption", so callers write `null` — deleting any existing note — rather
+ * than storing an empty string, matching `PhotoRow.note`'s own contract.
+ */
+export function normalizePhotoNote(input: string): string | null {
+  const trimmed = input.trim().slice(0, PHOTO_NOTE_MAX_LENGTH);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export type ChronologicalRank = {
   /** 1-based, ascending by occurred_at — 1 is the OLDEST photo. */
   rank: number;

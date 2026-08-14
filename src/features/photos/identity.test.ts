@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PHOTO_NOTE_MAX_LENGTH,
   TRASH_RETENTION_DAYS,
   advanceMediumBackfillRun,
   buildMediumKey,
@@ -26,6 +27,7 @@ import {
   isPhotoDueForCleanup,
   locatePhotoInSections,
   nextMediumBackfillId,
+  normalizePhotoNote,
   resolveFullscreenUri,
   selectMediumBackfillCandidates,
   shouldResignUrl,
@@ -598,5 +600,34 @@ describe('trash confirmation texts', () => {
   it('empty-trash confirmation names the exact count, singular and plural', () => {
     expect(formatEmptyTrashConfirmation(1)).toContain('1 Foto');
     expect(formatEmptyTrashConfirmation(4)).toContain('4 Fotos');
+  });
+});
+
+describe('normalizePhotoNote', () => {
+  it('trims surrounding whitespace', () => {
+    expect(normalizePhotoNote('  Am Strand  ')).toBe('Am Strand');
+  });
+
+  it('keeps interior newlines — captions are multi-line', () => {
+    expect(normalizePhotoNote('Erste Zeile\nZweite Zeile')).toBe('Erste Zeile\nZweite Zeile');
+  });
+
+  it('turns an empty input into null, deleting the caption', () => {
+    expect(normalizePhotoNote('')).toBeNull();
+  });
+
+  it('turns a whitespace-only input into null', () => {
+    expect(normalizePhotoNote('   \n  ')).toBeNull();
+  });
+
+  it('caps at PHOTO_NOTE_MAX_LENGTH characters', () => {
+    const long = 'x'.repeat(PHOTO_NOTE_MAX_LENGTH + 50);
+    const result = normalizePhotoNote(long);
+    expect(result).toHaveLength(PHOTO_NOTE_MAX_LENGTH);
+  });
+
+  it('leaves a note at exactly the cap untouched', () => {
+    const exact = 'y'.repeat(PHOTO_NOTE_MAX_LENGTH);
+    expect(normalizePhotoNote(exact)).toBe(exact);
   });
 });
