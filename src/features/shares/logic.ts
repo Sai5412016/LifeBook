@@ -107,13 +107,21 @@ export function generateAccessCode(randomBytes: Uint8Array): string {
 /* ────────────────────────────── Aufgabe 3: link, message, labels ────────────────────────────── */
 
 /**
- * The viewing link — Stufe 2 builds the actual page behind it, so this
- * leads nowhere yet ON PURPOSE (task: "das ist so gewollt"). `supabaseUrl`
- * is passed in rather than read from `@/core/env` here, so this stays a
- * plain string-building function with no environment coupling at all.
+ * 2026-08-14: the viewing page does NOT live behind the Supabase project
+ * URL — Supabase refuses to serve HTML on a `supabase.co` address and
+ * sandboxes the response instead (confirmed on-device: raw source instead
+ * of a rendered page, mangled umlauts, cookies blocked). The `album` Edge
+ * Function now serves JSON only; the actual page is a separate Vercel
+ * deployment. This constant is the ONE place that address is written down
+ * — every caller in this feature builds the link through `buildShareLink`,
+ * never by concatenating a URL of its own, so the day a custom domain
+ * replaces this one there is exactly one line to change.
  */
-export function buildShareLink(supabaseUrl: string, token: string): string {
-  return `${supabaseUrl}/functions/v1/album/${token}`;
+const SHARE_VIEWER_BASE_URL = 'https://lifebook-album-heimlig.vercel.app';
+
+/** The viewing link handed to a guest — the access CODE is the second factor, entered on the page itself. */
+export function buildShareLink(token: string): string {
+  return `${SHARE_VIEWER_BASE_URL}/a/${token}`;
 }
 
 /**

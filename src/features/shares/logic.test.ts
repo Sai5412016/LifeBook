@@ -85,10 +85,15 @@ describe('generateAccessCode', () => {
 });
 
 describe('buildShareLink', () => {
-  it('joins the Supabase URL and token via the album function path', () => {
-    expect(buildShareLink('https://example.supabase.co', 'abc123')).toBe(
-      'https://example.supabase.co/functions/v1/album/abc123',
-    );
+  it('joins the Vercel viewer base URL and token via the /a/ path', () => {
+    expect(buildShareLink('abc123')).toBe('https://lifebook-album-heimlig.vercel.app/a/abc123');
+  });
+
+  it('uses only the token, never a Supabase URL', () => {
+    // 2026-08-14: the viewer moved off Supabase entirely (supabase.co
+    // refuses to serve HTML) — this guards against the base URL ever being
+    // threaded back in as a parameter by mistake.
+    expect(buildShareLink('xyz')).not.toContain('supabase');
   });
 });
 
@@ -98,6 +103,13 @@ describe('formatShareMessage', () => {
     expect(message).toContain('Sommerurlaub');
     expect(message).toContain('https://example.com/x');
     expect(message).toContain('AB12CD');
+  });
+
+  it('carries the actual Vercel viewer link when composed with buildShareLink', () => {
+    // 2026-08-14: the "Link und Code weitergeben" message must reflect the
+    // current viewer address, not a stale Supabase one.
+    const message = formatShareMessage('Sommerurlaub', buildShareLink('abc123'), 'AB12CD');
+    expect(message).toContain('https://lifebook-album-heimlig.vercel.app/a/abc123');
   });
 });
 

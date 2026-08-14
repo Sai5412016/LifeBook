@@ -11,7 +11,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { ENV } from '@/core/env';
 import { deviceTimeZone } from '@/core/time/device';
 import {
   DEVICE_LIMIT_CHOICES,
@@ -73,7 +72,7 @@ export default function FreigabeDetailScreen() {
     if (!share) {
       return;
     }
-    const link = buildShareLink(ENV.SUPABASE_URL, share.token);
+    const link = buildShareLink(share.token);
     try {
       await Share.share({ message: formatShareMessage(share.name, link, share.access_code) });
     } catch (shareError) {
@@ -186,7 +185,7 @@ export default function FreigabeDetailScreen() {
     );
   }
 
-  const link = buildShareLink(ENV.SUPABASE_URL, share.token);
+  const link = buildShareLink(share.token);
 
   return (
     <ThemedView style={styles.root}>
