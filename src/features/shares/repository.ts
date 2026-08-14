@@ -267,6 +267,22 @@ export async function removePhotosFromShare(shareId: string, photoIds: readonly 
 }
 
 /**
+ * Removes a photo from every share it was ever part of, regardless of
+ * which share(s) — the last step of a PERMANENT photo delete
+ * (features/photos/storage.ts#permanentlyDeletePhoto), called AFTER the
+ * photo's own row is already gone. A photo with no matching row here is
+ * not an error (nothing to remove), so a photo that was never shared, or
+ * whose share rows a concurrent cleanup on the other phone already
+ * deleted, is handled the same way as a normal removal.
+ */
+export async function removePhotoFromAllShares(photoId: string): Promise<void> {
+  const { error } = await supabase.from('share_photos').delete().eq('photo_id', photoId);
+  if (error) {
+    throw new Error(describeSupabaseError(error));
+  }
+}
+
+/**
  * Turns `currentIds` into `nextIds` with the minimal add/remove calls —
  * the editable-photo-selection screen's save step. The set-difference
  * itself is `logic.ts#diffPhotoSelection`, kept pure and tested there;

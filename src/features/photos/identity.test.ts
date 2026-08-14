@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  TRASH_RETENTION_DAYS,
   advanceMediumBackfillRun,
   buildMediumKey,
   buildOriginalKey,
@@ -12,12 +13,17 @@ import {
   dedupeByHash,
   extensionForMime,
   formatAgeLabel,
+  formatEmptyTrashConfirmation,
   formatEstimatedDownloadSize,
   formatMediumBackfillConfirmation,
   formatMediumBackfillLabel,
+  formatPermanentDeleteConfirmation,
+  formatPhotoRestoreConfirmation,
+  formatTrashRemainingLabel,
   groupPhotosByDay,
   isMediumBackfillRunComplete,
   isOccurredAtEstimated,
+  isPhotoDueForCleanup,
   locatePhotoInSections,
   nextMediumBackfillId,
   resolveFullscreenUri,
@@ -525,5 +531,72 @@ describe('chronologicalRank', () => {
     const afterDeletion = photosNewestFirst.filter((p) => p.id !== 'middle');
     expect(chronologicalRank(afterDeletion, 'oldest')).toEqual({ rank: 1, total: 2 });
     expect(chronologicalRank(afterDeletion, 'newest')).toEqual({ rank: 2, total: 2 });
+  });
+});
+
+describe('isPhotoDueForCleanup', () => {
+  const now = '2026-08-15T00:00:00.000Z';
+  const daysAgo = (days: number) => {
+    const date = new Date(Date.parse(now) - days * 24 * 60 * 60 * 1000);
+    return date.toISOString();
+  };
+
+  it('is not due for a photo just deleted', () => {
+    expect(isPhotoDueForCleanup(now, now)).toBe(false);
+  });
+
+  it('is not due at 29 days', () => {
+    expect(isPhotoDueForCleanup(daysAgo(29), now, TRASH_RETENTION_DAYS)).toBe(false);
+  });
+
+  it('is not due at exactly 30 days — the boundary is exclusive', () => {
+    expect(isPhotoDueForCleanup(daysAgo(30), now, TRASH_RETENTION_DAYS)).toBe(false);
+  });
+
+  it('is due at 31 days', () => {
+    expect(isPhotoDueForCleanup(daysAgo(31), now, TRASH_RETENTION_DAYS)).toBe(true);
+  });
+
+  it('is never due for a photo that was never deleted', () => {
+    expect(isPhotoDueForCleanup(null, now)).toBe(false);
+  });
+
+  it('is never due for a nonsensical time value, rather than guessing', () => {
+    expect(isPhotoDueForCleanup('not-a-date', now)).toBe(false);
+    expect(isPhotoDueForCleanup(now, 'also-not-a-date')).toBe(false);
+  });
+});
+
+describe('formatTrashRemainingLabel', () => {
+  const now = '2026-08-15T00:00:00.000Z';
+  const daysAgo = (days: number) => new Date(Date.parse(now) - days * 24 * 60 * 60 * 1000).toISOString();
+
+  it('shows the full retention window right after deletion', () => {
+    expect(formatTrashRemainingLabel(now, now)).toBe(`noch ${TRASH_RETENTION_DAYS} Tage`);
+  });
+
+  it('counts down as days pass', () => {
+    expect(formatTrashRemainingLabel(daysAgo(29), now)).toBe('noch 1 Tag');
+  });
+
+  it('reads "läuft heute ab" once the window has fully elapsed', () => {
+    expect(formatTrashRemainingLabel(daysAgo(30), now)).toBe('läuft heute ab');
+  });
+});
+
+describe('trash confirmation texts', () => {
+  it('restore confirmation mentions the chronology, both phones and shares', () => {
+    const text = formatPhotoRestoreConfirmation();
+    expect(text).toContain('Chronik');
+    expect(text).toContain('Freigabe');
+  });
+
+  it('permanent single-delete confirmation is final', () => {
+    expect(formatPermanentDeleteConfirmation()).toContain('kann nicht wiederhergestellt werden');
+  });
+
+  it('empty-trash confirmation names the exact count, singular and plural', () => {
+    expect(formatEmptyTrashConfirmation(1)).toContain('1 Foto');
+    expect(formatEmptyTrashConfirmation(4)).toContain('4 Fotos');
   });
 });

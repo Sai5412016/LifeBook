@@ -70,6 +70,7 @@ import {
   usePendingUploadCount,
 } from '@/features/photos/repository';
 import { cancelMediumBackfillRun, runMediumBackfill } from '@/features/photos/storage';
+import { useTrashCleanupDiagnostics } from '@/features/photos/trashDiagnostics';
 
 function SyncStatusRow() {
   const status = useStatus();
@@ -130,6 +131,7 @@ function PhotoStatusRow() {
   const backfillLabel = formatMediumBackfillLabel(useMediumBackfillProgress());
   const candidates = useMediumBackfillCandidatePhotos();
   const onWifi = useIsOnWifi();
+  const trashDiagnostics = useTrashCleanupDiagnostics();
 
   const [runState, setRunState] = useState<MediumBackfillRunState | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
@@ -244,6 +246,23 @@ function PhotoStatusRow() {
             </ThemedText>
           ) : null}
         </>
+      ) : null}
+
+      <Pressable onPress={() => router.push('/papierkorb')} hitSlop={8}>
+        <ThemedText type="linkPrimary">Papierkorb öffnen</ThemedText>
+      </Pressable>
+      {trashDiagnostics.lastRunAtUtcIso ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          Automatisches Aufräumen zuletzt: {formatTimeLabel(trashDiagnostics.lastRunAtUtcIso, deviceTimeZone())}
+          {trashDiagnostics.runStatus === 'done'
+            ? ` · ${trashDiagnostics.removed} entfernt${trashDiagnostics.failed > 0 ? `, ${trashDiagnostics.failed} fehlgeschlagen` : ''}`
+            : ''}
+        </ThemedText>
+      ) : null}
+      {trashDiagnostics.lastError ? (
+        <ThemedText type="small" themeColor="dangerText">
+          {trashDiagnostics.lastError}
+        </ThemedText>
       ) : null}
     </ThemedView>
   );

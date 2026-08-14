@@ -28,3 +28,8 @@ jobs:
       platform: android
       branch: preview
       message: Automatisches Update aus main
+      # Ohne diese Zeile entsteht in dem Moment, in dem eine Umgebungsvariable
+      # nur bei EAS und nicht lokal gesetzt ist, still eine App ohne
+      # Backend-Adresse — der Job liefe durch, würde aber mit den falschen
+      # (oder leeren) EXPO_PUBLIC_*-Werten bauen, ohne dass das hier auffällt.
+      environment: preview

@@ -20,12 +20,14 @@ import * as Network from 'expo-network';
 import { ENV } from '@/core/env';
 import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
+import { removePhotoFromAllShares } from '@/features/shares/repository';
 
 import {
   advanceMediumBackfillRun,
   buildMediumKey,
   extensionForMime,
   isMediumBackfillRunComplete,
+  isPhotoDueForCleanup,
   nextMediumBackfillId,
   shouldResignUrl,
   startMediumBackfillRun,
@@ -33,11 +35,14 @@ import {
 } from './identity';
 import { createMediumImage, createThumbnail, deleteQuietly } from './media';
 import {
+  hardDeletePhoto,
+  loadAllDeletedPhotos,
   loadPendingUploads,
   markMediumUploaded,
   markOriginalUploaded,
   markThumbUploaded,
 } from './repository';
+import { setTrashCleanupDiagnostics } from './trashDiagnostics';
 import type { PhotoRow } from './types';
 
 export const PHOTOS_BUCKET = 'photos';
@@ -334,7 +339,23 @@ export async function getCachedSignedUrls(keys: readonly string[]): Promise<Map<
   return result;
 }
 
-/** Remove every stored rendition of a photo. Best-effort — a leftover object is cleaned up later. */
+/**
+ * Remove every stored rendition of a photo.
+ *
+ * 2026-08-15: THROWS on failure now, no longer best-effort — its only
+ * caller is `permanentlyDeletePhoto` below, where a storage failure MUST
+ * stop the operation before the row is deleted (task requirement: an
+ * orphaned object that nobody can attribute to anything any more is worse
+ * than a trash entry that stays a little longer). When soft-delete alone
+ * was still paired with this call, a swallowed failure was harmless — that
+ * caller is gone (see repository.ts#softDeletePhoto's own doc comment).
+ *
+ * Idempotent by construction: Supabase Storage's `remove()` is a thin
+ * wrapper over S3-style object deletion, which returns success for a key
+ * that is already gone rather than erroring — removing the same photo's
+ * files twice (e.g. two phones sweeping the trash at the same moment,
+ * Aufgabe 3) is therefore not a failure case this function can even see.
+ */
 export async function removeStoredObjects(
   thumbKey: string | null,
   mediumKey: string | null,
@@ -347,7 +368,7 @@ export async function removeStoredObjects(
 
   const { error } = await supabase.storage.from(PHOTOS_BUCKET).remove(keys);
   if (error) {
-    console.error('[LifeBook] Fotodateien konnten nicht gelöscht werden', error.message);
+    throw new Error(`photos: Speicherobjekte konnten nicht entfernt werden: ${error.message}`);
   }
 }
 
@@ -702,5 +723,134 @@ export async function runMediumBackfill(
     return { healed: state.healed, failed: state.failed, stoppedEarly: false };
   } finally {
     backfillAbortController = null;
+  }
+}
+
+/* ────────────────────────────── Papierkorb (Aufgabe 2/3, 2026-08-15) ────────────────────────────── */
+
+/** Every field a permanent delete needs for one photo. */
+export type PermanentlyDeletablePhoto = Pick<
+  PhotoRow,
+  'id' | 'thumb_key' | 'medium_key' | 'original_key' | 'local_uri'
+>;
+
+/**
+ * Removes one photo for good: task's exact order, and the reasoning for
+ * it —
+ *
+ * 1. Storage files (thumb/medium/original) — `removeStoredObjects` now
+ *    THROWS on failure (see its own doc comment), so a storage error
+ *    aborts right here, before anything else happens: the row below is
+ *    NOT deleted, and this photo simply stays in the trash to be retried
+ *    later (by the user, or by the next automatic sweep). Skipping this
+ *    and deleting the row anyway would leave an object in storage that no
+ *    row, on either phone, could ever point back to again.
+ * 2. The locally staged copy, if this device still has one — best-effort
+ *    (`deleteQuietly` never throws), same as every other cache cleanup in
+ *    this feature; a leftover in the OS-managed staging directory is
+ *    reclaimed eventually and is not worth aborting a delete over.
+ * 3. The row itself, hard — only reachable once step 1 succeeded.
+ * 4. Any `share_photos` entries referencing this photo, in whichever
+ *    share(s) it was part of — this is a separate Supabase table with no
+ *    foreign key back to `photos` (it isn't PowerSync-synced at all, see
+ *    features/shares/repository.ts's own doc comment), so nothing removes
+ *    these rows automatically once the photo is gone.
+ */
+export async function permanentlyDeletePhoto(
+  db: AbstractPowerSyncDatabase,
+  photo: PermanentlyDeletablePhoto,
+): Promise<void> {
+  await removeStoredObjects(photo.thumb_key, photo.medium_key, photo.original_key);
+  deleteQuietly(photo.local_uri);
+  await hardDeletePhoto(db, photo.id);
+  await removePhotoFromAllShares(photo.id);
+}
+
+export type TrashSweepResult = { removed: number; failed: number };
+
+/**
+ * Runs `permanentlyDeletePhoto` over `photos`, one at a time — sequential,
+ * never parallel (task requirement for Aufgabe 3; also just correct for
+ * Aufgabe 2's "Papierkorb leeren", which reuses this same loop). A single
+ * photo's failure is caught, logged and counted, never stops the rest —
+ * mirrors every other batch loop in this module (see `executeUploadQueue`,
+ * `runMediumBackfill`).
+ */
+async function deletePhotosPermanently(
+  db: AbstractPowerSyncDatabase,
+  photos: readonly PermanentlyDeletablePhoto[],
+): Promise<TrashSweepResult> {
+  let removed = 0;
+  let failed = 0;
+
+  for (const photo of photos) {
+    try {
+      await permanentlyDeletePhoto(db, photo);
+      removed += 1;
+    } catch (error) {
+      failed += 1;
+      console.error('[LifeBook] Foto konnte nicht endgültig gelöscht werden', {
+        photoId: photo.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { removed, failed };
+}
+
+/**
+ * The trash screen's "Papierkorb leeren" — permanently deletes EVERY photo
+ * currently in `photos` (the screen's own already-loaded trash list),
+ * regardless of how long it has been there. Distinct from the automatic
+ * sweep below only in that it skips the `isPhotoDueForCleanup` filter —
+ * the user asked for all of it, now.
+ */
+export async function emptyTrash(
+  db: AbstractPowerSyncDatabase,
+  photos: readonly PermanentlyDeletablePhoto[],
+): Promise<TrashSweepResult> {
+  return deletePhotosPermanently(db, photos);
+}
+
+/**
+ * The automatic 30-day sweep's actual work: load every soft-deleted photo
+ * in the local database, keep only the ones `isPhotoDueForCleanup` says
+ * are actually overdue, and permanently delete those — sequentially, same
+ * as `emptyTrash`. Photos not yet due are left untouched and simply
+ * re-evaluated the next time this runs.
+ */
+export async function runTrashCleanupSweep(db: AbstractPowerSyncDatabase): Promise<TrashSweepResult> {
+  const now = nowUtcIso();
+  const deletedPhotos = await loadAllDeletedPhotos(db);
+  const due = deletedPhotos.filter((photo) => isPhotoDueForCleanup(photo.deleted_at, now));
+  return deletePhotosPermanently(db, due);
+}
+
+/**
+ * The startup entry point (Aufgabe 3) — called once per signed-in app
+ * start from src/app/_layout.tsx#TrashCleanupEffect, the same pattern as
+ * PushRegistrationEffect (CLAUDE.md Architekturregel 8). NEVER throws and
+ * NEVER blocks the start: every outcome is recorded in ./trashDiagnostics
+ * instead, which Einstellungen reads — including the case where the sweep
+ * couldn't even start (e.g. the initial query itself failed), which is
+ * exactly the kind of failure a bare `console.error` would otherwise make
+ * invisible (see trashDiagnostics.ts's own doc comment).
+ */
+export async function runStartupTrashCleanup(db: AbstractPowerSyncDatabase): Promise<void> {
+  setTrashCleanupDiagnostics({ runStatus: 'running' });
+  try {
+    const result = await runTrashCleanupSweep(db);
+    setTrashCleanupDiagnostics({
+      runStatus: 'done',
+      removed: result.removed,
+      failed: result.failed,
+      lastError: null,
+      lastRunAtUtcIso: nowUtcIso(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[LifeBook] Automatisches Papierkorb-Aufräumen fehlgeschlagen', error);
+    setTrashCleanupDiagnostics({ runStatus: 'failed', lastError: message, lastRunAtUtcIso: nowUtcIso() });
   }
 }

@@ -17,6 +17,7 @@ import { guardImport, guardImportAsync, useImportErrors } from '@/core/diagnosti
 import { checkEnv } from '@/core/env';
 import { registerForPushNotifications } from '@/core/notifications';
 import { useHasHousehold } from '@/features/household/repository';
+import { runStartupTrashCleanup } from '@/features/photos/storage';
 
 // As early as this module can manage it — before anything else in the app
 // runs — so an unhandled JS error anywhere shows CrashScreen instead of
@@ -107,6 +108,7 @@ function DbAndAuthGate({ children }: { children: ReactNode }) {
     <PowerSyncContext.Provider value={db}>
       <PowerSyncConnector db={db} />
       <PushRegistrationEffect />
+      <TrashCleanupEffect db={db} />
       {children}
     </PowerSyncContext.Provider>
   );
@@ -153,6 +155,38 @@ function PushRegistrationEffect() {
     // its own errors into ./diagnostics) — must not delay or block startup.
     void registerForPushNotifications(session.user.id);
   }, [status, session]);
+
+  return null;
+}
+
+/**
+ * Runs the automatic trash sweep (Aufgabe 3, CLAUDE.md Fallstrick-adjacent
+ * pattern per Architekturregel 8: this depends on the SIGNED-IN STATE, not
+ * on the interactive sign-in action) once per signed-in app start —
+ * permanently removes photos whose 30-day trash window
+ * (features/photos/identity.ts#TRASH_RETENTION_DAYS) has passed. Same ref
+ * guard shape as PushRegistrationEffect above, deliberately not keyed to a
+ * specific `userId`: the sweep is household-wide storage cleanup, not
+ * per-user data, so which signed-in user triggered it is irrelevant — only
+ * "already ran this app session" matters.
+ */
+function TrashCleanupEffect({ db }: { db: PowerSyncDatabase }) {
+  const { status } = useAuth();
+  const hasRunRef = useRef(false);
+
+  useEffect(() => {
+    if (status === 'signedOut') {
+      hasRunRef.current = false;
+      return;
+    }
+    if (status !== 'signedIn' || hasRunRef.current) {
+      return;
+    }
+    hasRunRef.current = true;
+    // Never awaited and never throws (runStartupTrashCleanup swallows its
+    // own errors into ./trashDiagnostics) — must not delay or block startup.
+    void runStartupTrashCleanup(db);
+  }, [status, db]);
 
   return null;
 }

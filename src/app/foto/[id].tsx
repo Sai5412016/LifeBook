@@ -49,16 +49,16 @@ import {
   resolveFullscreenUri,
 } from '@/features/photos/identity';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
-import { deleteQuietly } from '@/features/photos/media';
+import { setLastViewedPhotoId } from '@/features/photos/lastViewed';
 import {
   correctPhotoOccurredAt,
   softDeletePhoto,
   usePhotoById,
   usePhotosOfChild,
 } from '@/features/photos/repository';
-import { setLastViewedPhotoId } from '@/features/photos/lastViewed';
+import { formatDeleteConfirmationMessage } from '@/features/photos/selection';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
-import { healMissingMedium, removeStoredObjects } from '@/features/photos/storage';
+import { healMissingMedium } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
 import {
   clampIndex,
@@ -219,19 +219,11 @@ export default function FotoVollbildScreen() {
 
     setDeleting(true);
     try {
+      // Nur die Zeile wird weich gelöscht — die Dateien im Speicher bleiben
+      // liegen, bis der Papierkorb sie nach 30 Tagen (oder auf Wunsch
+      // früher) endgültig entfernt (src/app/papierkorb.tsx,
+      // features/photos/storage.ts#permanentlyDeletePhoto).
       await softDeletePhoto(db, currentPhoto.id);
-
-      // Hartes Löschen der Dateien ist Best-Effort: schlägt es fehl, ist das
-      // weiche Löschen in der Datenbank trotzdem gültig — protokollieren und
-      // weitermachen statt abzubrechen.
-      try {
-        await removeStoredObjects(currentPhoto.thumb_key, currentPhoto.medium_key, currentPhoto.original_key);
-      } catch (error) {
-        console.error('[LifeBook] Speicherobjekte konnten nicht entfernt werden', error);
-      }
-      if (currentPhoto.local_uri) {
-        deleteQuietly(currentPhoto.local_uri);
-      }
 
       const nextIndex = indexAfterDeletion(currentIndex, photos.length);
       if (nextIndex === -1) {
@@ -295,21 +287,18 @@ export default function FotoVollbildScreen() {
     }
   }, [db, currentPhoto, dateInput, timeInput]);
 
-  // Der Text ist bewusst deutlich: "weiches Löschen" trifft nur die
-  // Datenbankzeile, die Dateien im Speicher werden hart entfernt (siehe
-  // handleDelete) — ohne Datei ist die Zeile für die Familie wertlos, das
-  // Foto ist tatsächlich weg, auf beiden Handys. Solange es keinen echten
-  // Papierkorb mit Wiederherstellung gibt, darf die Oberfläche keine
-  // Rückholbarkeit suggerieren, die es nicht gibt.
+  // 2026-08-15: der Papierkorb ist jetzt da (src/app/papierkorb.tsx) — das
+  // Foto verschwindet aus der Chronik auf beiden Handys, aber die Dateien
+  // bleiben 30 Tage im Speicher liegen, wiederherstellbar. Derselbe Text wie
+  // im Mehrfachauswahl-Löschen der Chronik, siehe
+  // features/photos/selection.ts#formatDeleteConfirmationMessage — hier mit
+  // count 1 aufgerufen statt eigenem Wortlaut, damit beide Löschwege nicht
+  // auseinanderlaufen können.
   const confirmDelete = useCallback(() => {
-    Alert.alert(
-      'Foto endgültig löschen?',
-      'Das Foto wird unwiderruflich gelöscht — auch vom Handy des anderen Elternteils. Es gibt keine Möglichkeit, es wiederherzustellen.',
-      [
-        { text: 'Abbrechen', style: 'cancel' },
-        { text: 'Endgültig löschen', style: 'destructive', onPress: handleDelete },
-      ],
-    );
+    Alert.alert('Foto löschen?', formatDeleteConfirmationMessage(1), [
+      { text: 'Abbrechen', style: 'cancel' },
+      { text: 'In den Papierkorb', style: 'destructive', onPress: handleDelete },
+    ]);
   }, [handleDelete]);
 
   const handleMomentumScrollEnd = useCallback(

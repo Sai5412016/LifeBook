@@ -19,13 +19,18 @@ export function formatSelectionCountLabel(count: number): string {
 }
 
 /**
- * The delete confirmation body text — names the exact count and states
- * plainly that it is final, mirroring the single-photo wording in
- * src/app/foto/[id].tsx (there is no trash/undo feature yet, so the UI must
- * never suggest recoverability it doesn't have).
+ * The delete confirmation body text — honest about what actually happens
+ * now (2026-08-15, trash feature): the photo only disappears from the
+ * chronology, on both phones; the files themselves stay in storage for 30
+ * days (features/photos/identity.ts#TRASH_RETENTION_DAYS), recoverable from
+ * the trash (src/app/papierkorb.tsx) or permanently removable there ahead
+ * of time. Shared with the single-photo confirmation in
+ * src/app/foto/[id].tsx (called with count 1) so the wording can't drift
+ * between the two delete paths.
  */
 export function formatDeleteConfirmationMessage(count: number): string {
-  const subject = count === 1 ? 'Das ausgewählte Foto wird' : `${count} ausgewählte Fotos werden`;
-  const pronoun = count === 1 ? 'es' : 'sie';
-  return `${subject} unwiderruflich gelöscht — auch vom Handy des anderen Elternteils. Es gibt keine Möglichkeit, ${pronoun} wiederherzustellen.`;
+  if (count === 1) {
+    return 'Das ausgewählte Foto verschwindet aus der Chronik, auch vom Handy des anderen Elternteils, und liegt 30 Tage im Papierkorb — dort lässt es sich wiederherstellen oder endgültig löschen.';
+  }
+  return `${count} ausgewählte Fotos verschwinden aus der Chronik, auch vom Handy des anderen Elternteils, und liegen 30 Tage im Papierkorb — dort lassen sie sich wiederherstellen oder endgültig löschen.`;
 }

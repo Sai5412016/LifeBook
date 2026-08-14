@@ -270,7 +270,17 @@ export async function correctPhotoOccurredAt(
   return true;
 }
 
-/** Soft-delete, mirroring the convention used by every other event table. */
+/**
+ * Soft-delete, mirroring the convention used by every other event table.
+ *
+ * 2026-08-15: this is now the ENTIRE delete operation from the Chronik and
+ * the fullscreen viewer — no storage cleanup happens here any more (see
+ * ./storage.ts#permanentlyDeletePhoto for that, now only reachable from the
+ * trash, src/app/papierkorb.tsx). Deleting the row alone is what makes a
+ * genuine 30-day recovery window possible: the previous behaviour removed
+ * the files in the same breath, which made the soft-delete a fiction — a
+ * row with no file behind it could never actually be restored.
+ */
 export async function softDeletePhoto(
   db: AbstractPowerSyncDatabase,
   photoId: string,
@@ -281,6 +291,62 @@ export async function softDeletePhoto(
     now,
     photoId,
   ]);
+}
+
+/**
+ * Un-deletes a photo — clears `deleted_at`, so it reappears in the
+ * Chronik on every device (and, per the trash screen's own confirmation
+ * text, in any share it was part of — a share's photo selection is a set
+ * of ids in `share_photos`, untouched by soft-delete/restore either way).
+ */
+export async function restorePhoto(db: AbstractPowerSyncDatabase, photoId: string): Promise<void> {
+  const now = nowUtcIso();
+  await db.execute('UPDATE photos SET deleted_at = NULL, updated_at = ? WHERE id = ?', [now, photoId]);
+}
+
+/**
+ * Removes the row outright — the last step of a PERMANENT delete
+ * (./storage.ts#permanentlyDeletePhoto), never called on its own: the
+ * storage files must already be gone first (see that function's own doc
+ * comment for why the order matters). A missing row is a no-op, not an
+ * error — the same DELETE statement PowerSync's own upload queue issues
+ * against Postgres for this row (core/sync/connector.ts), so a second
+ * device racing to clean up the same overdue photo can never fail here.
+ */
+export async function hardDeletePhoto(db: AbstractPowerSyncDatabase, photoId: string): Promise<void> {
+  await db.execute('DELETE FROM photos WHERE id = ?', [photoId]);
+}
+
+/**
+ * Reactive: every soft-deleted photo of a child, most recently deleted
+ * first — the trash screen's list (src/app/papierkorb.tsx).
+ */
+export function useDeletedPhotosOfChild(childId: string | undefined): {
+  photos: PhotoRow[];
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useQuery<PhotoRow>(
+    `SELECT ${PHOTO_COLUMNS} FROM photos
+      WHERE child_id = ? AND deleted_at IS NOT NULL
+      ORDER BY deleted_at DESC`,
+    [childId ?? ''],
+  );
+
+  return { photos: data ?? [], isLoading };
+}
+
+/**
+ * One-shot (not reactive) load of every soft-deleted photo in the local
+ * database, oldest deletion first — the automatic 30-day sweep's own work
+ * queue (./storage.ts#runTrashCleanupSweep), which runs once at app start
+ * rather than from a mounted screen, so a live `useQuery` subscription
+ * would have nothing to attach to. Not scoped to a single child: the sweep
+ * is household-wide cleanup, same as the medium-rendition backfill.
+ */
+export async function loadAllDeletedPhotos(db: AbstractPowerSyncDatabase): Promise<PhotoRow[]> {
+  return db.getAll<PhotoRow>(
+    `SELECT ${PHOTO_COLUMNS} FROM photos WHERE deleted_at IS NOT NULL ORDER BY deleted_at ASC`,
+  );
 }
 
 /** Reactive chronology for one child: day sections, newest first. */

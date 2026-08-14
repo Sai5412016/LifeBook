@@ -130,10 +130,14 @@ enden mit:
 ```sql
 ALTER TABLE public.<tabelle> REPLICA IDENTITY FULL;
 ```
-→ Die Tabelle muss außerdem in die Publikation `powersync` aufgenommen
-und die Zeile in `sync-rules.yaml` ergänzt werden. Drei Schritte, nicht
-einer — und die Sync-Regeln müssen zusätzlich von Hand in der
-PowerSync-Konsole freigegeben werden.
+**Präzisiert am 15.08.2026, gegen die Datenbank geprüft:** Die Publikation
+`powersync` ist auf das ganze Schema `public` eingerichtet, nicht auf eine
+Tabellenliste — eine neue Tabelle landet also AUTOMATISCH in der
+Replikation, der Schritt „in die Publikation aufnehmen" entfällt. Was NICHT
+automatisch folgt: `REPLICA IDENTITY FULL` bleibt auf dem Standardwert und
+muss weiterhin von Hand gesetzt werden (siehe oben), ebenso die Zeile in
+`sync-rules.yaml` — und die Sync-Regeln müssen zusätzlich von Hand in der
+PowerSync-Konsole freigegeben werden. Zwei Schritte, nicht drei.
 
 ### 7. Expo-Pakete niemals mit `npm install` und geratener Version
 

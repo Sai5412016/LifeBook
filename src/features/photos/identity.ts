@@ -484,6 +484,80 @@ export function locatePhotoInSections<T extends { id: string }>(
   return null;
 }
 
+/* ────────────────────────────── Papierkorb (2026-08-15) ────────────────────────────── */
+
+/**
+ * How long a soft-deleted photo stays recoverable before the automatic
+ * sweep (storage.ts#runTrashCleanupSweep) removes it for good.
+ */
+export const TRASH_RETENTION_DAYS = 30;
+
+/**
+ * Whether a soft-deleted photo is due for permanent removal — "older than
+ * `retentionDays`" is deliberately exclusive (exactly `retentionDays` old
+ * is NOT yet due), so a photo gets one full clean retention window before
+ * anything irreversible happens to it.
+ *
+ * Never deletes on uncertain input: `deletedAtUtcIso === null` (never
+ * deleted) and an unparseable value (`secondsBetween` resolves to `NaN` for
+ * either endpoint) both return false rather than guessing — a photo this
+ * function can't confidently place in time must not be swept.
+ */
+export function isPhotoDueForCleanup(
+  deletedAtUtcIso: string | null,
+  nowUtcIso: string,
+  retentionDays: number = TRASH_RETENTION_DAYS,
+): boolean {
+  if (!deletedAtUtcIso) {
+    return false;
+  }
+  const elapsedSeconds = secondsBetween(deletedAtUtcIso, nowUtcIso);
+  if (!Number.isFinite(elapsedSeconds)) {
+    return false;
+  }
+  return elapsedSeconds > retentionDays * 24 * 60 * 60;
+}
+
+/**
+ * "noch 12 Tage" — the trash row's remaining-time label. Rounds UP to whole
+ * days (a photo deleted an hour ago still reads "noch 30 Tage", not "noch
+ * 0 Tage") so the number only ever counts down once a full day has
+ * actually elapsed, matching `isPhotoDueForCleanup`'s own exclusive
+ * boundary above.
+ */
+export function formatTrashRemainingLabel(
+  deletedAtUtcIso: string,
+  nowUtcIso: string,
+  retentionDays: number = TRASH_RETENTION_DAYS,
+): string {
+  const elapsedSeconds = secondsBetween(deletedAtUtcIso, nowUtcIso);
+  const secondsPerDay = 24 * 60 * 60;
+  const remainingSeconds = retentionDays * secondsPerDay - (Number.isFinite(elapsedSeconds) ? elapsedSeconds : 0);
+  const remainingDays = Math.max(0, Math.ceil(remainingSeconds / secondsPerDay));
+  if (remainingDays === 0) {
+    return 'läuft heute ab';
+  }
+  return remainingDays === 1 ? 'noch 1 Tag' : `noch ${remainingDays} Tage`;
+}
+
+/** The revoke-style confirmation shown before restoring a photo from the trash — states plainly that it reappears everywhere, including any share, since that surprise is the whole point of asking first. */
+export function formatPhotoRestoreConfirmation(): string {
+  return 'Das Foto erscheint wieder in der Chronik, auf beiden Handys — und, falls es Teil einer Freigabe war, auch dort wieder.';
+}
+
+/** The confirmation before permanently deleting ONE photo from the trash ahead of the 30-day window. */
+export function formatPermanentDeleteConfirmation(): string {
+  return 'Das Foto wird jetzt endgültig gelöscht und kann nicht wiederhergestellt werden.';
+}
+
+/** The "Papierkorb leeren" confirmation — names the exact count, singular/plural. */
+export function formatEmptyTrashConfirmation(count: number): string {
+  if (count === 1) {
+    return '1 Foto wird jetzt endgültig gelöscht und kann nicht wiederhergestellt werden.';
+  }
+  return `${count} Fotos werden jetzt endgültig gelöscht und können nicht wiederhergestellt werden.`;
+}
+
 export type ChronologicalRank = {
   /** 1-based, ascending by occurred_at — 1 is the OLDEST photo. */
   rank: number;

@@ -36,15 +36,17 @@ describe('formatSelectionCountLabel', () => {
 });
 
 describe('formatDeleteConfirmationMessage', () => {
-  it('names a single photo in the singular', () => {
-    expect(formatDeleteConfirmationMessage(1)).toBe(
-      'Das ausgewählte Foto wird unwiderruflich gelöscht — auch vom Handy des anderen Elternteils. Es gibt keine Möglichkeit, es wiederherzustellen.',
-    );
+  it('names a single photo in the singular and mentions the trash', () => {
+    const message = formatDeleteConfirmationMessage(1);
+    expect(message).toContain('Das ausgewählte Foto');
+    expect(message).toContain('30 Tage im Papierkorb');
+    expect(message).not.toContain('unwiderruflich');
   });
 
-  it('names the exact count in the plural', () => {
-    expect(formatDeleteConfirmationMessage(5)).toBe(
-      '5 ausgewählte Fotos werden unwiderruflich gelöscht — auch vom Handy des anderen Elternteils. Es gibt keine Möglichkeit, sie wiederherzustellen.',
-    );
+  it('names the exact count in the plural and mentions the trash', () => {
+    const message = formatDeleteConfirmationMessage(5);
+    expect(message).toContain('5 ausgewählte Fotos');
+    expect(message).toContain('30 Tage im Papierkorb');
+    expect(message).not.toContain('unwiderruflich');
   });
 });

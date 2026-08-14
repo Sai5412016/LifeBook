@@ -38,7 +38,6 @@ import { chunkPhotos, formatAgeLabel, locatePhotoInSections } from '@/features/p
 import { PickCancelledError, describeImport, importPhotos } from '@/features/photos/import';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { takeLastViewedPhotoId } from '@/features/photos/lastViewed';
-import { deleteQuietly } from '@/features/photos/media';
 import { softDeletePhoto, usePendingUploadCount, usePhotoSections } from '@/features/photos/repository';
 import {
   formatDeleteConfirmationMessage,
@@ -46,7 +45,7 @@ import {
   toggleSelected,
 } from '@/features/photos/selection';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
-import { removeStoredObjects, runUploadQueue } from '@/features/photos/storage';
+import { runUploadQueue } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
 import { BigButton, Button, useUiColors, withAlpha } from '@/ui';
 
@@ -167,28 +166,19 @@ export default function ChronikScreen() {
     Alert.alert(count === 1 ? 'Foto löschen?' : 'Fotos löschen?', formatDeleteConfirmationMessage(count), [
       { text: 'Abbrechen', style: 'cancel' },
       {
-        text: 'Endgültig löschen',
+        text: 'In den Papierkorb',
         style: 'destructive',
         onPress: async () => {
           setBusy(true);
           let failed = 0;
 
+          // Nur die Zeile wird weich gelöscht — die Dateien im Speicher
+          // bleiben liegen, bis der Papierkorb sie nach 30 Tagen (oder auf
+          // Wunsch früher) endgültig entfernt (src/app/papierkorb.tsx,
+          // features/photos/storage.ts#permanentlyDeletePhoto).
           for (const photo of selectedPhotos) {
             try {
               await softDeletePhoto(db, photo.id);
-
-              // Hartes Löschen der Dateien ist Best-Effort, wie in der
-              // Vollbildansicht: schlägt es fehl, ist das weiche Löschen in
-              // der Datenbank trotzdem gültig — protokollieren und
-              // weitermachen statt abzubrechen.
-              try {
-                await removeStoredObjects(photo.thumb_key, photo.medium_key, photo.original_key);
-              } catch (error) {
-                console.error('[LifeBook] Speicherobjekte konnten nicht entfernt werden', error);
-              }
-              if (photo.local_uri) {
-                deleteQuietly(photo.local_uri);
-              }
             } catch (error) {
               failed += 1;
               console.error('[LifeBook] Foto konnte nicht gelöscht werden', error);
