@@ -300,6 +300,28 @@ function buildAppSchema() {
     },
   );
 
+  /* ────────────────────────────── Foto-Sicherung aufs Gerät (2026-08-16) ────────────────────────────── */
+
+  // `localOnly: true` — deliberately NEVER synced, unlike every other table
+  // in this schema. "Alle Fotos sichern" (features/photos/storage.ts#
+  // runPhotoBackup) copies originals into THIS device's own gallery album
+  // — a fact that is only ever true for the specific phone that actually
+  // wrote the file. A synced marker would tell the OTHER parent's phone
+  // "already backed up" for files it never received, and that photo would
+  // then silently never reach that phone's gallery on a later run. `id` is
+  // the photo's own id — one row per backed-up photo on THIS device;
+  // existence is the marker (see repository.ts#usePhotoBackupCandidatePhotos).
+  // Being local-only also means none of CLAUDE.md's Fallstrick 6 applies:
+  // there is no Postgres table to add `REPLICA IDENTITY FULL` to, nothing
+  // to add to the `powersync` publication, no `sync-rules.yaml` line — this
+  // table never leaves the device, so no migration was needed for it.
+  const photo_backups = new Table(
+    {
+      backed_up_at: column.text,
+    },
+    { localOnly: true },
+  );
+
   /* ────────────────────────────── Begleitende Menschen (2026-08-12) ────────────────────────────── */
 
   // New feature, not in the original Spec: people who accompanied the child
@@ -370,6 +392,7 @@ function buildAppSchema() {
     milestones,
     notes,
     photos,
+    photo_backups,
     people,
     reminders,
     user_preferences,

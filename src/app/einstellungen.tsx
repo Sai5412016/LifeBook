@@ -60,16 +60,28 @@ import { useIsOnWifi } from '@/features/photos/hooks';
 import {
   formatMediumBackfillConfirmation,
   formatMediumBackfillLabel,
+  formatPhotoBackupConfirmation,
+  formatPhotoBackupStatusLabel,
   selectMediumBackfillCandidates,
+  selectPhotoBackupCandidates,
   startMediumBackfillRun,
+  startPhotoBackupRun,
   type MediumBackfillRunState,
+  type PhotoBackupRunState,
 } from '@/features/photos/identity';
 import {
+  useLastPhotoBackupAt,
   useMediumBackfillCandidatePhotos,
   useMediumBackfillProgress,
   usePendingUploadCount,
+  usePhotoBackupCandidatePhotos,
 } from '@/features/photos/repository';
-import { cancelMediumBackfillRun, runMediumBackfill } from '@/features/photos/storage';
+import {
+  cancelMediumBackfillRun,
+  cancelPhotoBackupRun,
+  runMediumBackfill,
+  runPhotoBackup,
+} from '@/features/photos/storage';
 import { useTrashCleanupDiagnostics } from '@/features/photos/trashDiagnostics';
 
 function SyncStatusRow() {
@@ -132,6 +144,8 @@ function PhotoStatusRow() {
   const candidates = useMediumBackfillCandidatePhotos();
   const onWifi = useIsOnWifi();
   const trashDiagnostics = useTrashCleanupDiagnostics();
+  const backupCandidates = usePhotoBackupCandidatePhotos();
+  const lastBackupAtUtcIso = useLastPhotoBackupAt();
 
   const [runState, setRunState] = useState<MediumBackfillRunState | null>(null);
   const [resultMessage, setResultMessage] = useState<string | null>(null);
@@ -141,11 +155,16 @@ function PhotoStatusRow() {
   // rendered anywhere `runState` is already set.
   const runningRef = useRef(false);
 
+  const [backupRunState, setBackupRunState] = useState<PhotoBackupRunState | null>(null);
+  const [backupResultMessage, setBackupResultMessage] = useState<string | null>(null);
+  const backupRunningRef = useRef(false);
+
   // Verlässt man Einstellungen …
   useFocusEffect(
     useCallback(() => {
       return () => {
         cancelMediumBackfillRun();
+        cancelPhotoBackupRun();
       };
     }, []),
   );
@@ -157,6 +176,7 @@ function PhotoStatusRow() {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState !== 'active') {
         cancelMediumBackfillRun();
+        cancelPhotoBackupRun();
       }
     });
     return () => subscription.remove();
@@ -204,12 +224,59 @@ function PhotoStatusRow() {
     );
   }, [candidates, handleStartAll]);
 
+  const handleStartBackup = useCallback(async () => {
+    if (backupRunningRef.current || backupCandidates.length === 0) {
+      return;
+    }
+    backupRunningRef.current = true;
+    setBackupResultMessage(null);
+    setBackupRunState(startPhotoBackupRun(backupCandidates.map((photo) => photo.id)));
+    try {
+      const result = await runPhotoBackup(db, backupCandidates, setBackupRunState);
+      if (result.failed > 0) {
+        setBackupResultMessage(
+          result.failed === 1
+            ? '1 Foto konnte nicht gesichert werden.'
+            : `${result.failed} Fotos konnten nicht gesichert werden.`,
+        );
+      }
+    } catch (error) {
+      // Deckt auch eine abgelehnte Galerie-Berechtigung ab
+      // (storage.ts#runPhotoBackup wirft dafür einen eigenen Fehler) — sonst
+      // bliebe der Knopf ohne jede Rückmeldung stumm.
+      console.error('[LifeBook] Sammellauf zum Sichern fehlgeschlagen', error);
+      setBackupResultMessage(
+        error instanceof Error ? error.message : 'Sichern fehlgeschlagen. Bitte erneut versuchen.',
+      );
+    } finally {
+      backupRunningRef.current = false;
+      setBackupRunState(null);
+    }
+  }, [db, backupCandidates]);
+
+  const handleConfirmStartBackup = useCallback(() => {
+    if (backupRunningRef.current || backupCandidates.length === 0) {
+      return;
+    }
+    // Derselbe Schätzwert-Ansatz wie beim Vorbereiten — aus der
+    // tatsächlichen Durchschnittsgröße der offenen Fotos, nicht geraten.
+    const { averageOriginalBytes } = selectPhotoBackupCandidates(backupCandidates);
+    Alert.alert(
+      'Alle Fotos sichern?',
+      formatPhotoBackupConfirmation(backupCandidates.length, averageOriginalBytes),
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        { text: 'Sichern', onPress: () => void handleStartBackup() },
+      ],
+    );
+  }, [backupCandidates, handleStartBackup]);
+
   return (
     <ThemedView type="backgroundElement" style={styles.card}>
       <ThemedText type="smallBold">Fotos</ThemedText>
       <ThemedText type="small" themeColor="textSecondary">
         {pending === 0
-          ? 'Alle Fotos sind gesichert.'
+          ? 'Alle Fotos sind hochgeladen.'
           : pending === 1
             ? '1 Foto wartet noch auf die Übertragung.'
             : `${pending} Fotos warten noch auf die Übertragung.`}
@@ -220,7 +287,7 @@ function PhotoStatusRow() {
       {backfillLabel ? (
         <>
           <ThemedText type="small" themeColor="textSecondary">
-            {runState ? `Vorbereitet: ${runState.healed + runState.failed} von ${runState.total}` : backfillLabel}
+            {runState ? `Vorbereitet: ${runState.succeeded + runState.failed} von ${runState.total}` : backfillLabel}
           </ThemedText>
           {runState ? (
             <Pressable onPress={cancelMediumBackfillRun} hitSlop={8}>
@@ -246,6 +313,47 @@ function PhotoStatusRow() {
             </ThemedText>
           ) : null}
         </>
+      ) : null}
+
+      {/*
+        AUSGANGSLAGE: Originale liegen ausschließlich im Supabase-Speicher —
+        Datenbanksicherungen dort enthalten Speicherobjekte ausdrücklich
+        NICHT. "Alle Fotos sichern" ist deshalb die einzige zweite Kopie, die
+        es je gibt; ohne die Statuszeile unten wüsste niemand, ob sie aktuell
+        ist.
+      */}
+      <ThemedText type="small" themeColor="textSecondary">
+        {formatPhotoBackupStatusLabel(lastBackupAtUtcIso, backupCandidates.length, deviceTimeZone())}
+      </ThemedText>
+      {backupRunState ? (
+        <>
+          <ThemedText type="small" themeColor="textSecondary">
+            Gesichert: {backupRunState.succeeded + backupRunState.failed} von {backupRunState.total}
+          </ThemedText>
+          <Pressable onPress={cancelPhotoBackupRun} hitSlop={8}>
+            <ThemedText type="linkPrimary">Abbrechen</ThemedText>
+          </Pressable>
+        </>
+      ) : (
+        <>
+          <Pressable onPress={handleConfirmStartBackup} disabled={!onWifi || backupCandidates.length === 0} hitSlop={8}>
+            <ThemedText
+              type="linkPrimary"
+              themeColor={onWifi && backupCandidates.length > 0 ? undefined : 'textSecondary'}>
+              Alle Fotos sichern
+            </ThemedText>
+          </Pressable>
+          {!onWifi ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              Kein WLAN aktiv — dafür bitte verbinden.
+            </ThemedText>
+          ) : null}
+        </>
+      )}
+      {backupResultMessage ? (
+        <ThemedText type="small" themeColor="dangerText">
+          {backupResultMessage}
+        </ThemedText>
       ) : null}
 
       <Pressable onPress={() => router.push('/papierkorb')} hitSlop={8}>

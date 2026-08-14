@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PHOTO_BACKUP_ALBUM_NAME,
   PHOTO_NOTE_MAX_LENGTH,
   TRASH_RETENTION_DAYS,
   advanceMediumBackfillRun,
+  advancePhotoBackupRun,
+  advanceSequentialRun,
   buildMediumKey,
   buildOriginalKey,
   buildThumbKey,
@@ -12,6 +15,7 @@ import {
   composeContentHash,
   countMediumBackfillProgress,
   dedupeByHash,
+  estimateBatchBytes,
   extensionForMime,
   formatAgeLabel,
   formatEmptyTrashConfirmation,
@@ -19,19 +23,28 @@ import {
   formatMediumBackfillConfirmation,
   formatMediumBackfillLabel,
   formatPermanentDeleteConfirmation,
+  formatPhotoBackupConfirmation,
+  formatPhotoBackupStatusLabel,
   formatPhotoRestoreConfirmation,
   formatTrashRemainingLabel,
   groupPhotosByDay,
   isMediumBackfillRunComplete,
   isOccurredAtEstimated,
+  isPhotoBackupRunComplete,
   isPhotoDueForCleanup,
+  isSequentialRunComplete,
   locatePhotoInSections,
   nextMediumBackfillId,
+  nextPhotoBackupId,
+  nextSequentialRunId,
   normalizePhotoNote,
   resolveFullscreenUri,
   selectMediumBackfillCandidates,
+  selectPhotoBackupCandidates,
   shouldResignUrl,
   startMediumBackfillRun,
+  startPhotoBackupRun,
+  startSequentialRun,
 } from './identity';
 
 const hash = (n: string) => composeContentHash(`sha-${n}`, 1000);
@@ -402,7 +415,7 @@ describe('medium backfill run state machine', () => {
     state = advanceMediumBackfillRun(state, 'healed');
 
     expect(isMediumBackfillRunComplete(state)).toBe(true);
-    expect(state).toEqual({ queue: [], total: 3, healed: 3, failed: 0 });
+    expect(state).toEqual({ queue: [], total: 3, succeeded: 3, failed: 0 });
   });
 
   it('Abbruch mitten im Lauf: the untouched ids stay queued, nothing already done is lost', () => {
@@ -412,7 +425,7 @@ describe('medium backfill run state machine', () => {
     // Simulates cancelling here — the caller just stops calling advance.
     expect(isMediumBackfillRunComplete(state)).toBe(false);
     expect(state.queue).toEqual(['c', 'd', 'e']);
-    expect(state.healed).toBe(2);
+    expect(state.succeeded).toBe(2);
     expect(state.total).toBe(5);
   });
 
@@ -425,7 +438,7 @@ describe('medium backfill run state machine', () => {
 
     state = advanceMediumBackfillRun(state, 'healed');
     expect(isMediumBackfillRunComplete(state)).toBe(true);
-    expect(state).toEqual({ queue: [], total: 3, healed: 2, failed: 1 });
+    expect(state).toEqual({ queue: [], total: 3, succeeded: 2, failed: 1 });
   });
 
   it('nextMediumBackfillId always names the front of the queue', () => {
@@ -629,5 +642,127 @@ describe('normalizePhotoNote', () => {
   it('leaves a note at exactly the cap untouched', () => {
     const exact = 'y'.repeat(PHOTO_NOTE_MAX_LENGTH);
     expect(normalizePhotoNote(exact)).toBe(exact);
+  });
+});
+
+describe('SequentialRunState (shared Ablaufsteuerung behind Vorbereiten and Sichern)', () => {
+  it('nichts zu sichern: starting from an empty list is immediately complete', () => {
+    const state = startSequentialRun([]);
+    expect(isSequentialRunComplete(state)).toBe(true);
+    expect(state).toEqual({ queue: [], total: 0, succeeded: 0, failed: 0 });
+    expect(nextSequentialRunId(state)).toBeNull();
+  });
+
+  it('alles zu sichern: runs through every id and ends complete, all succeeded', () => {
+    let state = startSequentialRun(['a', 'b', 'c']);
+    expect(isSequentialRunComplete(state)).toBe(false);
+
+    state = advanceSequentialRun(state, 'succeeded');
+    state = advanceSequentialRun(state, 'succeeded');
+    state = advanceSequentialRun(state, 'succeeded');
+
+    expect(isSequentialRunComplete(state)).toBe(true);
+    expect(state).toEqual({ queue: [], total: 3, succeeded: 3, failed: 0 });
+  });
+
+  it('Abbruch mitten im Lauf: the untouched ids stay queued, nothing already done is lost', () => {
+    let state = startSequentialRun(['a', 'b', 'c', 'd', 'e']);
+    state = advanceSequentialRun(state, 'succeeded');
+    state = advanceSequentialRun(state, 'succeeded');
+    // Simulates cancelling here — the caller just stops calling advance.
+    expect(isSequentialRunComplete(state)).toBe(false);
+    expect(state.queue).toEqual(['c', 'd', 'e']);
+    expect(state.succeeded).toBe(2);
+    expect(state.total).toBe(5);
+  });
+
+  it('einzelner Fehlschlag unterbricht nicht: the queue keeps moving past a failure', () => {
+    let state = startSequentialRun(['a', 'b', 'c']);
+    state = advanceSequentialRun(state, 'succeeded');
+    state = advanceSequentialRun(state, 'failed');
+    expect(isSequentialRunComplete(state)).toBe(false);
+    expect(nextSequentialRunId(state)).toBe('c');
+
+    state = advanceSequentialRun(state, 'succeeded');
+    expect(isSequentialRunComplete(state)).toBe(true);
+    expect(state).toEqual({ queue: [], total: 3, succeeded: 2, failed: 1 });
+  });
+});
+
+describe('photo backup run wrappers (thin aliases over the shared engine)', () => {
+  it('map "saved"/"failed" onto the generic succeeded/failed outcome', () => {
+    let state = startPhotoBackupRun(['a', 'b']);
+    state = advancePhotoBackupRun(state, 'saved');
+    state = advancePhotoBackupRun(state, 'failed');
+    expect(isPhotoBackupRunComplete(state)).toBe(true);
+    expect(state).toEqual({ queue: [], total: 2, succeeded: 1, failed: 1 });
+  });
+
+  it('nextPhotoBackupId always names the front of the queue', () => {
+    const state = startPhotoBackupRun(['first', 'second']);
+    expect(nextPhotoBackupId(state)).toBe('first');
+  });
+});
+
+describe('estimateBatchBytes', () => {
+  const photo = (id: string, bytes: number | null) => ({ id, bytes });
+
+  it('averages the known sizes', () => {
+    expect(estimateBatchBytes([photo('a', 4_000_000), photo('b', 8_000_000)])).toEqual({
+      ids: ['a', 'b'],
+      averageBytes: 6_000_000,
+    });
+  });
+
+  it('returns a zero average rather than NaN when nothing has a known size', () => {
+    expect(estimateBatchBytes([photo('a', null)])).toEqual({ ids: ['a'], averageBytes: 0 });
+  });
+});
+
+describe('selectPhotoBackupCandidates', () => {
+  it('mirrors selectMediumBackfillCandidates — same computation, backup-specific field name', () => {
+    expect(selectPhotoBackupCandidates([{ id: 'a', bytes: 2_000_000 }])).toEqual({
+      ids: ['a'],
+      averageOriginalBytes: 2_000_000,
+    });
+  });
+});
+
+describe('formatPhotoBackupConfirmation', () => {
+  it('names the count, the estimate and the device album', () => {
+    const message = formatPhotoBackupConfirmation(2, 4_000_000);
+    expect(message).toContain('2 Fotos sind noch nicht gesichert');
+    expect(message).toContain('WLAN');
+    expect(message).toContain(PHOTO_BACKUP_ALBUM_NAME);
+  });
+
+  it('uses the singular for exactly one photo', () => {
+    expect(formatPhotoBackupConfirmation(1, 1_000_000)).toContain('1 Foto ist noch nicht gesichert');
+  });
+});
+
+describe('formatPhotoBackupStatusLabel', () => {
+  const tz = 'Europe/Berlin';
+
+  it('says never backed up when there is no timestamp and nothing pending', () => {
+    expect(formatPhotoBackupStatusLabel(null, 0, tz)).toBe('Noch nie gesichert.');
+  });
+
+  it('says never backed up but names the pending count when photos exist', () => {
+    expect(formatPhotoBackupStatusLabel(null, 3, tz)).toBe('Noch nie gesichert — 3 Fotos noch offen.');
+  });
+
+  it('names the last backup date and that everything is current', () => {
+    expect(formatPhotoBackupStatusLabel('2026-08-10T12:00:00.000Z', 0, tz)).toContain('alle gesichert');
+  });
+
+  it('names the last backup date and the exact pending count', () => {
+    const label = formatPhotoBackupStatusLabel('2026-08-10T12:00:00.000Z', 5, tz);
+    expect(label).toContain('Zuletzt gesichert');
+    expect(label).toContain('5 Fotos noch offen');
+  });
+
+  it('uses the singular for exactly one pending photo', () => {
+    expect(formatPhotoBackupStatusLabel('2026-08-10T12:00:00.000Z', 1, tz)).toContain('1 Foto noch offen');
   });
 });

@@ -464,3 +464,59 @@ export function useMediumBackfillCandidatePhotos(): MediumBackfillCandidatePhoto
   );
   return data ?? [];
 }
+
+/* ────────────────────────────── "Alle Fotos sichern" (Original-Backup aufs Gerät, 2026-08-16) ────────────────────────────── */
+
+/** Every field storage.ts#runPhotoBackup and identity.ts#selectPhotoBackupCandidates need for one photo. */
+export type PhotoBackupCandidatePhoto = Pick<PhotoRow, 'id' | 'local_uri' | 'original_key' | 'mime' | 'bytes'>;
+
+/**
+ * Reactive: every photo not yet backed up to THIS device's gallery, oldest
+ * first (same convention as `loadPendingUploads`/
+ * `useMediumBackfillCandidatePhotos`) — the "Alle Fotos sichern" button's
+ * work queue. The LEFT JOIN against the local-only `photo_backups` table
+ * (see schema.ts's own doc comment on why it is local-only) is an
+ * ordinary SQL join even though the two tables have very different sync
+ * behaviour — both still live in the same local SQLite database. Re-runs
+ * as photos get backed up, so a cancelled or interrupted run simply has
+ * fewer candidates next time — no separate "resume" bookkeeping needed.
+ */
+export function usePhotoBackupCandidatePhotos(): PhotoBackupCandidatePhoto[] {
+  const { data } = useQuery<PhotoBackupCandidatePhoto>(
+    `SELECT p.id, p.local_uri, p.original_key, p.mime, p.bytes
+       FROM photos p
+       LEFT JOIN photo_backups b ON b.id = p.id
+      WHERE p.deleted_at IS NULL AND b.id IS NULL
+      ORDER BY p.created_at ASC`,
+  );
+  return data ?? [];
+}
+
+/**
+ * Reactive: every `backed_up_at` instant on file — the Einstellungen
+ * status line reduces this to a single "most recent" via
+ * identity.ts#formatPhotoBackupStatusLabel's caller, in plain JS rather
+ * than a SQL `MAX()` (this file's established convention since Fehler 2,
+ * 2026-08-14 — see identity.ts#countMediumBackfillProgress's own doc
+ * comment for why SQL aggregates are avoided here).
+ */
+export function useLastPhotoBackupAt(): string | null {
+  const { data } = useQuery<{ backed_up_at: string }>(`SELECT backed_up_at FROM photo_backups`);
+  if (!data || data.length === 0) {
+    return null;
+  }
+  return data.reduce((latest, row) => (row.backed_up_at > latest ? row.backed_up_at : latest), data[0].backed_up_at);
+}
+
+/**
+ * Records that this photo's original now has a copy in this device's own
+ * gallery — `INSERT OR REPLACE` so a defensive re-attempt (should the
+ * exact same id somehow already have a row) overwrites rather than
+ * errors; the normal path never hits that, since
+ * `usePhotoBackupCandidatePhotos` already excludes anything with a row
+ * here.
+ */
+export async function markPhotoBackedUp(db: AbstractPowerSyncDatabase, photoId: string): Promise<void> {
+  const now = nowUtcIso();
+  await db.execute('INSERT OR REPLACE INTO photo_backups (id, backed_up_at) VALUES (?, ?)', [photoId, now]);
+}

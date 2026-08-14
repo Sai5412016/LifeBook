@@ -15,6 +15,7 @@
 
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { Directory, File, Paths, UploadType } from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Network from 'expo-network';
 
 import { ENV } from '@/core/env';
@@ -23,15 +24,21 @@ import { supabase } from '@/core/supabase';
 import { removePhotoFromAllShares } from '@/features/shares/repository';
 
 import {
+  PHOTO_BACKUP_ALBUM_NAME,
   advanceMediumBackfillRun,
+  advancePhotoBackupRun,
   buildMediumKey,
   extensionForMime,
   isMediumBackfillRunComplete,
+  isPhotoBackupRunComplete,
   isPhotoDueForCleanup,
   nextMediumBackfillId,
+  nextPhotoBackupId,
   shouldResignUrl,
   startMediumBackfillRun,
+  startPhotoBackupRun,
   type MediumBackfillRunState,
+  type PhotoBackupRunState,
 } from './identity';
 import { createMediumImage, createThumbnail, deleteQuietly } from './media';
 import {
@@ -40,7 +47,9 @@ import {
   loadPendingUploads,
   markMediumUploaded,
   markOriginalUploaded,
+  markPhotoBackedUp,
   markThumbUploaded,
+  type PhotoBackupCandidatePhoto,
 } from './repository';
 import { setTrashCleanupDiagnostics } from './trashDiagnostics';
 import type { PhotoRow } from './types';
@@ -711,7 +720,7 @@ export async function runMediumBackfill(
   try {
     while (!isMediumBackfillRunComplete(state)) {
       if (controller.signal.aborted || !(await isOnWifi())) {
-        return { healed: state.healed, failed: state.failed, stoppedEarly: true };
+        return { healed: state.succeeded, failed: state.failed, stoppedEarly: true };
       }
 
       const id = nextMediumBackfillId(state);
@@ -720,7 +729,7 @@ export async function runMediumBackfill(
       state = advanceMediumBackfillRun(state, outcome === 'healed' ? 'healed' : 'failed');
       onProgress?.(state);
     }
-    return { healed: state.healed, failed: state.failed, stoppedEarly: false };
+    return { healed: state.succeeded, failed: state.failed, stoppedEarly: false };
   } finally {
     backfillAbortController = null;
   }
@@ -852,5 +861,133 @@ export async function runStartupTrashCleanup(db: AbstractPowerSyncDatabase): Pro
     const message = error instanceof Error ? error.message : String(error);
     console.error('[LifeBook] Automatisches Papierkorb-Aufräumen fehlgeschlagen', error);
     setTrashCleanupDiagnostics({ runStatus: 'failed', lastError: message, lastRunAtUtcIso: nowUtcIso() });
+  }
+}
+
+/* ────────────────────────────── "Alle Fotos sichern" (Original-Backup aufs Gerät, 2026-08-16) ────────────────────────────── */
+
+let backupAbortController: AbortController | null = null;
+
+/** Whether a backup run is currently in progress — the "Alle Fotos sichern" button reads this to refuse a second start. */
+export function isPhotoBackupRunning(): boolean {
+  return backupAbortController !== null;
+}
+
+/** Stops an in-progress backup run at the next item boundary — never mid-photo. Safe to call even when no run is active. */
+export function cancelPhotoBackupRun(): void {
+  backupAbortController?.abort();
+}
+
+/**
+ * Copies one photo's original into the device's own gallery album
+ * (identity.ts#PHOTO_BACKUP_ALBUM_NAME) — creating the album on the first
+ * photo, adding to it after that. `copy: false` on both calls:
+ * `createAssetAsync` already places the file in the library's default
+ * location, so adding it to the album with a COPY (the API's own default)
+ * would leave two entries for the same picture (see
+ * createAlbumAsync/addAssetsToAlbumAsync's own docs) — moving instead
+ * keeps exactly one.
+ */
+async function saveOriginalToDeviceAlbum(localUri: string): Promise<void> {
+  const asset = await MediaLibrary.createAssetAsync(localUri);
+  const existingAlbum = await MediaLibrary.getAlbumAsync(PHOTO_BACKUP_ALBUM_NAME);
+  if (existingAlbum) {
+    await MediaLibrary.addAssetsToAlbumAsync([asset], existingAlbum, false);
+  } else {
+    await MediaLibrary.createAlbumAsync(PHOTO_BACKUP_ALBUM_NAME, asset, false);
+  }
+}
+
+/**
+ * Resolves ONE photo's original — local copy if still staged, otherwise
+ * downloaded — via `resolveOriginalForSharing`, the SAME resolution the OS
+ * share sheet already uses (task requirement: reuse it rather than a
+ * second download path; it already prefers `local_uri` over a fresh
+ * download, exactly what "Fotos, deren Original noch lokal vorliegt,
+ * direkt von dort speichern" asked for) — then saves it into the device
+ * album, then cleans up the temporary file either way.
+ */
+async function backUpOnePhoto(photo: PhotoBackupCandidatePhoto): Promise<void> {
+  const resolved = await resolveOriginalForSharing(photo);
+  try {
+    await saveOriginalToDeviceAlbum(resolved.uri);
+  } finally {
+    cleanupSharedFiles([resolved]);
+  }
+}
+
+export type PhotoBackupRunResult = {
+  saved: number;
+  failed: number;
+  stoppedEarly: boolean;
+};
+
+/**
+ * Runs the "Alle Fotos sichern" batch: one photo at a time (task
+ * requirement — sequential, never parallel), WLAN-gated (`isOnWifi()`,
+ * the SAME check the ordinary upload queue and the medium backfill
+ * already gate on, rechecked before every item so losing WLAN mid-run
+ * ends the run cleanly instead of grinding through the rest as silent
+ * failures), cancellable between items, and never letting one bad photo
+ * stop the rest — mirrors `runMediumBackfill` closely, both being thin
+ * async loops around the SAME shared `SequentialRunState` engine
+ * (identity.ts) rather than two separate implementations of the same
+ * Ablaufsteuerung.
+ *
+ * The write-to-gallery permission is requested HERE, the very first thing
+ * once a run actually begins — never at app start (task requirement).
+ *
+ * Throws if a run is already active — the caller (the button) is expected
+ * to prevent this in the first place; this is the second line of defence,
+ * same convention as `runMediumBackfill`.
+ */
+export async function runPhotoBackup(
+  db: AbstractPowerSyncDatabase,
+  photos: readonly PhotoBackupCandidatePhoto[],
+  onProgress?: (state: PhotoBackupRunState) => void,
+): Promise<PhotoBackupRunResult> {
+  if (backupAbortController) {
+    throw new Error('photos: Sammellauf zum Sichern läuft bereits');
+  }
+
+  const permission = await MediaLibrary.requestPermissionsAsync(true);
+  if (!permission.granted) {
+    throw new Error('photos: Berechtigung für die Fotogalerie wurde nicht erteilt');
+  }
+
+  const controller = new AbortController();
+  backupAbortController = controller;
+  const byId = new Map(photos.map((photo) => [photo.id, photo]));
+
+  let state = startPhotoBackupRun(photos.map((photo) => photo.id));
+  onProgress?.(state);
+
+  try {
+    while (!isPhotoBackupRunComplete(state)) {
+      if (controller.signal.aborted || !(await isOnWifi())) {
+        return { saved: state.succeeded, failed: state.failed, stoppedEarly: true };
+      }
+
+      const id = nextPhotoBackupId(state);
+      const photo = id ? byId.get(id) : undefined;
+      let outcome: 'saved' | 'failed' = 'failed';
+      if (photo) {
+        try {
+          await backUpOnePhoto(photo);
+          await markPhotoBackedUp(db, photo.id);
+          outcome = 'saved';
+        } catch (error) {
+          console.error('[LifeBook] Foto konnte nicht gesichert werden', {
+            photoId: photo.id,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      state = advancePhotoBackupRun(state, outcome);
+      onProgress?.(state);
+    }
+    return { saved: state.succeeded, failed: state.failed, stoppedEarly: false };
+  } finally {
+    backupAbortController = null;
   }
 }

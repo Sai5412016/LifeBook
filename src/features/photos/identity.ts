@@ -13,7 +13,7 @@
  * the only identity that survives, so that is what we key on.
  */
 
-import { secondsBetween } from '@/core/time';
+import { formatDayLabel, secondsBetween, toLocalDate } from '@/core/time';
 
 import type { OccurredAtSource } from './types';
 
@@ -338,6 +338,35 @@ export function formatMediumBackfillLabel(progress: MediumBackfillProgress): str
   return `Vorbereitet: ${progress.prepared} von ${progress.total}`;
 }
 
+export type BatchByteEstimate = {
+  ids: string[];
+  /** This batch's own average size — used for a "how much data" confirmation estimate. */
+  averageBytes: number;
+};
+
+/**
+ * Summarizes a batch of candidate photos: which ones, and their average
+ * size — shared by every "confirm before a big WLAN batch" dialog in this
+ * feature (the medium-rendition backfill, Aufgabe 3 2026-08-14, and the
+ * original-photo device backup, Aufgabe 2026-08-16) so the estimate is
+ * always computed from the album's real data, never a guessed or hardcoded
+ * number, in exactly one place. `photos` is expected to already be
+ * filtered to the actual candidates (repository.ts's query does that);
+ * this only summarizes what is left. Photos with an unknown size (`bytes`
+ * null or 0 — shouldn't happen for a real row, but the type allows it) are
+ * excluded from the average rather than treated as zero, which would
+ * understate it.
+ */
+export function estimateBatchBytes(photos: readonly { id: string; bytes: number | null }[]): BatchByteEstimate {
+  const ids = photos.map((photo) => photo.id);
+  const knownBytes = photos
+    .map((photo) => photo.bytes)
+    .filter((bytes): bytes is number => bytes != null && bytes > 0);
+  const averageBytes =
+    knownBytes.length > 0 ? knownBytes.reduce((sum, bytes) => sum + bytes, 0) / knownBytes.length : 0;
+  return { ids, averageBytes };
+}
+
 export type MediumBackfillCandidates = {
   /** Ids of every photo still missing a medium rendition. */
   ids: string[];
@@ -345,26 +374,27 @@ export type MediumBackfillCandidates = {
   averageOriginalBytes: number;
 };
 
-/**
- * Summarizes the photos still missing a medium rendition: which ones, and
- * their average original size — the basis for the "Alle Fotos vorbereiten"
- * confirmation estimate (task: computed from the album's real data, never a
- * guessed or hardcoded number). `photos` is expected to already be filtered
- * to "no medium_key yet" (repository.ts's query does that); this only
- * summarizes what is left. Photos with an unknown size (`bytes` null or 0 —
- * shouldn't happen for a real row, but the type allows it) are excluded
- * from the average rather than treated as zero, which would understate it.
- */
+/** The "Alle Fotos vorbereiten" confirmation's own data — see `estimateBatchBytes` for the shared computation. */
 export function selectMediumBackfillCandidates(
   photos: readonly { id: string; bytes: number | null }[],
 ): MediumBackfillCandidates {
-  const ids = photos.map((photo) => photo.id);
-  const knownBytes = photos
-    .map((photo) => photo.bytes)
-    .filter((bytes): bytes is number => bytes != null && bytes > 0);
-  const averageOriginalBytes =
-    knownBytes.length > 0 ? knownBytes.reduce((sum, bytes) => sum + bytes, 0) / knownBytes.length : 0;
-  return { ids, averageOriginalBytes };
+  const { ids, averageBytes } = estimateBatchBytes(photos);
+  return { ids, averageOriginalBytes: averageBytes };
+}
+
+export type PhotoBackupCandidates = {
+  /** Ids of every photo not yet backed up to the device gallery. */
+  ids: string[];
+  /** This batch's own average ORIGINAL size — what a backup run actually saves per photo. */
+  averageOriginalBytes: number;
+};
+
+/** The "Alle Fotos sichern" confirmation's own data — see `estimateBatchBytes` for the shared computation. */
+export function selectPhotoBackupCandidates(
+  photos: readonly { id: string; bytes: number | null }[],
+): PhotoBackupCandidates {
+  const { ids, averageBytes } = estimateBatchBytes(photos);
+  return { ids, averageOriginalBytes: averageBytes };
 }
 
 /** "≈ 600 MB" / "≈ 1.2 GB" — never claims false precision, never shows "0 MB" for a non-empty estimate. */
@@ -392,54 +422,148 @@ export function formatMediumBackfillConfirmation(pendingCount: number, averageOr
   return `${photosLabel}, geschätzt ${estimate} werden über WLAN geladen.`;
 }
 
-export type MediumBackfillItemOutcome = 'healed' | 'failed';
+export type SequentialRunOutcome = 'succeeded' | 'failed';
 
-export type MediumBackfillRunState = {
+export type SequentialRunState = {
   /** Ids not yet attempted this run, in order. */
   queue: readonly string[];
-  /** Fixed at the start of the run — how many photos this run set out to prepare. */
+  /** Fixed at the start of the run — how many items this run set out to process. */
   total: number;
-  healed: number;
+  succeeded: number;
   failed: number;
 };
 
 /**
- * Ablaufsteuerung for the "Alle Fotos vorbereiten" batch run — pure so
- * "what's next", "when is it done" and "how does progress count" are
- * verifiable without a device, a database, or a network. The actual async
- * work (storage.ts#runMediumBackfill) is a thin loop driven by these four
- * functions; it decides nothing on its own.
+ * The shared queue engine behind every "one item at a time, keep going
+ * past a single failure, cancel between items" batch run in this feature
+ * — the medium-rendition backfill (Aufgabe 3, 2026-08-14) and the
+ * original-photo device backup (Aufgabe 2026-08-16) both drive their
+ * async loop off this SAME pure state machine instead of each having
+ * their own copy (task requirement: reuse the existing Ablaufsteuerung,
+ * not a second implementation of it). Pure so "what's next", "when is it
+ * done" and "how does progress count" are verifiable without a device, a
+ * database, or a network — the actual async work
+ * (storage.ts#runMediumBackfill / #runPhotoBackup) is a thin loop around
+ * these four functions, deciding nothing on its own.
  */
-export function startMediumBackfillRun(pendingIds: readonly string[]): MediumBackfillRunState {
-  return { queue: pendingIds, total: pendingIds.length, healed: 0, failed: 0 };
+export function startSequentialRun(pendingIds: readonly string[]): SequentialRunState {
+  return { queue: pendingIds, total: pendingIds.length, succeeded: 0, failed: 0 };
 }
 
 /** Nothing left to attempt this run — not the same as "everything succeeded", see `failed`. */
-export function isMediumBackfillRunComplete(state: MediumBackfillRunState): boolean {
+export function isSequentialRunComplete(state: SequentialRunState): boolean {
   return state.queue.length === 0;
 }
 
 /** The id that should be attempted next, or null once the run is complete. */
-export function nextMediumBackfillId(state: MediumBackfillRunState): string | null {
+export function nextSequentialRunId(state: SequentialRunState): string | null {
   return state.queue[0] ?? null;
 }
 
 /**
  * Advances past the item at the front of the queue, recording whether it
  * succeeded. A failure only increments `failed` and moves on — it does
- * NOT stop the run, so one bad photo can never block the rest (task
+ * NOT stop the run, so one bad item can never block the rest (task
  * requirement, verified by a dedicated test).
  */
+export function advanceSequentialRun(state: SequentialRunState, outcome: SequentialRunOutcome): SequentialRunState {
+  return {
+    queue: state.queue.slice(1),
+    total: state.total,
+    succeeded: state.succeeded + (outcome === 'succeeded' ? 1 : 0),
+    failed: state.failed + (outcome === 'failed' ? 1 : 0),
+  };
+}
+
+/* ────────────────────────────── "Alle Fotos vorbereiten" (Medium-Backfill) ────────────────────────────── */
+
+export type MediumBackfillItemOutcome = 'healed' | 'failed';
+export type MediumBackfillRunState = SequentialRunState;
+
+/** Thin wrapper over `startSequentialRun` — kept so call sites can keep saying "backfill", see the module's shared-engine doc comment above. */
+export function startMediumBackfillRun(pendingIds: readonly string[]): MediumBackfillRunState {
+  return startSequentialRun(pendingIds);
+}
+
+export function isMediumBackfillRunComplete(state: MediumBackfillRunState): boolean {
+  return isSequentialRunComplete(state);
+}
+
+export function nextMediumBackfillId(state: MediumBackfillRunState): string | null {
+  return nextSequentialRunId(state);
+}
+
 export function advanceMediumBackfillRun(
   state: MediumBackfillRunState,
   outcome: MediumBackfillItemOutcome,
 ): MediumBackfillRunState {
-  return {
-    queue: state.queue.slice(1),
-    total: state.total,
-    healed: state.healed + (outcome === 'healed' ? 1 : 0),
-    failed: state.failed + (outcome === 'failed' ? 1 : 0),
-  };
+  return advanceSequentialRun(state, outcome === 'healed' ? 'succeeded' : 'failed');
+}
+
+/* ────────────────────────────── "Alle Fotos sichern" (Original-Backup, 2026-08-16) ────────────────────────────── */
+
+export type PhotoBackupItemOutcome = 'saved' | 'failed';
+export type PhotoBackupRunState = SequentialRunState;
+
+export function startPhotoBackupRun(pendingIds: readonly string[]): PhotoBackupRunState {
+  return startSequentialRun(pendingIds);
+}
+
+export function isPhotoBackupRunComplete(state: PhotoBackupRunState): boolean {
+  return isSequentialRunComplete(state);
+}
+
+export function nextPhotoBackupId(state: PhotoBackupRunState): string | null {
+  return nextSequentialRunId(state);
+}
+
+export function advancePhotoBackupRun(
+  state: PhotoBackupRunState,
+  outcome: PhotoBackupItemOutcome,
+): PhotoBackupRunState {
+  return advanceSequentialRun(state, outcome === 'saved' ? 'succeeded' : 'failed');
+}
+
+/**
+ * The device gallery album every backed-up original lands in — the ONE
+ * place this name is written down (storage.ts#runPhotoBackup creates/looks
+ * up exactly this album; this confirmation text names it so the user knows
+ * where to look).
+ */
+export const PHOTO_BACKUP_ALBUM_NAME = 'LifeBook';
+
+/**
+ * The "Alle Fotos sichern" confirmation dialog's body, same honesty rule
+ * as `formatMediumBackfillConfirmation`: the estimate is
+ * `estimateBatchBytes`'s own measured average, never guessed.
+ */
+export function formatPhotoBackupConfirmation(pendingCount: number, averageOriginalBytes: number): string {
+  const photosLabel = pendingCount === 1 ? '1 Foto ist noch nicht gesichert' : `${pendingCount} Fotos sind noch nicht gesichert`;
+  const estimate = formatEstimatedDownloadSize(pendingCount * averageOriginalBytes);
+  return `${photosLabel}, geschätzt ${estimate} werden über WLAN in das Gerätealbum „${PHOTO_BACKUP_ALBUM_NAME}" gespeichert.`;
+}
+
+/**
+ * The Einstellungen backup-status line — task requirement: without it,
+ * nobody can tell whether the backup is current. `pendingCount` is every
+ * photo that does not yet have a row in the local-only `photo_backups`
+ * table (see repository.ts's own doc comment on that table for why it is
+ * local-only, never synced) — deliberately NOT a "created after the last
+ * backup" count: a photo that failed during a previous run is just as
+ * unsecured as a brand-new one, and a status line that only counted
+ * chronologically new photos would hide exactly that risk.
+ */
+export function formatPhotoBackupStatusLabel(
+  lastBackupAtUtcIso: string | null,
+  pendingCount: number,
+  tz: string,
+): string {
+  const pendingLabel =
+    pendingCount === 0 ? 'alle gesichert' : pendingCount === 1 ? '1 Foto noch offen' : `${pendingCount} Fotos noch offen`;
+  if (!lastBackupAtUtcIso) {
+    return pendingCount === 0 ? 'Noch nie gesichert.' : `Noch nie gesichert — ${pendingLabel}.`;
+  }
+  return `Zuletzt gesichert: ${formatDayLabel(toLocalDate(lastBackupAtUtcIso, tz))} · ${pendingLabel}`;
 }
 
 /** Split a day's photos into fixed-width rows for the Chronik grid. */
