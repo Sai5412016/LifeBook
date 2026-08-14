@@ -98,16 +98,16 @@ describe('neighborIndices', () => {
 });
 
 describe('formatPositionLabel', () => {
-  it('formats a 1-based position out of the total', () => {
-    expect(formatPositionLabel(13, 90)).toBe('14 von 90');
+  it('formats an already 1-based rank out of the total', () => {
+    expect(formatPositionLabel(14, 90)).toBe('14 von 90');
   });
 
-  it('formats the first photo', () => {
-    expect(formatPositionLabel(0, 90)).toBe('1 von 90');
+  it('formats the first (oldest) photo', () => {
+    expect(formatPositionLabel(1, 90)).toBe('1 von 90');
   });
 
   it('formats a single-photo album', () => {
-    expect(formatPositionLabel(0, 1)).toBe('1 von 1');
+    expect(formatPositionLabel(1, 1)).toBe('1 von 1');
   });
 });
 

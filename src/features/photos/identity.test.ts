@@ -4,6 +4,7 @@ import {
   buildMediumKey,
   buildOriginalKey,
   buildThumbKey,
+  chronologicalRank,
   chunkPhotos,
   composeContentHash,
   countMediumBackfillProgress,
@@ -351,5 +352,61 @@ describe('locatePhotoInSections', () => {
 
   it('returns null for an empty list of sections', () => {
     expect(locatePhotoInSections([], 'a', 3)).toBeNull();
+  });
+});
+
+describe('chronologicalRank', () => {
+  const photo = (id: string, occurred_at: string) => ({ id, occurred_at });
+
+  // Newest-first, matching how usePhotosOfChild/the Chronik actually order
+  // photos — chronologicalRank must NOT just trust that order.
+  const photosNewestFirst = [
+    photo('newest', '2026-08-13T10:00:00Z'),
+    photo('middle', '2026-08-10T10:00:00Z'),
+    photo('oldest', '2026-08-01T10:00:00Z'),
+  ];
+
+  it('gives the oldest photo rank 1', () => {
+    expect(chronologicalRank(photosNewestFirst, 'oldest')).toEqual({ rank: 1, total: 3 });
+  });
+
+  it('gives the newest photo the total', () => {
+    expect(chronologicalRank(photosNewestFirst, 'newest')).toEqual({ rank: 3, total: 3 });
+  });
+
+  it('gives a photo in between its middle rank', () => {
+    expect(chronologicalRank(photosNewestFirst, 'middle')).toEqual({ rank: 2, total: 3 });
+  });
+
+  it('breaks ties on occurred_at stably by id, repeatably across calls', () => {
+    const sameInstant = [
+      photo('b', '2026-08-05T10:00:00Z'),
+      photo('a', '2026-08-05T10:00:00Z'),
+    ];
+    const first = chronologicalRank(sameInstant, 'a');
+    const second = chronologicalRank(sameInstant, 'a');
+    expect(first).toEqual({ rank: 1, total: 2 });
+    expect(second).toEqual(first);
+    expect(chronologicalRank(sameInstant, 'b')).toEqual({ rank: 2, total: 2 });
+  });
+
+  it('returns null for a photo not in the list, instead of a fabricated rank', () => {
+    expect(chronologicalRank(photosNewestFirst, 'nope')).toBeNull();
+  });
+
+  it('returns "1 von 1" territory for a single-photo album', () => {
+    expect(chronologicalRank([photo('only', '2026-08-05T10:00:00Z')], 'only')).toEqual({
+      rank: 1,
+      total: 1,
+    });
+  });
+
+  it('a deleted photo leaves no gap — the remaining photos renumber cleanly', () => {
+    // Simulates "middle" having been deleted: the caller's list (already
+    // excluding it, same as a live query would) still produces a clean
+    // 1..total sequence for what's left, not a stale total or a hole.
+    const afterDeletion = photosNewestFirst.filter((p) => p.id !== 'middle');
+    expect(chronologicalRank(afterDeletion, 'oldest')).toEqual({ rank: 1, total: 2 });
+    expect(chronologicalRank(afterDeletion, 'newest')).toEqual({ rank: 2, total: 2 });
   });
 });

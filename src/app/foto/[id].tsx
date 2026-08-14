@@ -42,7 +42,12 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { ageInDays, formatDayLabel, formatTimeLabel } from '@/core/time';
 import { useActiveChild } from '@/features/household/repository';
-import { formatAgeLabel, isOccurredAtEstimated, resolveFullscreenUri } from '@/features/photos/identity';
+import {
+  chronologicalRank,
+  formatAgeLabel,
+  isOccurredAtEstimated,
+  resolveFullscreenUri,
+} from '@/features/photos/identity';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { deleteQuietly } from '@/features/photos/media';
 import {
@@ -356,10 +361,17 @@ export default function FotoVollbildScreen() {
   // features/photos/identity.ts#groupPhotosByDay's doc comment.
   const currentPhotoAgeDays = currentPhoto && child ? ageInDays(currentPhoto.occurred_at, child.birthAtUtcIso, child.birthTz) : null;
 
+  // The child's-life rank ("1 von 123" = oldest, not the swipe list's own
+  // newest-first position) — recomputed from `currentPhoto`/`photos` on
+  // every render, so it keeps up while swiping instead of freezing on
+  // whichever photo was opened first. See identity.ts#chronologicalRank's
+  // doc comment for why this can't just be `currentIndex`.
+  const currentPhotoRank = currentPhoto ? chronologicalRank(photos, currentPhoto.id) : null;
+
   const headerSubtitle = currentPhoto
     ? [
         currentPhotoAgeDays !== null ? formatAgeLabel(currentPhotoAgeDays) : null,
-        formatPositionLabel(currentIndex ?? 0, photos.length),
+        currentPhotoRank ? formatPositionLabel(currentPhotoRank.rank, currentPhotoRank.total) : null,
       ]
         .filter(Boolean)
         .join(' · ')

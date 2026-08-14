@@ -379,3 +379,45 @@ export function locatePhotoInSections<T extends { id: string }>(
   }
   return null;
 }
+
+export type ChronologicalRank = {
+  /** 1-based, ascending by occurred_at — 1 is the OLDEST photo. */
+  rank: number;
+  total: number;
+};
+
+type RankablePhoto = { id: string; occurred_at: string };
+
+/**
+ * A photo's rank in the child's life, oldest first — 2026-08-14: the
+ * fullscreen header showed "1 von 123" for the NEWEST photo, because it
+ * used the swipe list's own position, and that list is (deliberately)
+ * newest-first (see repository.ts#usePhotosOfChild / groupPhotosByDay
+ * above — the Chronik's ordering is not changing). The number in the
+ * header is a different thing entirely: it describes the child's life
+ * ("this is photo 1 of 123 ever taken"), not where the photo sits in that
+ * list — so this sorts independently rather than deriving anything from
+ * list position or the swipe direction, both of which stay newest-first.
+ *
+ * Ties on `occurred_at` (burst shots from the same instant) are broken by
+ * `id` — arbitrary, but STABLE: without a tiebreaker, `Array.prototype.sort`
+ * on JS's own default gives no ordering guarantee for two equal timestamps,
+ * so photos from the same burst could swap ranks between renders and the
+ * number would appear to flicker for no reason.
+ *
+ * Returns null when `photoId` isn't in `photos` (not loaded yet, or
+ * deleted) rather than a fabricated rank.
+ */
+export function chronologicalRank<T extends RankablePhoto>(
+  photos: readonly T[],
+  photoId: string,
+): ChronologicalRank | null {
+  const sorted = [...photos].sort(
+    (a, b) => a.occurred_at.localeCompare(b.occurred_at) || a.id.localeCompare(b.id),
+  );
+  const index = sorted.findIndex((photo) => photo.id === photoId);
+  if (index === -1) {
+    return null;
+  }
+  return { rank: index + 1, total: sorted.length };
+}

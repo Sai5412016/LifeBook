@@ -53,9 +53,16 @@ export function neighborIndices(currentIndex: number, total: number, radius: num
   return windowIndices(currentIndex, total, radius).filter((index) => index !== currentIndex);
 }
 
-/** "14 von 90" — an unobtrusive position readout for the header. */
-export function formatPositionLabel(currentIndex: number, total: number): string {
-  return `${currentIndex + 1} von ${total}`;
+/**
+ * "14 von 90" — an unobtrusive position readout for the header.
+ *
+ * 2026-08-14: `rank` is already 1-based (identity.ts#chronologicalRank),
+ * unlike the swipe list's own 0-based `currentIndex` this used to take —
+ * the header shows the child's-life rank now, not the list position, so
+ * there is no index left to add 1 to here.
+ */
+export function formatPositionLabel(rank: number, total: number): string {
+  return `${rank} von ${total}`;
 }
 
 /**

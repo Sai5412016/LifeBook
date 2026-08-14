@@ -190,6 +190,24 @@ Build-Warteschlange. Deshalb: nach **jeder** Änderung an `app.json` oder an der
 Plugin-Liste `npx expo config --json` ausführen, **bevor** ein Build gestartet
 wird (siehe „Vor jeder Abgabe").
 
+### 9. Im Wurzel-Layout gehört `<Stack />`, nicht `<Slot />`
+
+Am 13.08.2026 gefunden: `app/_layout.tsx` rendert für den Hauptzustand
+`<Slot />`. Slot zeigt immer nur die aktive Route und baut alles darunter
+ab. Beim Öffnen eines Bildschirms neben `(tabs)` — Foto, Menschen,
+Einstellungen, Kindprofil — wurde deshalb der GESAMTE Reiter-Navigator
+abgebaut und beim Zurückspringen neu erzeugt. Ein frischer Reiter-
+Navigator startet immer auf seinem Standardreiter. Symptome: Rücksprung
+landet auf der Startseite statt beim vorherigen Reiter, und die
+Scrollposition ist weg.
+
+Der naheliegende Verdacht (falsch verdrahtetes Navigationsziel) war
+nachweislich falsch — `router.back()` stand korrekt da. Die Ursache lag eine
+Ebene höher.
+
+→ Bildschirme, die über den Reitern liegen sollen, brauchen im Wurzel-
+Layout einen echten Stapel. Nicht auf `<Slot />` zurückdrehen.
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste
