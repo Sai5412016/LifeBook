@@ -1,0 +1,8 @@
+# Diese Funktion MUSS ohne Anmeldung erreichbar sein, weil Großeltern kein
+# Konto haben. Der Zugangsschlüssel im Link und der Zugangscode sind der
+# Ersatz. Ohne diesen Eintrag würde eine spätere Veröffentlichung über die
+# Kommandozeile die Anmeldepflicht wieder einschalten und den Gastzugang
+# stillschweigend abschalten — die Seite würde dann für jeden Gast nur noch
+# einen Fehler zeigen.
+[functions.album]
+verify_jwt = false

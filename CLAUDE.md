@@ -237,6 +237,13 @@ Getestet: fremde Haushalte werden in beide Richtungen abgewiesen.
 GPS-Koordinaten kommen **nicht** in die Datenbank. Das Originalfoto wird
 unverändert gespeichert, inklusive eingebetteter Aufnahmedaten.
 
+## Edge Functions
+
+- `notify-household` — verschickt Push-Nachrichten an den Haushalt, mit
+  Anmeldepflicht.
+- `album` — öffentliche Ansichtsseite für Freigaben, OHNE Anmeldepflicht,
+  bewusst; siehe `supabase/config.toml`. Sie ist die einzige Ausnahme.
+
 ## Befehle
 
 ```bash
