@@ -64,6 +64,23 @@ describe('gramsToKgInput / mmToCmInput', () => {
     expect(mmToCmInput(510)).toBe('51,0');
     expect(mmToCmInput(514)).toBe('51,4');
   });
+
+  // 2026-08-17: the exact stored values from the "Kind bearbeiten lädt
+  // nicht" report (Marina Philomena's real birth measurements) — the bug
+  // was never in this conversion, it was in kind/bearbeiten.tsx never
+  // CALLING it with real data. Pinned here anyway so this specific
+  // regression can never silently recur.
+  it('pre-fills the exact values from the bug report', () => {
+    expect(gramsToKgInput(1800)).toBe('1,8');
+    expect(mmToCmInput(430)).toBe('43,0');
+    expect(mmToCmInput(295)).toBe('29,5');
+  });
+
+  it('round-trips storage -> input -> parsed -> storage for the report values', () => {
+    expect(kgToGrams(parseDecimalInput(gramsToKgInput(1800))!)).toBe(1800);
+    expect(cmToMm(parseDecimalInput(mmToCmInput(430))!)).toBe(430);
+    expect(cmToMm(parseDecimalInput(mmToCmInput(295))!)).toBe(295);
+  });
 });
 
 describe('formatWeightKg / formatLengthCm / formatHeadCircumferenceCm', () => {

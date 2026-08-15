@@ -6,13 +6,27 @@
  * Kein natives Datums-Auswahlfeld (wie schon beim Anlegen des Haushalts,
  * siehe (onboarding)/household.tsx) — Text-Eingabe im Format JJJJ-MM-TT /
  * HH:MM, geprüft vor dem Speichern.
+ *
+ * 2026-08-17: gefunden — dieser Bildschirm öffnete sich mit leeren
+ * Feldern, obwohl die Datenbank vollständige Werte hatte. Ursache: die
+ * `useState`-Aufrufe unten lasen `child` als Startwert, aber
+ * `useActiveChild()` liefert `child` erst NACH einem ersten Render mit
+ * `null` (die reaktive Abfrage ist noch nicht fertig) — React führt einen
+ * `useState`-Initialwert aber nur EIN EINZIGES Mal aus, beim allerersten
+ * Aufbau. Das Feld blieb deshalb für immer leer, obwohl `child` kurz
+ * danach ankam — und "Speichern" hätte genau diese Leere über die
+ * echten Werte geschrieben, da der Name-Pflichtcheck der einzige Schutz
+ * war. Behoben mit `useHydrateOnce` (siehe @/ui): die Felder werden erst
+ * befüllt, sobald `child` TATSÄCHLICH da ist, dafür aber garantiert genau
+ * einmal — und bis dahin ist "Speichern" gesperrt, das Formular zeigt
+ * einen Ladezustand statt editierbarer, aber falscher Leerfelder.
  */
 
 import { usePowerSync } from '@powersync/react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -25,11 +39,11 @@ import {
   mmToCmInput,
   parseDecimalInput,
 } from '@/features/household/measurements';
-import { updateChild, useActiveChild } from '@/features/household/repository';
+import { updateChild, useActiveChild, type ActiveChild } from '@/features/household/repository';
 import { usePhotosOfChild } from '@/features/photos/repository';
 import type { PhotoRow } from '@/features/photos/types';
 import { useSignedUrls } from '@/features/photos/hooks';
-import { KeyboardSafeScreen, useUiColors, TextField } from '@/ui';
+import { KeyboardSafeScreen, useHydrateOnce, useUiColors, TextField } from '@/ui';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -44,36 +58,40 @@ const AVATAR_PICKER_LIMIT = 60;
 
 export default function ChildEditScreen() {
   const db = usePowerSync();
-  const { child } = useActiveChild();
+  const { child, isLoading: childLoading } = useActiveChild();
   const { photos } = usePhotosOfChild(child?.childId);
   const { accent } = useUiColors();
 
-  const [firstName, setFirstName] = useState(child?.firstName ?? '');
-  const [birthDate, setBirthDate] = useState(
-    child ? toLocalDate(child.birthAtUtcIso, child.birthTz) : '',
-  );
-  const [birthTime, setBirthTime] = useState(
-    child ? formatTimeLabel(child.birthAtUtcIso, child.birthTz) : '',
-  );
-  const [weight, setWeight] = useState(
-    child?.birthWeightG != null ? gramsToKgInput(child.birthWeightG) : '',
-  );
-  const [length, setLength] = useState(
-    child?.birthLengthMm != null ? mmToCmInput(child.birthLengthMm) : '',
-  );
-  const [headCircumference, setHeadCircumference] = useState(
-    child?.birthHeadMm != null ? mmToCmInput(child.birthHeadMm) : '',
-  );
-  const [birthPlace, setBirthPlace] = useState(child?.birthPlace ?? '');
-  const [avatarPhotoId, setAvatarPhotoId] = useState<string | null>(child?.avatarPhotoId ?? null);
+  const [firstName, setFirstName] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [birthTime, setBirthTime] = useState('');
+  const [weight, setWeight] = useState('');
+  const [length, setLength] = useState('');
+  const [headCircumference, setHeadCircumference] = useState('');
+  const [birthPlace, setBirthPlace] = useState('');
+  const [avatarPhotoId, setAvatarPhotoId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Befüllt die Felder GENAU EINMAL, sobald `child` tatsächlich da ist —
+  // siehe den Dateikopf-Kommentar für den Fehler, den das behebt.
+  const hydrate = useCallback((loaded: ActiveChild) => {
+    setFirstName(loaded.firstName);
+    setBirthDate(toLocalDate(loaded.birthAtUtcIso, loaded.birthTz));
+    setBirthTime(formatTimeLabel(loaded.birthAtUtcIso, loaded.birthTz));
+    setWeight(loaded.birthWeightG != null ? gramsToKgInput(loaded.birthWeightG) : '');
+    setLength(loaded.birthLengthMm != null ? mmToCmInput(loaded.birthLengthMm) : '');
+    setHeadCircumference(loaded.birthHeadMm != null ? mmToCmInput(loaded.birthHeadMm) : '');
+    setBirthPlace(loaded.birthPlace ?? '');
+    setAvatarPhotoId(loaded.avatarPhotoId ?? null);
+  }, []);
+  const ready = useHydrateOnce(child, childLoading, hydrate);
 
   const avatarChoices = photos.slice(0, AVATAR_PICKER_LIMIT);
   const signedUrls = useSignedUrls(avatarChoices.map((photo) => photo.thumb_key));
 
   const handleSave = async () => {
-    if (!child) {
+    if (!child || !ready) {
       return;
     }
     setError(null);
@@ -123,7 +141,7 @@ export default function ChildEditScreen() {
         </ThemedText>
       </Pressable>
       <ThemedText type="smallBold">Kind bearbeiten</ThemedText>
-      <Pressable onPress={handleSave} hitSlop={12} disabled={saving || !child}>
+      <Pressable onPress={handleSave} hitSlop={12} disabled={saving || !child || !ready}>
         <ThemedText type="linkPrimary">{saving ? '…' : 'Speichern'}</ThemedText>
       </Pressable>
     </View>
@@ -132,7 +150,23 @@ export default function ChildEditScreen() {
   return (
     <ThemedView style={styles.root}>
       <KeyboardSafeScreen header={header} contentContainerStyle={styles.content}>
-        <TextField label="Name" value={firstName} onChangeText={setFirstName} autoCapitalize="words" />
+        {!ready ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator />
+            <ThemedText type="small" themeColor="textSecondary">
+              Daten werden geladen …
+            </ThemedText>
+          </View>
+        ) : null}
+
+        <TextField
+          label="Name"
+          value={firstName}
+          onChangeText={setFirstName}
+          autoCapitalize="words"
+          editable={ready}
+          placeholder={ready ? undefined : 'Lädt …'}
+        />
 
           <View style={styles.row}>
             <View style={styles.rowField}>
@@ -142,6 +176,8 @@ export default function ChildEditScreen() {
                 onChangeText={setBirthDate}
                 keyboardType="numbers-and-punctuation"
                 autoCapitalize="none"
+                editable={ready}
+                placeholder={ready ? undefined : 'Lädt …'}
               />
             </View>
             <View style={styles.rowField}>
@@ -151,6 +187,8 @@ export default function ChildEditScreen() {
                 onChangeText={setBirthTime}
                 keyboardType="numbers-and-punctuation"
                 autoCapitalize="none"
+                editable={ready}
+                placeholder={ready ? undefined : 'Lädt …'}
               />
             </View>
           </View>
@@ -162,7 +200,8 @@ export default function ChildEditScreen() {
                 value={weight}
                 onChangeText={setWeight}
                 keyboardType="decimal-pad"
-                placeholder="3,4"
+                placeholder={ready ? '3,4' : 'Lädt …'}
+                editable={ready}
               />
             </View>
             <View style={styles.rowField}>
@@ -171,7 +210,8 @@ export default function ChildEditScreen() {
                 value={length}
                 onChangeText={setLength}
                 keyboardType="decimal-pad"
-                placeholder="51,0"
+                placeholder={ready ? '51,0' : 'Lädt …'}
+                editable={ready}
               />
             </View>
           </View>
@@ -181,7 +221,8 @@ export default function ChildEditScreen() {
             value={headCircumference}
             onChangeText={setHeadCircumference}
             keyboardType="decimal-pad"
-            placeholder="34,5"
+            placeholder={ready ? '34,5' : 'Lädt …'}
+            editable={ready}
           />
 
           <TextField
@@ -189,7 +230,8 @@ export default function ChildEditScreen() {
             value={birthPlace}
             onChangeText={setBirthPlace}
             autoCapitalize="words"
-            placeholder="z. B. Berlin"
+            placeholder={ready ? 'z. B. Berlin' : 'Lädt …'}
+            editable={ready}
           />
 
           {error ? (
@@ -218,7 +260,7 @@ export default function ChildEditScreen() {
                   signedUrl={photo.thumb_key ? signedUrls.get(photo.thumb_key) : undefined}
                   selected={photo.id === avatarPhotoId}
                   accent={accent}
-                  onPress={() => setAvatarPhotoId(photo.id === avatarPhotoId ? null : photo.id)}
+                  onPress={() => ready && setAvatarPhotoId(photo.id === avatarPhotoId ? null : photo.id)}
                 />
               ))}
             </View>
@@ -272,6 +314,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.five,
   },
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   row: { flexDirection: 'row', gap: Spacing.two },
   rowField: { flex: 1 },
   avatarTitle: { marginTop: Spacing.two },

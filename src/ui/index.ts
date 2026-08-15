@@ -12,4 +12,5 @@ export { KeyboardSafeScreen } from './keyboard-safe-screen';
 export type { KeyboardSafeScreenProps } from './keyboard-safe-screen';
 export { computeKeyboardInset } from './keyboard-inset';
 export type { KeyboardInsetInput } from './keyboard-inset';
+export { useHydrateOnce } from './use-hydrate-once';
 export * from './colors';

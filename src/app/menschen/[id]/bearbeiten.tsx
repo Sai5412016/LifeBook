@@ -2,6 +2,19 @@
  * Person bearbeiten — dieselbe Form-UI wie beim Anlegen (siehe ../neu.tsx),
  * vorausgefüllt, plus "Person löschen" (weiches Löschen mit Rückfrage, wie
  * überall sonst im Projekt — vgl. Fotochronik).
+ *
+ * 2026-08-17: `<PersonForm>` wird erst gemountet, wenn `person` fertig
+ * geladen ist (siehe unten) — genau das schützt Name/Rolle/Notiz/Foto
+ * bereits vor dem "Kind bearbeiten"-Fehler (useState mit einem noch nicht
+ * angekommenen Wert). "Von"/"Bis" brauchten aber ZUSÄTZLICH `child` (für
+ * dessen Zeitzone), und die alte Bedingung wartete nur auf `person`, nicht
+ * auch auf `child` — kam `child` später an als `person`, mountete das
+ * Formular mit leeren Von/Bis-Feldern trotz vorhandener Werte, für immer.
+ * Behoben, indem die Ladebedingung unten `child`/dessen eigenes
+ * `isLoading` mit einschließt — derselbe Grundsatz wie in
+ * kind/bearbeiten.tsx (erst rendern/befüllen, wenn ALLE benötigten Daten
+ * da sind), hier über die schon vorhandene "noch nicht mounten"-Schranke
+ * statt über useHydrateOnce, weil die bereits korrekt für `person` sorgt.
  */
 
 import { usePowerSync } from '@powersync/react-native';
@@ -20,8 +33,8 @@ import { removeStoredObjects } from '@/features/photos/storage';
 export default function PersonEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = usePowerSync();
-  const { child } = useActiveChild();
-  const { person, isLoading } = usePersonById(id);
+  const { child, isLoading: childLoading } = useActiveChild();
+  const { person, isLoading: personLoading } = usePersonById(id);
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -100,7 +113,8 @@ export default function PersonEditScreen() {
     ]);
   };
 
-  if (isLoading) {
+  // Wartet auf BEIDE Quellen, nicht nur auf `person` — siehe Dateikopf.
+  if (personLoading || childLoading) {
     return (
       <ThemedView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
@@ -108,7 +122,7 @@ export default function PersonEditScreen() {
     );
   }
 
-  if (!person) {
+  if (!person || !child) {
     return null;
   }
 
@@ -121,8 +135,8 @@ export default function PersonEditScreen() {
       initialName={person.name}
       initialRole={person.role}
       initialNote={person.note ?? ''}
-      initialMetFrom={person.met_from && child ? toLocalDate(person.met_from, child.birthTz) : ''}
-      initialMetTo={person.met_to && child ? toLocalDate(person.met_to, child.birthTz) : ''}
+      initialMetFrom={person.met_from ? toLocalDate(person.met_from, child.birthTz) : ''}
+      initialMetTo={person.met_to ? toLocalDate(person.met_to, child.birthTz) : ''}
       existingPhotoKey={person.photo_key}
       onSubmit={handleSubmit}
       onDelete={handleDelete}
