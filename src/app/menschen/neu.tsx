@@ -75,6 +75,10 @@ export default function NeuePersonScreen() {
 
   return (
     <PersonForm
+      // Ausdrücklich "anlegen": es gibt nichts zu laden, das Formular ist
+      // sofort benutzbar und startet leer (Architekturregel 9 / siehe
+      // person-form.tsx' Dateikopf zum `mode`-Vertrag).
+      mode={{ kind: 'create' }}
       headerTitle="Person hinzufügen"
       submitLabel="Hinzufügen"
       saving={saving}

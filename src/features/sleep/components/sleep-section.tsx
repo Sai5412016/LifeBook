@@ -19,7 +19,7 @@ import { Spacing } from '@/constants/theme';
 import { formatDuration, formatTimeLabel, toLocalDate } from '@/core/time';
 import { isRunaway } from '@/core/tracking/running-conflicts';
 import type { ActiveChild } from '@/features/household/repository';
-import { BigButton, Chip, TextField, useUiColors } from '@/ui';
+import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 import {
   acknowledgeSleepReviewFlag,
@@ -402,11 +402,23 @@ function SleepEditPanel({
 }) {
   const isOpenSleep = sleep.ended_at === null;
 
-  const [time, setTime] = useState(formatTimeLabel(sleep.occurred_at, sleep.tz));
-  const [endTime, setEndTime] = useState(sleep.ended_at ? formatTimeLabel(sleep.ended_at, sleep.tz) : '');
-  const [location, setLocation] = useState<SleepLocation | null>(sleep.location);
+  const [time, setTime] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [location, setLocation] = useState<SleepLocation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { dangerText } = useUiColors();
+
+  // Architekturregel 9 — gleiche Begründung wie in Füttern's FeedEditPanel:
+  // die Liste unter dem Panel bleibt antippbar, ein Wechsel auf eine andere
+  // Zeile behält sonst die Werte der vorherigen, und editSleep schreibt
+  // Beginn, Ende und Ort gemeinsam.
+  const hydrate = useCallback((loaded: SleepRow) => {
+    setTime(formatTimeLabel(loaded.occurred_at, loaded.tz));
+    setEndTime(loaded.ended_at ? formatTimeLabel(loaded.ended_at, loaded.tz) : '');
+    setLocation(loaded.location);
+    setError(null);
+  }, []);
+  useHydrateOnce(sleep, sleep.id, hydrate);
 
   const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 

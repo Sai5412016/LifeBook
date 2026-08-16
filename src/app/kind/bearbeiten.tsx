@@ -58,7 +58,7 @@ const AVATAR_PICKER_LIMIT = 60;
 
 export default function ChildEditScreen() {
   const db = usePowerSync();
-  const { child, isLoading: childLoading } = useActiveChild();
+  const { child } = useActiveChild();
   const { photos } = usePhotosOfChild(child?.childId);
   const { accent } = useUiColors();
 
@@ -85,7 +85,7 @@ export default function ChildEditScreen() {
     setBirthPlace(loaded.birthPlace ?? '');
     setAvatarPhotoId(loaded.avatarPhotoId ?? null);
   }, []);
-  const ready = useHydrateOnce(child, childLoading, hydrate);
+  const ready = useHydrateOnce(child, child?.childId, hydrate);
 
   const avatarChoices = photos.slice(0, AVATAR_PICKER_LIMIT);
   const signedUrls = useSignedUrls(avatarChoices.map((photo) => photo.thumb_key));

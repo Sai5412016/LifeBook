@@ -52,7 +52,7 @@ import {
   isRunaway,
 } from '@/features/feeding/timer';
 import type { BottleKind, FeedRow, FeedSide } from '@/features/feeding/types';
-import { BigButton, Chip, TextField, useUiColors } from '@/ui';
+import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 export type FeedingSectionProps = {
   child: ActiveChild | null;
@@ -400,8 +400,15 @@ function ReviewCorrectionPanel({
   onAcknowledge: () => void;
   onSave: (durationLeftS: number, durationRightS: number) => void;
 }) {
-  const [leftMin, setLeftMin] = useState(String(Math.round((feed.duration_left_s ?? 0) / 60)));
-  const [rightMin, setRightMin] = useState(String(Math.round((feed.duration_right_s ?? 0) / 60)));
+  const [leftMin, setLeftMin] = useState('');
+  const [rightMin, setRightMin] = useState('');
+
+  // Gleiche Begründung wie in FeedEditPanel — siehe dort (Architekturregel 9).
+  const hydrate = useCallback((loaded: FeedRow) => {
+    setLeftMin(String(Math.round((loaded.duration_left_s ?? 0) / 60)));
+    setRightMin(String(Math.round((loaded.duration_right_s ?? 0) / 60)));
+  }, []);
+  useHydrateOnce(feed, feed.id, hydrate);
 
   const handleSave = () => {
     const left = Math.max(0, Number(leftMin) || 0);
@@ -545,13 +552,31 @@ function FeedEditPanel({
   const isBreast = feed.feed_type.startsWith('breast_');
   const isOpenFeed = feed.ended_at === null;
 
-  const [time, setTime] = useState(formatTimeLabel(feed.occurred_at, feed.tz));
-  const [leftMin, setLeftMin] = useState(String(Math.round((feed.duration_left_s ?? 0) / 60)));
-  const [rightMin, setRightMin] = useState(String(Math.round((feed.duration_right_s ?? 0) / 60)));
-  const [amount, setAmount] = useState(feed.amount_ml ? String(feed.amount_ml) : '');
-  const [kind, setKind] = useState<BottleKind>(feed.feed_type === 'bottle_formula' ? 'formula' : 'breastmilk');
+  const [time, setTime] = useState('');
+  const [leftMin, setLeftMin] = useState('');
+  const [rightMin, setRightMin] = useState('');
+  const [amount, setAmount] = useState('');
+  const [kind, setKind] = useState<BottleKind>('breastmilk');
   const [error, setError] = useState<string | null>(null);
   const { dangerText } = useUiColors();
+
+  // Architekturregel 9: Dieses Feld war früher `useState(formatTimeLabel(feed…))`.
+  // Die Liste unter diesem Panel bleibt antippbar, also kann der Nutzer
+  // mitten im Bearbeiten auf eine ANDERE Fütterung wechseln — das Panel
+  // bleibt dabei dieselbe React-Instanz, `useState` läuft nicht erneut, und
+  // die Werte von Zeile A standen dann in einem Panel, das auf Zeile B
+  // speichert (editFeed schreibt Uhrzeit, Dauer, Menge und Art auf einmal).
+  // `useHydrateOnce` befüllt pro `feed.id` neu und räumt dabei auch die
+  // Fehlermeldung der vorherigen Zeile weg.
+  const hydrate = useCallback((loaded: FeedRow) => {
+    setTime(formatTimeLabel(loaded.occurred_at, loaded.tz));
+    setLeftMin(String(Math.round((loaded.duration_left_s ?? 0) / 60)));
+    setRightMin(String(Math.round((loaded.duration_right_s ?? 0) / 60)));
+    setAmount(loaded.amount_ml ? String(loaded.amount_ml) : '');
+    setKind(loaded.feed_type === 'bottle_formula' ? 'formula' : 'breastmilk');
+    setError(null);
+  }, []);
+  useHydrateOnce(feed, feed.id, hydrate);
 
   const handleSave = () => {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {

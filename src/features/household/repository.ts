@@ -154,12 +154,26 @@ async function loadChildById(
  * Does NOT touch `photos.age_days`: see features/photos/repository.ts's
  * doc comment on why photo ages are computed live from `children.birth_at`
  * for display instead of being rewritten here.
+ *
+ * LETZTES NETZ (2026-08-17, Architekturregel 9): Ein leerer Name wird hier
+ * abgelehnt, nicht nur im Formular. Ein Kind hat immer einen Namen, ein
+ * leerer ist also NIE eine gültige Absicht — und er ist zugleich das
+ * zuverlässigste Kennzeichen eines Formulars, das gespeichert hat, ohne je
+ * geladen zu haben (dann sind alle Felder leer, der Name eingeschlossen).
+ * Diese Prüfung greift damit unabhängig davon, ob die Sperre in der
+ * Oberfläche funktioniert hat. Bewusst NUR der Name — siehe Bericht
+ * zur Frage, warum ein pauschales "alle Felder leer"-Verbot hier falsch
+ * wäre: das Leeren einzelner Maße ist eine legitime Korrektur.
  */
 export async function updateChild(
   db: AbstractPowerSyncDatabase,
   childId: string,
   input: ChildEditInput,
 ): Promise<void> {
+  if (input.firstName.trim().length === 0) {
+    throw new Error('household: Kind ohne Namen kann nicht gespeichert werden');
+  }
+
   const child = await loadChildById(db, childId);
   if (!child) {
     return;

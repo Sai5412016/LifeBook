@@ -3,18 +3,16 @@
  * vorausgefüllt, plus "Person löschen" (weiches Löschen mit Rückfrage, wie
  * überall sonst im Projekt — vgl. Fotochronik).
  *
- * 2026-08-17: `<PersonForm>` wird erst gemountet, wenn `person` fertig
- * geladen ist (siehe unten) — genau das schützt Name/Rolle/Notiz/Foto
- * bereits vor dem "Kind bearbeiten"-Fehler (useState mit einem noch nicht
- * angekommenen Wert). "Von"/"Bis" brauchten aber ZUSÄTZLICH `child` (für
- * dessen Zeitzone), und die alte Bedingung wartete nur auf `person`, nicht
- * auch auf `child` — kam `child` später an als `person`, mountete das
- * Formular mit leeren Von/Bis-Feldern trotz vorhandener Werte, für immer.
- * Behoben, indem die Ladebedingung unten `child`/dessen eigenes
- * `isLoading` mit einschließt — derselbe Grundsatz wie in
- * kind/bearbeiten.tsx (erst rendern/befüllen, wenn ALLE benötigten Daten
- * da sind), hier über die schon vorhandene "noch nicht mounten"-Schranke
- * statt über useHydrateOnce, weil die bereits korrekt für `person` sorgt.
+ * 2026-08-17: Dieser Bildschirm hielt `<PersonForm>` zurück, bis `person`
+ * geladen war — eine eigene Warteschranke, die dasselbe Problem löste wie
+ * `useHydrateOnce` in kind/bearbeiten.tsx, nur anders. Zwei Verfahren für
+ * einen Fehler sind eines zu viel (Architekturregel 9), deshalb liegt das
+ * Warten jetzt IM Formular: dieser Bildschirm reicht den Datensatz als
+ * `mode={{ kind: 'edit', record }}` durch und setzt `record` auf `null`,
+ * solange eine der beiden Quellen (`person` ODER `child` — letzteres nur
+ * für die Zeitzone von "Von"/"Bis") noch lädt. Genau dieses `child`
+ * fehlte in der alten Schranke: kam es später an als `person`, standen
+ * Von/Bis dauerhaft leer, obwohl Werte vorhanden waren.
  */
 
 import { usePowerSync } from '@powersync/react-native';
@@ -25,7 +23,11 @@ import { ActivityIndicator, Alert } from 'react-native';
 import { ThemedView } from '@/components/themed-view';
 import { combineLocalDateAndTime, toLocalDate } from '@/core/time';
 import { useActiveChild } from '@/features/household/repository';
-import { PersonForm, type PersonFormSubmitInput } from '@/features/people/components/person-form';
+import {
+  PersonForm,
+  type PersonFormRecord,
+  type PersonFormSubmitInput,
+} from '@/features/people/components/person-form';
 import { uploadPersonPhoto } from '@/features/people/photo';
 import { setPersonPhotoKey, softDeletePerson, updatePerson, usePersonById } from '@/features/people/repository';
 import { removeStoredObjects } from '@/features/photos/storage';
@@ -113,8 +115,9 @@ export default function PersonEditScreen() {
     ]);
   };
 
-  // Wartet auf BEIDE Quellen, nicht nur auf `person` — siehe Dateikopf.
-  if (personLoading || childLoading) {
+  // Echtes "gibt es nicht" (gelöscht, falsche id) — NICHT dasselbe wie
+  // "lädt noch", das erledigt jetzt das Formular selbst über `record: null`.
+  if (!personLoading && !person) {
     return (
       <ThemedView style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
@@ -122,22 +125,32 @@ export default function PersonEditScreen() {
     );
   }
 
-  if (!person || !child) {
-    return null;
-  }
+  // `null`, solange EINE der beiden Quellen noch fehlt — `child` wird für
+  // die Zeitzone von Von/Bis gebraucht, siehe Dateikopf.
+  const record: PersonFormRecord | null =
+    person && child
+      ? {
+          id: person.id,
+          values: {
+            name: person.name,
+            role: person.role,
+            note: person.note ?? '',
+            metFrom: person.met_from ? toLocalDate(person.met_from, child.birthTz) : '',
+            metTo: person.met_to ? toLocalDate(person.met_to, child.birthTz) : '',
+            photoKey: person.photo_key,
+          },
+        }
+      : null;
 
   return (
     <PersonForm
+      // Ausdrücklich "bearbeiten": `record` ist null, solange geladen wird —
+      // das Formular sperrt sich so lange selbst (Architekturregel 9).
+      mode={{ kind: 'edit', record }}
       headerTitle="Person bearbeiten"
       submitLabel="Speichern"
       saving={saving}
       error={error}
-      initialName={person.name}
-      initialRole={person.role}
-      initialNote={person.note ?? ''}
-      initialMetFrom={person.met_from ? toLocalDate(person.met_from, child.birthTz) : ''}
-      initialMetTo={person.met_to ? toLocalDate(person.met_to, child.birthTz) : ''}
-      existingPhotoKey={person.photo_key}
       onSubmit={handleSubmit}
       onDelete={handleDelete}
       deleting={deleting}

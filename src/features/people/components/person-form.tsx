@@ -9,11 +9,25 @@
  * fields in kind/bearbeiten.tsx, which stay text entry (a picker chooses a
  * DAY; birth also needs an exact time of day, which this component doesn't
  * carry — out of scope for this change).
+ *
+ * 2026-08-17 — WARUM `mode` UND NICHT MEHR `initialXyz`-EINZELWERTE:
+ * Der alte Vertrag waren flache Eigenschaften mit Standardwerten
+ * (`initialName = ''` …). Damit war "wird gerade noch geladen" von "legt
+ * gerade frisch an" NICHT unterscheidbar — beide sahen für dieses
+ * Formular identisch aus, nämlich als leere Zeichenketten. Genau diese
+ * fehlende Unterscheidung ist der Grund, warum hier ursprünglich eine
+ * Warteschranke im aufrufenden Bildschirm nötig war statt des
+ * projektweiten `useHydrateOnce` (Architekturregel 9). `mode` macht den
+ * Unterschied jetzt ausdrücklich und im Typsystem unumgehbar: „anlegen"
+ * hat gar kein Feld für einen Datensatz, „bearbeiten" hat eines, das
+ * `null` sein DARF, solange geladen wird — und in genau diesem Zustand
+ * bleibt „Speichern" gesperrt. Ein Aufrufer kann nicht mehr versehentlich
+ * so tun, als wäre nichts zu laden.
  */
 
 import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -22,7 +36,7 @@ import { Spacing } from '@/constants/theme';
 import { localDateToPickerDate, nowUtcIso, pickerDateToLocalDate, toLocalDate } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useSignedUrls } from '@/features/photos/hooks';
-import { Chip, KeyboardSafeScreen, TextField, useUiColors } from '@/ui';
+import { Chip, KeyboardSafeScreen, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 import { PersonPhotoPickCancelledError, pickPersonPhotoUri } from '../photo';
 import { ROLE_OPTIONS, isMetToValid, toGermanDate } from '../logic';
@@ -40,19 +54,42 @@ export type PersonFormSubmitInput = {
   pickedPhotoUri: string | null;
 };
 
+/** The already-localised values of an existing person, as this form shows them. */
+export type PersonFormValues = {
+  name: string;
+  role: PersonRole;
+  note: string;
+  /** "YYYY-MM-DD" or "" — the caller converts from the stored instant via core/time. */
+  metFrom: string;
+  metTo: string;
+  /** Already-uploaded portrait, for the preview. */
+  photoKey: string | null;
+};
+
+/** The record being edited, once it has actually loaded. */
+export type PersonFormRecord = {
+  /** Identity for `useHydrateOnce` — seeding re-runs if this ever points at a different person. */
+  id: string;
+  values: PersonFormValues;
+};
+
+/**
+ * Which of the two jobs this form is doing — see the file header for why
+ * this is an explicit union instead of optional initial values.
+ */
+export type PersonFormMode =
+  /** Nothing to load; the form starts empty and is immediately usable. */
+  | { kind: 'create' }
+  /** `record: null` means "still loading" — the form locks itself until it arrives. */
+  | { kind: 'edit'; record: PersonFormRecord | null };
+
 export type PersonFormProps = {
+  mode: PersonFormMode;
   headerTitle: string;
   submitLabel: string;
   saving: boolean;
   /** Save failure from the screen (e.g. a write error) — shown alongside this form's own validation errors. */
   error: string | null;
-  initialName?: string;
-  initialRole?: PersonRole;
-  initialNote?: string;
-  initialMetFrom?: string;
-  initialMetTo?: string;
-  /** Already-uploaded portrait, for edit mode's preview. */
-  existingPhotoKey?: string | null;
   onSubmit: (input: PersonFormSubmitInput) => void;
   /** Present only in edit mode. */
   onDelete?: () => void;
@@ -60,32 +97,43 @@ export type PersonFormProps = {
 };
 
 export function PersonForm({
+  mode,
   headerTitle,
   submitLabel,
   saving,
   error,
-  initialName = '',
-  initialRole = 'family',
-  initialNote = '',
-  initialMetFrom = '',
-  initialMetTo = '',
-  existingPhotoKey = null,
   onSubmit,
   onDelete,
   deleting = false,
 }: PersonFormProps) {
   const { dangerText } = useUiColors();
 
-  const [name, setName] = useState(initialName);
-  const [role, setRole] = useState<PersonRole>(initialRole);
-  const [note, setNote] = useState(initialNote);
-  const [metFrom, setMetFrom] = useState(initialMetFrom);
-  const [metTo, setMetTo] = useState(initialMetTo);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState<PersonRole>('family');
+  const [note, setNote] = useState('');
+  const [metFrom, setMetFrom] = useState('');
+  const [metTo, setMetTo] = useState('');
+  const [photoKey, setPhotoKey] = useState<string | null>(null);
   const [pickedPhotoUri, setPickedPhotoUri] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const signedUrls = useSignedUrls([existingPhotoKey]);
-  const previewUri = pickedPhotoUri ?? (existingPhotoKey ? signedUrls.get(existingPhotoKey) : undefined);
+  const hydrate = useCallback((loaded: PersonFormRecord) => {
+    setName(loaded.values.name);
+    setRole(loaded.values.role);
+    setNote(loaded.values.note);
+    setMetFrom(loaded.values.metFrom);
+    setMetTo(loaded.values.metTo);
+    setPhotoKey(loaded.values.photoKey);
+  }, []);
+
+  const editRecord = mode.kind === 'edit' ? mode.record : null;
+  const hydrated = useHydrateOnce(editRecord, editRecord?.id, hydrate);
+  // Anlegen hat nichts zu laden und ist deshalb sofort benutzbar; beim
+  // Bearbeiten erst, wenn der Datensatz wirklich da ist (Architekturregel 9).
+  const ready = mode.kind === 'create' || hydrated;
+
+  const signedUrls = useSignedUrls([photoKey]);
+  const previewUri = pickedPhotoUri ?? (photoKey ? signedUrls.get(photoKey) : undefined);
   const busy = saving || deleting;
 
   const handlePickPhoto = async () => {
@@ -100,6 +148,11 @@ export function PersonForm({
   };
 
   const handleSubmit = () => {
+    // Architekturregel 9: niemals speichern, bevor die Daten da sind —
+    // sonst schreibt das Formular seine eigene Leere über den Datensatz.
+    if (!ready) {
+      return;
+    }
     setValidationError(null);
 
     if (name.trim().length === 0) {
@@ -131,7 +184,7 @@ export function PersonForm({
         </ThemedText>
       </Pressable>
       <ThemedText type="smallBold">{headerTitle}</ThemedText>
-      <Pressable onPress={handleSubmit} hitSlop={12} disabled={busy}>
+      <Pressable onPress={handleSubmit} hitSlop={12} disabled={busy || !ready}>
         <ThemedText type="linkPrimary">{saving ? '…' : submitLabel}</ThemedText>
       </Pressable>
     </View>
@@ -140,14 +193,32 @@ export function PersonForm({
   return (
     <ThemedView style={styles.root}>
       <KeyboardSafeScreen header={header} contentContainerStyle={styles.content}>
+        {!ready ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator />
+            <ThemedText type="small" themeColor="textSecondary">
+              Daten werden geladen …
+            </ThemedText>
+          </View>
+        ) : null}
+
         <View style={styles.photoRow}>
             <PersonAvatar uri={previewUri} name={name} size={96} />
-            <Pressable onPress={handlePickPhoto} hitSlop={8} disabled={busy}>
-              <ThemedText type="linkPrimary">Foto auswählen</ThemedText>
+            <Pressable onPress={handlePickPhoto} hitSlop={8} disabled={busy || !ready}>
+              <ThemedText type="linkPrimary" themeColor={ready ? undefined : 'textSecondary'}>
+                Foto auswählen
+              </ThemedText>
             </Pressable>
           </View>
 
-          <TextField label="Name" value={name} onChangeText={setName} autoCapitalize="words" />
+          <TextField
+            label="Name"
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="words"
+            editable={ready}
+            placeholder={ready ? undefined : 'Lädt …'}
+          />
 
           <ThemedText type="small" themeColor="textSecondary">
             Rolle
@@ -158,7 +229,7 @@ export function PersonForm({
                 key={option.value}
                 label={option.label}
                 selected={role === option.value}
-                onPress={() => setRole(option.value)}
+                onPress={() => ready && setRole(option.value)}
               />
             ))}
           </View>
@@ -168,7 +239,7 @@ export function PersonForm({
                 key={option.value}
                 label={option.label}
                 selected={role === option.value}
-                onPress={() => setRole(option.value)}
+                onPress={() => ready && setRole(option.value)}
               />
             ))}
           </View>
@@ -180,14 +251,16 @@ export function PersonForm({
             multiline
             numberOfLines={3}
             style={styles.noteInput}
+            editable={ready}
+            placeholder={ready ? undefined : 'Lädt …'}
           />
 
           <View style={styles.row}>
             <View style={styles.rowField}>
-              <DateChoiceField label="Von" value={metFrom} onChange={setMetFrom} />
+              <DateChoiceField label="Von" value={metFrom} onChange={setMetFrom} enabled={ready} />
             </View>
             <View style={styles.rowField}>
-              <DateChoiceField label="Bis" value={metTo} onChange={setMetTo} />
+              <DateChoiceField label="Bis" value={metTo} onChange={setMetTo} enabled={ready} />
             </View>
           </View>
 
@@ -235,10 +308,13 @@ function DateChoiceField({
   label,
   value,
   onChange,
+  enabled,
 }: {
   label: string;
   value: string;
   onChange: (localDate: string) => void;
+  /** False while the record is still loading — see Architekturregel 9. */
+  enabled: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const { dangerText } = useUiColors();
@@ -248,12 +324,14 @@ function DateChoiceField({
       <ThemedText type="small" themeColor="textSecondary">
         {label}
       </ThemedText>
-      <Pressable onPress={() => setPickerOpen(true)}>
+      <Pressable onPress={() => setPickerOpen(true)} disabled={!enabled}>
         <ThemedView type="backgroundElement" style={styles.dateValueButton}>
-          <ThemedText>{value ? toGermanDate(value) : 'Datum wählen'}</ThemedText>
+          <ThemedText themeColor={enabled ? undefined : 'textSecondary'}>
+            {!enabled ? 'Lädt …' : value ? toGermanDate(value) : 'Datum wählen'}
+          </ThemedText>
         </ThemedView>
       </Pressable>
-      {value ? (
+      {enabled && value ? (
         <Pressable onPress={() => onChange('')} hitSlop={8}>
           <ThemedText type="small" style={{ color: dangerText }}>
             Löschen
@@ -293,6 +371,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingBottom: Spacing.five,
   },
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   photoRow: { alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.one },
   chipRow: { flexDirection: 'row', gap: Spacing.two },
   noteInput: { height: 84, textAlignVertical: 'top', paddingTop: Spacing.two },

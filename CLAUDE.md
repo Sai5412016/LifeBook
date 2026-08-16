@@ -63,6 +63,45 @@ laufen über EAS). iOS ist vorbereitet, aber nicht getestet.
    Nutzern mit bestehender Sitzung nie — der Normalfall ab dem zweiten Tag.
    Solche Effekte gehören an den Auth-Zustand im Wurzel-Layout, nach dem
    Muster von `PushRegistrationEffect` und `PowerSyncConnector`.
+9. **Bearbeitungsformulare befüllen sich, wenn die Daten da sind — und
+   speichern erst dann.** Formularzustand aus einer asynchronen Abfrage
+   direkt beim ersten Aufbau zu setzen, merkt sich die Leere für immer:
+   Die Abfrage liefert beim ersten Durchlauf noch nichts. Sichtbar wird
+   das als leeres Formular über vorhandenen Daten — und Speichern
+   überschreibt sie. Am 16.08.2026 in „Kind bearbeiten" passiert, um ein
+   Haar mit Verlust von Marinas Geburtsdaten.
+   → Befüllen über `useHydrateOnce` (src/ui), und „Speichern" bleibt
+   gesperrt, bis die Daten geladen sind. Die Sperre ist der wichtigere
+   Teil: Sie verhindert den Schaden auch dann, wenn das Befüllen scheitert.
+
+   **Derselbe Fehler in der zweiten Bauform (17.08.2026):** Nicht nur
+   spätes Ankommen bricht `useState`, sondern auch ein WECHSELNDER
+   Datensatz. Ein Panel als `{ziel ? <Panel zeile={ziel}/> : null}` bleibt
+   beim Antippen einer anderen Zeile dieselbe React-Instanz — `useState`
+   läuft nicht erneut, und die Werte von Zeile A stehen in einem Panel,
+   das auf Zeile B speichert. Gefunden in den Bearbeiten-Panels von
+   Füttern, Wickeln und Schlafen, wo je ein Schreibvorgang mehrere Spalten
+   gleichzeitig setzt. Deshalb nimmt `useHydrateOnce` die Identität des
+   Datensatzes entgegen und befüllt bei deren Wechsel neu. Ein Formular,
+   das denselben Datensatz behält, wird dabei NICHT neu befüllt — eine
+   laufende Eingabe darf ein Hintergrund-Abgleich nie überschreiben.
+
+   **Ein Verfahren, nicht mehrere.** Wartende Aufrufer-Schranken
+   („Formular erst mounten, wenn geladen") gab es früher parallel dazu;
+   sie sind entfernt. Ein gemeinsam genutztes Formular muss ausdrücklich
+   erfahren, welchen Fall es bedient — siehe `PersonFormMode` in
+   `features/people/components/person-form.tsx`: „anlegen" hat gar kein
+   Feld für einen Datensatz, „bearbeiten" hat eines, das `null` sein darf,
+   solange geladen wird. Standardwerte wie `initialName = ''` sind genau
+   deshalb verboten: Sie machen „lädt noch" von „legt frisch an"
+   ununterscheidbar.
+
+   **Letztes Netz in der Datenschicht.** `updateChild` und `updatePerson`
+   weisen einen leeren Pflichtnamen ab. Ein leerer Name ist nie eine
+   gültige Absicht und zugleich das zuverlässigste Kennzeichen eines
+   Formulars, das ohne Laden gespeichert hat. Ein pauschales „alle Felder
+   leer"-Verbot wäre dagegen falsch: Einzelne optionale Werte zu leeren
+   ist eine legitime Korrektur.
 
 ## Verifizierte Fallstricke — nicht erneut hineinlaufen
 

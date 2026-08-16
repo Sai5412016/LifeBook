@@ -18,7 +18,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
-import { BigButton, Chip, TextField, useUiColors } from '@/ui';
+import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 import { editDiaper, logDiaper, softDeleteDiaper, useDiapersOfDay } from '../repository';
 import type { DiaperEditInput } from '../repository';
@@ -299,13 +299,28 @@ function DiaperEditPanel({
   onSave: (input: DiaperEditInput) => void;
   onDelete: () => void;
 }) {
-  const [time, setTime] = useState(formatTimeLabel(diaper.occurred_at, diaper.tz));
-  const [kind, setKind] = useState<DiaperKind>(diaper.kind);
-  const [consistency, setConsistency] = useState<DiaperConsistency | null>(diaper.consistency);
-  const [color, setColor] = useState<DiaperColor | null>(diaper.color);
-  const [leaked, setLeaked] = useState(diaper.leaked === 1);
+  const [time, setTime] = useState('');
+  const [kind, setKind] = useState<DiaperKind>('wet');
+  const [consistency, setConsistency] = useState<DiaperConsistency | null>(null);
+  const [color, setColor] = useState<DiaperColor | null>(null);
+  const [leaked, setLeaked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { dangerText } = useUiColors();
+
+  // Architekturregel 9 — gleiche Begründung wie in Füttern's FeedEditPanel:
+  // die Liste unter dem Panel bleibt antippbar, ein Wechsel auf eine andere
+  // Zeile behält sonst die Werte der vorherigen (React baut dieselbe
+  // Instanz weiter, `useState` läuft nicht erneut), und editDiaper schreibt
+  // Uhrzeit, Art, Konsistenz, Farbe und "ausgelaufen" gemeinsam.
+  const hydrate = useCallback((loaded: DiaperRow) => {
+    setTime(formatTimeLabel(loaded.occurred_at, loaded.tz));
+    setKind(loaded.kind);
+    setConsistency(loaded.consistency);
+    setColor(loaded.color);
+    setLeaked(loaded.leaked === 1);
+    setError(null);
+  }, []);
+  useHydrateOnce(diaper, diaper.id, hydrate);
 
   const handleSave = () => {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {

@@ -114,12 +114,25 @@ export type UpdatePersonInput = {
   metToUtcIso: string | null;
 };
 
-/** Applies an edit from the person form. Does not touch `photo_key` — see `setPersonPhotoKey`. */
+/**
+ * Applies an edit from the person form. Does not touch `photo_key` — see
+ * `setPersonPhotoKey`.
+ *
+ * LETZTES NETZ (2026-08-17, Architekturregel 9): identisch zu
+ * `household/repository.ts#updateChild` — ein leerer Name ist nie eine
+ * gültige Absicht und zugleich das Kennzeichen eines Formulars, das
+ * gespeichert hat, ohne geladen zu haben. Greift unabhängig von der
+ * Sperre in der Oberfläche.
+ */
 export async function updatePerson(
   db: AbstractPowerSyncDatabase,
   personId: string,
   input: UpdatePersonInput,
 ): Promise<void> {
+  if (input.name.trim().length === 0) {
+    throw new Error('people: Person ohne Namen kann nicht gespeichert werden');
+  }
+
   await db.execute(
     `UPDATE people
         SET name = ?, role = ?, note = ?, met_from = ?, met_to = ?, updated_at = ?
