@@ -314,6 +314,21 @@ Bei jeder Änderung an `app.json` oder an der Plugin-Liste zusätzlich
 lesbare Konfiguration ausgeben. Das prüft in Sekunden denselben Schritt, an
 dem `eas build` sonst erst nach der Build-Warteschlange scheitert (Fallstrick 8).
 
+## Wann etwas fertig ist
+
+`STATUS: fertig` darf nur gemeldet werden, wenn die **Definition of Done**
+in `SKILL.md` für den jeweiligen Arbeitstyp (Feature, Release, Bugfix,
+Meilenstein „Umsatz") erfüllt ist. Ist auch nur ein Kriterium offen, lautet
+die Meldung `STATUS: blockiert`, und das offene Kriterium steht wörtlich
+unter `OFFEN:`.
+
+Sauberes `tsc`, grüne Tests und ein unveränderter Fingerabdruck sind
+Voraussetzung, nicht Beweis — sie sagen, dass nichts kaputt ist, nicht dass
+etwas fertig ist. Kriterien, die nur auf einem echten Gerät oder in einer
+fremden Konsole prüfbar sind (Gerätetest, Play Console, Google-Group),
+kann eine Sitzung nicht selbst abhaken: Sie werden als offen gemeldet, nie
+stillschweigend als erfüllt angenommen.
+
 ## Berichtsformat — am Ende JEDER Aufgabe ausgeben
 
 ```
