@@ -6,9 +6,11 @@ import {
   DEVICE_LIMIT_CHOICES,
   SHARE_DISCLOSURE_TEXT,
   buildShareLink,
+  describeDeviceFromUserAgent,
   describeShareState,
   describeSupabaseError,
   diffPhotoSelection,
+  formatShareDeviceName,
   formatDeviceCountLabel,
   formatDeviceSeenLabel,
   formatPhotoCountLabel,
@@ -236,5 +238,113 @@ describe('describeSupabaseError', () => {
 
   it('falls back to the message alone without a code', () => {
     expect(describeSupabaseError({ message: 'nope' })).toBe('nope');
+  });
+});
+
+/**
+ * Echte User-Agent-Zeichenketten, keine erfundenen — die Fallen dieser
+ * Funktion stecken genau in den Kompatibilitätsangaben, die echte Browser
+ * mitschicken (siehe den Kommentar über PLATFORM_PATTERNS in logic.ts).
+ */
+const UA = {
+  iphoneSafari:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+  iphoneChrome:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1',
+  ipadSafari:
+    'Mozilla/5.0 (iPad; CPU OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+  androidChrome:
+    'Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  androidSamsung:
+    'Mozilla/5.0 (Linux; Android 13; SM-A515F) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0.0.0 Mobile Safari/537.36',
+  windowsChrome:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  windowsEdge:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.2210.91',
+  windowsFirefox: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+  macSafari:
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+};
+
+describe('describeDeviceFromUserAgent — die Verwechslungsfallen', () => {
+  it('nennt ein iPhone nicht "Mac", obwohl der User-Agent "like Mac OS X" enthält', () => {
+    expect(describeDeviceFromUserAgent(UA.iphoneSafari)).toBe('iPhone · Safari');
+  });
+
+  it('nennt ein Android-Handy nicht "Linux", obwohl der User-Agent mit "Linux;" beginnt', () => {
+    expect(describeDeviceFromUserAgent(UA.androidChrome)).toBe('Android · Chrome');
+  });
+
+  it('nennt Chrome nicht "Safari", obwohl der User-Agent "Safari/537.36" enthält', () => {
+    expect(describeDeviceFromUserAgent(UA.windowsChrome)).toBe('Windows · Chrome');
+  });
+
+  it('nennt Edge nicht "Chrome", obwohl der User-Agent "Chrome/120" enthält', () => {
+    expect(describeDeviceFromUserAgent(UA.windowsEdge)).toBe('Windows · Edge');
+  });
+
+  it('nennt Samsung Internet nicht "Chrome", obwohl der User-Agent "Chrome/115" enthält', () => {
+    expect(describeDeviceFromUserAgent(UA.androidSamsung)).toBe('Android · Samsung Internet');
+  });
+});
+
+describe('describeDeviceFromUserAgent — die übrigen üblichen Geräte', () => {
+  it('erkennt ein iPad', () => {
+    expect(describeDeviceFromUserAgent(UA.ipadSafari)).toBe('iPad · Safari');
+  });
+
+  it('erkennt Chrome auf dem iPhone an "CriOS"', () => {
+    expect(describeDeviceFromUserAgent(UA.iphoneChrome)).toBe('iPhone · Chrome');
+  });
+
+  it('erkennt Firefox unter Windows', () => {
+    expect(describeDeviceFromUserAgent(UA.windowsFirefox)).toBe('Windows · Firefox');
+  });
+
+  it('erkennt Safari auf dem Mac', () => {
+    expect(describeDeviceFromUserAgent(UA.macSafari)).toBe('Mac · Safari');
+  });
+});
+
+describe('describeDeviceFromUserAgent — wenn nichts zu erkennen ist', () => {
+  it('gibt null zurück statt zu raten', () => {
+    expect(describeDeviceFromUserAgent('irgendein Bot ohne alles')).toBeNull();
+  });
+
+  it('gibt null für fehlende, leere und nur aus Leerzeichen bestehende Angaben zurück', () => {
+    expect(describeDeviceFromUserAgent(null)).toBeNull();
+    expect(describeDeviceFromUserAgent(undefined)).toBeNull();
+    expect(describeDeviceFromUserAgent('')).toBeNull();
+    expect(describeDeviceFromUserAgent('   ')).toBeNull();
+  });
+
+  it('nennt allein das System, wenn der Browser unbekannt ist', () => {
+    expect(describeDeviceFromUserAgent('Mozilla/5.0 (Windows NT 10.0) EigenerClient/1.0')).toBe('Windows');
+  });
+
+  it('nennt allein den Browser, wenn das System unbekannt ist', () => {
+    expect(describeDeviceFromUserAgent('Firefox/121.0')).toBe('Firefox');
+  });
+});
+
+describe('formatShareDeviceName', () => {
+  it('nimmt ein selbst vergebenes Label immer vorrangig', () => {
+    expect(formatShareDeviceName('Omas Tablet', UA.androidChrome)).toBe('Omas Tablet');
+  });
+
+  it('leitet aus dem User-Agent ab, wenn kein Label gesetzt ist', () => {
+    expect(formatShareDeviceName(null, UA.iphoneSafari)).toBe('iPhone · Safari');
+  });
+
+  it('behandelt ein Label aus Leerzeichen wie keines', () => {
+    expect(formatShareDeviceName('   ', UA.macSafari)).toBe('Mac · Safari');
+  });
+
+  it('fällt auf den Platzhalter zurück, wenn beides fehlt', () => {
+    expect(formatShareDeviceName(null, null)).toBe('Unbenanntes Gerät');
+  });
+
+  it('fällt auf den Platzhalter zurück, wenn der User-Agent nichts hergibt', () => {
+    expect(formatShareDeviceName(null, 'unlesbar')).toBe('Unbenanntes Gerät');
   });
 });

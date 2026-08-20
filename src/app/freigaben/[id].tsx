@@ -18,6 +18,7 @@ import {
   buildShareLink,
   describeShareState,
   formatDeviceSeenLabel,
+  formatShareDeviceName,
   formatDeleteConfirmation,
   formatPhotoCountLabel,
   formatRevokeConfirmation,
@@ -97,7 +98,8 @@ export default function FreigabeDetailScreen() {
   };
 
   const handleRemoveDevice = (device: ShareDeviceRow) => {
-    Alert.alert('Gerät entfernen?', `„${device.label ?? 'Unbenanntes Gerät'}" verliert damit den Zugriff.`, [
+    const deviceName = formatShareDeviceName(device.label, device.user_agent);
+    Alert.alert('Gerät entfernen?', `„${deviceName}" verliert damit den Zugriff.`, [
       { text: 'Abbrechen', style: 'cancel' },
       {
         text: 'Entfernen',
@@ -272,7 +274,9 @@ export default function FreigabeDetailScreen() {
               devices.map((device) => (
                 <ThemedView key={device.id} type="backgroundElement" style={styles.deviceRow}>
                   <View style={styles.deviceInfo}>
-                    <ThemedText type="small">{device.label ?? 'Unbenanntes Gerät'}</ThemedText>
+                    <ThemedText type="small">
+                      {formatShareDeviceName(device.label, device.user_agent)}
+                    </ThemedText>
                     <ThemedText type="small" themeColor="textSecondary">
                       {formatDeviceSeenLabel(device.first_seen_at, device.last_seen_at, deviceTimeZone())}
                     </ThemedText>

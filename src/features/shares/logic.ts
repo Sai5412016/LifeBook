@@ -187,6 +187,92 @@ export function formatDeviceSeenLabel(firstSeenAtUtcIso: string, lastSeenAtUtcIs
   return `Erster Zugriff: ${format(firstSeenAtUtcIso)}\nLetzter Zugriff: ${format(lastSeenAtUtcIso)}`;
 }
 
+/* ────────────────────────────── Gerätename aus dem User-Agent (2026-08-18) ────────────────────────────── */
+
+/**
+ * WARUM DIE REIHENFOLGE HIER ENTSCHEIDEND IST
+ * --------------------------------------------
+ * User-Agent-Zeichenketten enthalten aus Kompatibilitätsgründen absichtlich
+ * die Namen ANDERER Systeme und Browser. Wer zuerst auf das Naheliegende
+ * prüft, bekommt systematisch die falsche Antwort:
+ *  - Ein iPhone meldet „like Mac OS X" — Mac zuerst geprüft, und jedes
+ *    iPhone hieße „Mac".
+ *  - Android meldet „Linux; Android 14" — Linux zuerst, und jedes
+ *    Android-Handy hieße „Linux".
+ *  - Chrome meldet „… Chrome/120 … Safari/537.36" — Safari zuerst, und
+ *    jeder Chrome hieße „Safari".
+ *  - Edge meldet „… Chrome/120 … Edg/120", Samsung Internet meldet
+ *    „… Chrome/… SamsungBrowser/23" — Chrome zuerst, und beide hießen
+ *    „Chrome".
+ * Beide Listen sind deshalb bewusst geordnet, das erste Muster gewinnt.
+ * Die Tests decken genau diese Verwechslungen ab.
+ */
+const PLATFORM_PATTERNS: { pattern: RegExp; name: string }[] = [
+  { pattern: /iPhone/i, name: 'iPhone' },
+  { pattern: /iPad/i, name: 'iPad' },
+  { pattern: /iPod/i, name: 'iPod' },
+  { pattern: /Android/i, name: 'Android' },
+  { pattern: /CrOS/i, name: 'Chromebook' },
+  { pattern: /Windows/i, name: 'Windows' },
+  { pattern: /Macintosh|Mac OS X/i, name: 'Mac' },
+  { pattern: /Linux/i, name: 'Linux' },
+];
+
+const BROWSER_PATTERNS: { pattern: RegExp; name: string }[] = [
+  { pattern: /Edg(?:iOS|A|e)?\//i, name: 'Edge' },
+  { pattern: /SamsungBrowser\//i, name: 'Samsung Internet' },
+  { pattern: /OPR\/|Opera/i, name: 'Opera' },
+  { pattern: /Firefox\/|FxiOS\//i, name: 'Firefox' },
+  { pattern: /CriOS\/|Chrome\/|Chromium\//i, name: 'Chrome' },
+  { pattern: /Safari\//i, name: 'Safari' },
+];
+
+const matchFirst = (userAgent: string, patterns: { pattern: RegExp; name: string }[]): string | null =>
+  patterns.find((entry) => entry.pattern.test(userAgent))?.name ?? null;
+
+/**
+ * Ein kurzer, für Eltern lesbarer Name aus dem User-Agent eines
+ * Gastgeräts — „iPhone · Safari", „Windows · Chrome". Zweck ist nur das
+ * Wiedererkennen in der Geräteliste einer Freigabe („welches davon ist
+ * Omas Tablet?"), nicht eine genaue Geräteerkennung: Version, Modellcode
+ * und Aufbau bleiben bewusst weg. Ein Modellcode wie „SM-S911B" steht zwar
+ * im Android-User-Agent, sagt aber niemandem etwas.
+ *
+ * Gibt `null` zurück, wenn sich weder System noch Browser erkennen lassen
+ * — dann hat der Aufrufer nichts Besseres als seinen eigenen Platzhalter,
+ * und eine geratene Angabe wäre schlechter als gar keine.
+ */
+export function describeDeviceFromUserAgent(userAgent: string | null | undefined): string | null {
+  if (!userAgent || userAgent.trim().length === 0) {
+    return null;
+  }
+
+  const platform = matchFirst(userAgent, PLATFORM_PATTERNS);
+  const browser = matchFirst(userAgent, BROWSER_PATTERNS);
+
+  if (platform && browser) {
+    return `${platform} · ${browser}`;
+  }
+  return platform ?? browser;
+}
+
+/**
+ * Der Name, der in der Geräteliste einer Freigabe steht. Ein selbst
+ * vergebenes `label` gewinnt immer — es ist das Einzige, was ein Mensch
+ * bewusst gesetzt hat. Sonst der abgeleitete Kurzname, und erst wenn auch
+ * der nicht zu ermitteln ist, der Platzhalter.
+ */
+export function formatShareDeviceName(
+  label: string | null | undefined,
+  userAgent: string | null | undefined,
+): string {
+  const trimmedLabel = label?.trim();
+  if (trimmedLabel) {
+    return trimmedLabel;
+  }
+  return describeDeviceFromUserAgent(userAgent) ?? 'Unbenanntes Gerät';
+}
+
 export const DEVICE_LIMIT_CHOICES = [1, 3, 5, 10, 20] as const;
 export const DEFAULT_DEVICE_LIMIT = 5;
 
