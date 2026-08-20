@@ -134,8 +134,11 @@ function gallery(res, data) {
     body += '<p class="sub">Für dieses Album sind noch keine Fotos freigegeben.</p>';
   }
 
+  // neueste zuerst, die Schnittstelle liefert aufsteigend
+  const ordered = photos.slice().reverse();
+
   let lastDay = '';
-  for (const photo of photos) {
+  for (const photo of ordered) {
     const day = dayFormatter.format(new Date(photo.occurredAt));
     if (day !== lastDay) {
       body += '<p class="day">' + escapeHtml(day)
