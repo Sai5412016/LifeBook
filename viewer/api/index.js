@@ -87,6 +87,8 @@ const STYLE = `
   figcaption { margin-top:8px; font-size:.8rem; }
   figcaption a { color:#E9613A; text-decoration:none; }
   .note { display:block; color:#3A2E26; font-size:.95rem; margin-bottom:4px; }
+  .fresh { background:#fff; border-left:4px solid #E9613A; border-radius:10px;
+    padding:12px 14px; margin:0 0 24px; font-weight:600; }
   .foot { margin-top:48px; font-size:.82rem; color:#9A8B7E; text-align:center; }
 `;
 
@@ -134,7 +136,16 @@ function gallery(res, data) {
     body += '<p class="sub">Für dieses Album sind noch keine Fotos freigegeben.</p>';
   }
 
-  // neueste zuerst, die Schnittstelle liefert aufsteigend
+  // Only shown to a device that has been here before; on a first visit
+  // everything is new and the line would be noise.
+  if (data.newSince > 0) {
+    body += '<p class="fresh">' + data.newSince
+      + (data.newSince === 1 ? ' neues Foto' : ' neue Fotos')
+      + ' seit deinem letzten Besuch.</p>';
+  }
+
+  // Newest first (2026-08-16, on request): the album is looked at again and
+  // again, and what is new should be on top. The API delivers ascending order.
   const ordered = photos.slice().reverse();
 
   let lastDay = '';
