@@ -130,8 +130,25 @@ async function buildPhotoList(share: ShareRow) {
   });
 }
 
-async function okResponse(share: ShareRow, deviceSecret: string) {
+async function countAddedSince(shareId: string, since: string | null): Promise<number> {
+  if (!since) return 0;
+  const { count } = await admin
+    .from('share_photos')
+    .select('photo_id', { count: 'exact', head: true })
+    .eq('share_id', shareId)
+    .gt('added_at', since);
+  return count ?? 0;
+}
+
+async function okResponse(
+  share: ShareRow,
+  deviceSecret: string,
+  previousSeenAt: string | null,
+) {
   const photos = await buildPhotoList(share);
+  // Counted BEFORE last_seen_at is refreshed below — afterwards it would
+  // always be zero.
+  const newSince = await countAddedSince(share.id, previousSeenAt);
   const now = new Date().toISOString();
   // Bookkeeping last and failures ignored: it must never keep a legitimate
   // visitor out of the album.
@@ -149,6 +166,7 @@ async function okResponse(share: ShareRow, deviceSecret: string) {
     name: share.name,
     allowDownload: share.allow_download,
     deviceSecret,
+    newSince,
     photos,
   });
 }
@@ -169,9 +187,11 @@ Deno.serve(async (request: Request) => {
   // Known device? Straight in.
   if (body.deviceSecret) {
     const { data: device } = await admin
-      .from('share_devices').select('id')
+      .from('share_devices').select('id, last_seen_at')
       .eq('share_id', share.id).eq('device_secret', body.deviceSecret).limit(1);
-    if (device && device.length > 0) return await okResponse(share, body.deviceSecret);
+    if (device && device.length > 0) {
+      return await okResponse(share, body.deviceSecret, device[0].last_seen_at ?? null);
+    }
   }
 
   if (!body.code) return json({ status: 'code_required', name: share.name });
@@ -212,5 +232,6 @@ Deno.serve(async (request: Request) => {
     .update({ failed_code_attempts: 0, locked_until: null })
     .eq('id', share.id);
 
-  return await okResponse(share, newSecret);
+  // First visit of this device: everything is new, so no counter.
+  return await okResponse(share, newSecret, null);
 });
