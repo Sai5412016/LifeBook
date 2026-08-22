@@ -267,6 +267,30 @@ JavaScript kommt kein Fehler an.
 davon, wo sie liegt. Und: Ein natives Modul, das schweigt, ist kein Beweis
 dafür, dass nichts passiert ist.
 
+### 11. PowerSync-Sync-Rules können keine JOINs
+
+Am 22.08.2026 gegen die PowerSync-Dokumentation und die Live-Datenbank
+geprüft, bevor die erste Zeile in `milestone_photos` existierte: Eine
+Sync-Rules-Zeile der Form
+
+```yaml
+- SELECT mp.* FROM milestone_photos mp JOIN milestones m ON m.id = mp.milestone_id
+   WHERE m.household_id = bucket.household_id
+```
+
+wäre beim Deploy gescheitert — JOINs sind laut PowerSync „Supported in Sync
+Streams only. Not available in Sync Rules". Eine Verknüpfungstabelle ohne
+eigene `household_id` kann ihre Sync-Rules-Zeile deshalb nicht über die
+Elterntabelle herleiten.
+
+→ Jede synchronisierte Tabelle braucht eine einzelne `id`-Spalte (PowerSync
+verlangt sie) UND ihre eigene `household_id`-Spalte, auch wenn sie fachlich
+nur über eine andere Tabelle zu einem Haushalt gehört. Verknüpfungstabellen
+werden dafür denormalisiert: `household_id` direkt in die Tabelle
+schreiben, nicht aus der Elternzeile joinen. Jeder Schreibvorgang muss
+dieses `household_id` explizit mitgeben — siehe
+`features/events/repository.ts#replaceEventPhotos` für das Muster.
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste

@@ -25,9 +25,15 @@ export type EventRow = {
   photo_id: string | null;
 };
 
-/** One row of `public.milestone_photos` — one photo linked to one event, in display order. */
+/**
+ * One row of `public.milestone_photos` — one photo linked to one event, in
+ * display order. `household_id` is denormalized directly onto this table
+ * (2026-08-22: PowerSync Sync Rules cannot JOIN against `milestones` to
+ * derive it, see repository.ts's comment on `replaceEventPhotos`).
+ */
 export type EventPhotoRow = {
   id: string;
+  household_id: string;
   milestone_id: string;
   photo_id: string;
   sort_index: number;

@@ -12,7 +12,10 @@
  *
  * `milestone_photos` links photos to an event, in display order
  * (`sort_index`). Unlike `shares`/`share_photos`, this table DOES go
- * through PowerSync — see core/db/schema.ts's comment on why.
+ * through PowerSync — see core/db/schema.ts's comment on why. Its
+ * `household_id` is a plain denormalized column (not derived via a JOIN
+ * against `milestones` — Sync Rules cannot express that), so every write
+ * to it below carries the owning event's `household_id` explicitly.
  */
 
 import { useQuery } from '@powersync/react-native';
@@ -73,7 +76,7 @@ export function useEventById(eventId: string | undefined): { event: EventRow | u
 /** Reactive: every photo linked to one event, in display order. */
 export function useEventPhotos(eventId: string | undefined): { photoIds: string[]; isLoading: boolean } {
   const { data, isLoading } = useQuery<EventPhotoRow>(
-    `SELECT id, milestone_id, photo_id, sort_index, added_at
+    `SELECT id, household_id, milestone_id, photo_id, sort_index, added_at
        FROM milestone_photos
       WHERE milestone_id = ?
       ORDER BY sort_index ASC`,
@@ -82,10 +85,21 @@ export function useEventPhotos(eventId: string | undefined): { photoIds: string[
   return { photoIds: (data ?? []).map((row) => row.photo_id), isLoading };
 }
 
-/** Replaces `milestone_photos` for one event with `photoIds` (in order) and updates the event's own `photo_id` title-image column to match, all in one transaction. */
+/**
+ * Replaces `milestone_photos` for one event with `photoIds` (in order) and
+ * updates the event's own `photo_id` title-image column to match, all in
+ * one transaction. `householdId` is always the OWNING event's own
+ * `household_id` (never re-derived from anything else) — required since
+ * 2026-08-22: `milestone_photos.household_id` is a plain NOT NULL column
+ * now, not read via a JOIN against `milestones` any more (Sync Rules
+ * cannot express that JOIN — see core/db/schema.ts's comment on this table,
+ * CLAUDE.md Fallstrick 11). Omitting it here would fail the Supabase
+ * upload with a NOT NULL violation.
+ */
 async function replaceEventPhotos(
   tx: Transaction,
   eventId: string,
+  householdId: string,
   photoIds: readonly string[],
 ): Promise<string | null> {
   const plan = planEventPhotoOrder(photoIds);
@@ -94,9 +108,9 @@ async function replaceEventPhotos(
   await tx.execute('DELETE FROM milestone_photos WHERE milestone_id = ?', [eventId]);
   for (const entry of plan.photos) {
     await tx.execute(
-      `INSERT INTO milestone_photos (id, milestone_id, photo_id, sort_index, added_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [newId(), eventId, entry.photoId, entry.sortIndex, now],
+      `INSERT INTO milestone_photos (id, household_id, milestone_id, photo_id, sort_index, added_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [newId(), householdId, eventId, entry.photoId, entry.sortIndex, now],
     );
   }
   return plan.titlePhotoId;
@@ -140,7 +154,7 @@ export async function addEvent(db: AbstractPowerSyncDatabase, input: AddEventInp
   const now = nowUtcIso();
 
   await db.writeTransaction(async (tx) => {
-    const titlePhotoId = await replaceEventPhotos(tx, id, input.photoIds);
+    const titlePhotoId = await replaceEventPhotos(tx, id, input.householdId, input.photoIds);
     await tx.execute(
       `INSERT INTO milestones (
          id, household_id, child_id, occurred_at, tz, local_date, created_by,
@@ -202,7 +216,7 @@ export async function updateEvent(
   const now = nowUtcIso();
 
   await db.writeTransaction(async (tx) => {
-    const titlePhotoId = await replaceEventPhotos(tx, eventId, input.photoIds);
+    const titlePhotoId = await replaceEventPhotos(tx, eventId, event.household_id, input.photoIds);
     await tx.execute(
       `UPDATE milestones
           SET title = ?, note = ?, occurred_at = ?, local_date = ?, photo_id = ?, updated_at = ?

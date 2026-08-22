@@ -243,11 +243,20 @@ function buildAppSchema() {
   // PowerSync — an event and its photos are ordinary household data, not a
   // guest-facing table — so it needs REPLICA IDENTITY FULL like every other
   // synced table (CLAUDE.md Fallstrick 6; already set on the live table,
-  // see the session report). No `household_id` of its own: the owning
-  // milestone's `household_id` is what sync-rules.yaml filters on via a
-  // JOIN, since this table has no household of its own to key on directly.
+  // see the session report).
+  //
+  // 2026-08-22, CORRECTED: originally had no `household_id` of its own,
+  // routed via a JOIN against `milestones` in sync-rules.yaml. Sync Rules
+  // do not support JOINs at all ("Supported in Sync Streams only. Not
+  // available in Sync Rules" — checked against the PowerSync docs and the
+  // live project) — that JOIN would have failed to deploy. Caught before
+  // any row existed, so the live table was changed instead of migrated:
+  // `household_id` is now a plain denormalized column, written directly
+  // from the same source as the owning `milestones` row's own
+  // `household_id` (see repository.ts). CLAUDE.md Fallstrick 11.
   const milestone_photos = new Table(
     {
+      household_id: column.text,
       milestone_id: column.text,
       photo_id: column.text,
       sort_index: column.integer,

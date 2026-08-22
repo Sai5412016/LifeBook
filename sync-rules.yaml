@@ -29,11 +29,7 @@ bucket_definitions:
       - SELECT * FROM vaccinations        WHERE household_id = bucket.household_id
       - SELECT * FROM solid_foods         WHERE household_id = bucket.household_id
       - SELECT * FROM milestones          WHERE household_id = bucket.household_id
-      # milestone_photos has no household_id of its own (junction table) —
-      # routed via its owning milestone instead. 2026-08-22.
-      - SELECT milestone_photos.* FROM milestone_photos
-          INNER JOIN milestones ON milestones.id = milestone_photos.milestone_id
-         WHERE milestones.household_id = bucket.household_id
+      - SELECT * FROM milestone_photos    WHERE household_id = bucket.household_id
       - SELECT * FROM notes               WHERE household_id = bucket.household_id
       - SELECT * FROM photos              WHERE household_id = bucket.household_id
       - SELECT * FROM people              WHERE household_id = bucket.household_id
