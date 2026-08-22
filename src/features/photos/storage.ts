@@ -23,6 +23,7 @@ import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
 import { removePhotoFromAllEvents } from '@/features/events/repository';
 import { removePhotoFromAllShares } from '@/features/shares/repository';
+import { removePhotoFromAllRelatives } from '@/features/tree/repository';
 
 import {
   PHOTO_BACKUP_ALBUM_NAME,
@@ -770,6 +771,11 @@ export type PermanentlyDeletablePhoto = Pick<
  *    as step 4, except `milestone_photos` IS a normal synced table (see
  *    features/events/repository.ts#removePhotoFromAllEvents), so this one
  *    runs against the local PowerSync database, not Supabase directly.
+ * 6. Any `relative_photos` entries referencing this photo — 2026-08-22,
+ *    same reasoning and same local-database path as step 5 (see
+ *    features/tree/repository.ts#removePhotoFromAllRelatives). Wired in
+ *    ahead of that feature's Stufe 2 (nothing writes a `relative_photos`
+ *    row yet), so this step is currently always a no-op in practice.
  */
 export async function permanentlyDeletePhoto(
   db: AbstractPowerSyncDatabase,
@@ -780,6 +786,7 @@ export async function permanentlyDeletePhoto(
   await hardDeletePhoto(db, photo.id);
   await removePhotoFromAllShares(photo.id);
   await removePhotoFromAllEvents(db, photo.id);
+  await removePhotoFromAllRelatives(db, photo.id);
 }
 
 export type TrashSweepResult = { removed: number; failed: number };

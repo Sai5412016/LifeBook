@@ -291,6 +291,31 @@ schreiben, nicht aus der Elternzeile joinen. Jeder Schreibvorgang muss
 dieses `household_id` explizit mitgeben — siehe
 `features/events/repository.ts#replaceEventPhotos` für das Muster.
 
+### 12. PowerSync lädt die Warteschlange in aufgezeichneter Reihenfolge hoch
+
+Am 22.08.2026 gegen die Live-Umgebung gemessen: In `addEvent`
+(`features/events/repository.ts`) stand die `milestone_photos`-Zeile VOR
+der `milestones`-Zeile. Beide liefen in derselben Transaktion, aber
+PowerSync lädt die Schreiboperationen eines Geräts an Supabase in der
+Reihenfolge hoch, in der sie LOKAL AUSGEFÜHRT wurden — nicht nach
+Transaktion gruppiert. Der erste Upload-Versuch war deshalb ein
+`milestone_photos`-Insert, dessen `milestone_id` in Postgres noch gar
+nicht existierte: ein Fremdschlüssel-409, den PowerSync alle 5 Sekunden
+endlos wiederholte. Kein einziger POST auf `/rest/v1/milestones` kam an —
+das Ereignis wurde nie angelegt — und der Stau blockierte JEDEN weiteren
+Upload dieses Geräts, auch Fotos und Alltagseinträge, die mit dem
+Ereignis nichts zu tun hatten.
+
+→ Elternzeile immer VOR Kindzeile schreiben, innerhalb derselben
+Transaktion (siehe `addEvent`s eigener Kommentar zur Schreibreihenfolge).
+Und, präziser als das: zwischen zwei synchronisierten Tabellen am besten
+gar keinen Fremdschlüssel anlegen, wenn eine davon aus der anderen heraus
+neu entsteht — ein hängengebliebener Stapel wegen eines einzigen
+Ordnungsfehlers ist teurer als der Verlust der Datenbank-Garantie. Genau
+deshalb tragen `relatives`, `relative_unions` und `relative_photos`
+absichtlich KEINE Fremdschlüssel zueinander (nur `household_id` hat einen)
+— siehe `core/db/schema.ts`s Kommentar auf `relatives`.
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste

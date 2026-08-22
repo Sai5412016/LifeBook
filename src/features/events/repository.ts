@@ -137,6 +137,25 @@ export type AddEventInput = {
  * unparseable date/time — the same "letztes Netz" the data layer keeps for
  * every other required field in this project (people/repository.ts#addPerson's
  * sibling functions), independent of whatever validation the form already did.
+ *
+ * WRITE ORDER (2026-08-22, Fallstrick 12): the `milestones` row is inserted
+ * FIRST, `milestone_photos` SECOND — both inside the one transaction below,
+ * but PowerSync uploads a device's queued operations to Supabase in the
+ * order they were LOCALLY EXECUTED, not grouped by transaction. With the
+ * order reversed (as this function originally had it), the very first
+ * upload attempt was a `milestone_photos` insert whose `milestone_id`
+ * doesn't exist in Postgres yet — a foreign-key 409 that PowerSync retries
+ * forever, wedging EVERY later upload from this device behind it (photos,
+ * Alltag-Einträge, everything), confirmed against the live environment.
+ * `milestone_photos.milestone_id` has a real `REFERENCES milestones(id)`
+ * foreign key (see core/db/schema.ts's comment on the table), so this
+ * parent-before-child order is load-bearing, not stylistic.
+ *
+ * No automated test guards this: the project has no PowerSync/transaction
+ * mock to assert generated statement ORDER against (every other repository
+ * in this codebase is untested for the same reason — see the session
+ * report). This comment is the documented substitute the task explicitly
+ * allows for that case.
  */
 export async function addEvent(db: AbstractPowerSyncDatabase, input: AddEventInput): Promise<string> {
   const title = normalizeEventTitle(input.title);
@@ -152,9 +171,13 @@ export async function addEvent(db: AbstractPowerSyncDatabase, input: AddEventInp
   const note = normalizeEventNote(input.note ?? '');
   const id = newId();
   const now = nowUtcIso();
+  // Same title-image rule `replaceEventPhotos` applies below, computed
+  // separately here so the `milestones` INSERT can carry `photo_id` right
+  // away instead of a second UPDATE after it — the parent row still goes
+  // first either way (see this function's own doc comment).
+  const titlePhotoId = planEventPhotoOrder(input.photoIds).titlePhotoId;
 
   await db.writeTransaction(async (tx) => {
-    const titlePhotoId = await replaceEventPhotos(tx, id, input.householdId, input.photoIds);
     await tx.execute(
       `INSERT INTO milestones (
          id, household_id, child_id, occurred_at, tz, local_date, created_by,
@@ -163,6 +186,7 @@ export async function addEvent(db: AbstractPowerSyncDatabase, input: AddEventInp
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?, ?)`,
       [id, input.householdId, input.childId, occurredAtUtcIso, input.tz, localDate, input.userId, now, now, note, titlePhotoId, title],
     );
+    await replaceEventPhotos(tx, id, input.householdId, input.photoIds);
   });
 
   return id;
@@ -192,6 +216,14 @@ export type UpdateEventInput = {
  * LETZTES NETZ (Architekturregel 9): an empty title is rejected here too,
  * independent of the form's own validation — see
  * `people/repository.ts#updatePerson`'s identical guard.
+ *
+ * NOT SUBJECT TO addEvent's write-order hazard (Fallstrick 12): the
+ * `milestone_photos` rows `replaceEventPhotos` writes below reference
+ * `eventId`, an EXISTING `milestones` row whose own INSERT was already
+ * queued earlier — by an earlier call to `addEvent` — so it always precedes
+ * these operations in the upload queue regardless of statement order
+ * inside this function. There is no new parent row for a child row to
+ * outrun here.
  */
 export async function updateEvent(
   db: AbstractPowerSyncDatabase,

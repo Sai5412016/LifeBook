@@ -45,6 +45,12 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Label>Alltag</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="waterbottle.fill" md="water_bottle" />
       </NativeTabs.Trigger>
+
+      {/* 2026-08-22: Verwandte nach Generation, siehe features/tree. Kein Platz im Auftrag vorgegeben — ans Ende gehängt, statt eine der bestehenden vier Reihenfolgen anzutasten. */}
+      <NativeTabs.Trigger name="stammbaum">
+        <NativeTabs.Trigger.Label>Stammbaum</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="figure.2.and.child.holdinghands" md="family_restroom" />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

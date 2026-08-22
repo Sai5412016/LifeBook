@@ -385,6 +385,95 @@ function buildAppSchema() {
     { indexes: { child_sort: ['child_id', 'sort_index'] } },
   );
 
+  /* ────────────────────────────── Stammbaum (2026-08-22) ────────────────────────────── */
+
+  // Live already created (migration family_tree_tables) — mirrored here
+  // verbatim, see the session report. `mother_id`/`father_id` and
+  // `relative_unions.a_id`/`b_id`/`relative_photos.relative_id` are
+  // DELIBERATELY not real foreign keys, unlike `household_id` on every one
+  // of these tables (CLAUDE.md Fallstrick 12): a real FK between two
+  // synced tables means a child row can outrun its parent row through
+  // PowerSync's upload queue and wedge every later upload from that device
+  // behind a permanent 409 — exactly what happened to
+  // `milestone_photos.milestone_id` before that fix. Parents are still
+  // written before children by convention (repository.ts), just without a
+  // constraint that would turn a queue-ordering bug into a stuck device.
+  const relatives = new Table(
+    {
+      household_id: column.text,
+      // Set only for the ONE relatives row that IS the tracked child
+      // (features/tree/repository.ts#ensureRootRelative) — every other row
+      // (parents, grandparents, …) leaves this NULL.
+      child_id: column.text,
+      given_name: column.text,
+      family_name: column.text,
+      // The name at birth, if it differs from `family_name` (marriage,
+      // adoption, …) — features/tree/logic.ts#displayName shows it in
+      // parentheses only when it's actually different.
+      birth_name: column.text,
+      gender: column.text,
+      // FREE TEXT on purpose ("1923", "März 1944", "12.03.1944") — a
+      // family tree routinely only knows a year or a month, which
+      // core/time's strict ISO/local-date model has no room for. Never
+      // parsed or validated, only displayed (features/tree/logic.ts#lifeLine).
+      born_on: column.text,
+      born_place: column.text,
+      deceased: column.integer, // 0 | 1
+      died_on: column.text, // same free-text contract as born_on
+      died_place: column.text,
+      mother_id: column.text, // NOT a foreign key — see this table's own doc comment
+      father_id: column.text, // NOT a foreign key — see this table's own doc comment
+      // {household_id}/relatives/{relative_id}.jpg in the existing `photos`
+      // bucket — see features/people/identity.ts#buildPersonPhotoKey for
+      // the identical pattern this reuses.
+      photo_key: column.text,
+      note: column.text,
+      sort_index: column.integer,
+      created_by: column.text,
+      created_at: column.text,
+      updated_at: column.text,
+      deleted_at: column.text,
+      source_device_id: column.text,
+    },
+    { indexes: { household_sort: ['household_id', 'sort_index'] } },
+  );
+
+  // Partnerships between two `relatives` rows — kept separate from
+  // `relatives` itself because a person can have more than one (former
+  // partner, remarriage, …), which a pair of columns on `relatives` could
+  // not express.
+  const relative_unions = new Table(
+    {
+      household_id: column.text,
+      a_id: column.text, // NOT a foreign key — see relatives' own doc comment
+      b_id: column.text, // NOT a foreign key — see relatives' own doc comment
+      kind: column.text, // partner | married | divorced | other — default 'partner'
+      since_on: column.text, // free text, same contract as relatives.born_on
+      until_on: column.text,
+      created_by: column.text,
+      created_at: column.text,
+      updated_at: column.text,
+      deleted_at: column.text,
+      source_device_id: column.text,
+    },
+    { indexes: { household: ['household_id'] } },
+  );
+
+  // Junction table: which photos belong to a relative, in display order —
+  // the Stufe 2 photo grid (not built yet, see the task's own scope note).
+  // Same denormalized-`household_id` shape as `milestone_photos`
+  // (CLAUDE.md Fallstrick 11): Sync Rules cannot JOIN it in via `relatives`.
+  const relative_photos = new Table(
+    {
+      household_id: column.text,
+      relative_id: column.text, // NOT a foreign key — see relatives' own doc comment
+      photo_id: column.text,
+      sort_index: column.integer,
+      added_at: column.text,
+    },
+    { indexes: { relative: ['relative_id'], photo: ['photo_id'] } },
+  );
+
   /* ────────────────────────────── Erinnerungen & Einstellungen (§5.5) ────────────────────────────── */
 
   const reminders = new Table({
@@ -431,6 +520,9 @@ function buildAppSchema() {
     photos,
     photo_backups,
     people,
+    relatives,
+    relative_unions,
+    relative_photos,
     reminders,
     user_preferences,
   });
