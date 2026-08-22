@@ -19,10 +19,12 @@ import {
   describeShareState,
   formatDeviceSeenLabel,
   formatShareDeviceName,
+  formatShareDeviceOrigin,
   formatDeleteConfirmation,
   formatPhotoCountLabel,
   formatRevokeConfirmation,
   formatShareMessage,
+  isUnexpectedOrigin,
 } from '@/features/shares/logic';
 import {
   deleteShare,
@@ -271,23 +273,33 @@ export default function FreigabeDetailScreen() {
                 Noch kein Gerät hat den Code eingelöst.
               </ThemedText>
             ) : (
-              devices.map((device) => (
-                <ThemedView key={device.id} type="backgroundElement" style={styles.deviceRow}>
-                  <View style={styles.deviceInfo}>
-                    <ThemedText type="small">
-                      {formatShareDeviceName(device.label, device.user_agent)}
-                    </ThemedText>
-                    <ThemedText type="small" themeColor="textSecondary">
-                      {formatDeviceSeenLabel(device.first_seen_at, device.last_seen_at, deviceTimeZone())}
-                    </ThemedText>
-                  </View>
-                  <Pressable onPress={() => handleRemoveDevice(device)} hitSlop={8} disabled={busy}>
-                    <ThemedText type="linkPrimary" themeColor="dangerText">
-                      Entfernen
-                    </ThemedText>
-                  </Pressable>
-                </ThemedView>
-              ))
+              devices.map((device) => {
+                const origin = formatShareDeviceOrigin(device.geo_country, device.geo_region, device.geo_city);
+                const unexpected = isUnexpectedOrigin(device.geo_country, device.geo_region);
+                return (
+                  <ThemedView key={device.id} type="backgroundElement" style={styles.deviceRow}>
+                    <View style={styles.deviceInfo}>
+                      <ThemedText type="small">
+                        {formatShareDeviceName(device.label, device.user_agent)}
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        {formatDeviceSeenLabel(device.first_seen_at, device.last_seen_at, deviceTimeZone())}
+                      </ThemedText>
+                      {origin ? (
+                        <ThemedText type="small" themeColor={unexpected ? undefined : 'textSecondary'} style={unexpected ? { color: accent } : undefined}>
+                          {origin}
+                          {unexpected ? ' · außerhalb Bayerns' : ''}
+                        </ThemedText>
+                      ) : null}
+                    </View>
+                    <Pressable onPress={() => handleRemoveDevice(device)} hitSlop={8} disabled={busy}>
+                      <ThemedText type="linkPrimary" themeColor="dangerText">
+                        Entfernen
+                      </ThemedText>
+                    </Pressable>
+                  </ThemedView>
+                );
+              })
             )}
           </View>
 

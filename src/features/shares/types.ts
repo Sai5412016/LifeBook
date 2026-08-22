@@ -39,6 +39,15 @@ export type ShareDeviceRow = {
   user_agent: string | null;
   first_seen_at: string;
   last_seen_at: string;
+  /**
+   * Einmalig von der Edge Function `album` aus Vercels Standort-Kopfzeilen
+   * gefüllt, beim Einlösen des Zugangscodes — keine IP wird gespeichert.
+   * NULL bei den zehn Geräten von vor dieser Spalte (Altbestand, kein
+   * Fehler) und bei jedem Aufruf, den Vercel nicht lokalisieren konnte.
+   */
+  geo_country: string | null;
+  geo_region: string | null;
+  geo_city: string | null;
 };
 
 /** A share plus the counts the overview list needs — computed by the repository, not stored. */

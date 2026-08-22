@@ -11,6 +11,7 @@ import {
   describeSupabaseError,
   diffPhotoSelection,
   formatShareDeviceName,
+  formatShareDeviceOrigin,
   formatDeviceCountLabel,
   formatDeviceSeenLabel,
   formatPhotoCountLabel,
@@ -20,6 +21,7 @@ import {
   generateAccessCode,
   generateShareToken,
   isPhotoReadyForShare,
+  isUnexpectedOrigin,
   summarizeShares,
 } from './logic';
 import type { ShareRow } from './types';
@@ -346,5 +348,38 @@ describe('formatShareDeviceName', () => {
 
   it('fällt auf den Platzhalter zurück, wenn der User-Agent nichts hergibt', () => {
     expect(formatShareDeviceName(null, 'unlesbar')).toBe('Unbenanntes Gerät');
+  });
+});
+
+describe('formatShareDeviceOrigin', () => {
+  it('zeigt alle drei Teile, wenn alles da ist', () => {
+    expect(formatShareDeviceOrigin('DE', 'BY', 'Germering')).toBe('Germering, BY, DE');
+  });
+
+  it('kürzt sinnvoll, wenn nur das Land bekannt ist', () => {
+    expect(formatShareDeviceOrigin('DE', null, null)).toBe('DE');
+  });
+
+  it('gibt eine leere Zeichenkette zurück, wenn nichts vorliegt', () => {
+    expect(formatShareDeviceOrigin(null, null, null)).toBe('');
+  });
+});
+
+describe('isUnexpectedOrigin', () => {
+  it('markiert DE/BY nicht als unerwartet', () => {
+    expect(isUnexpectedOrigin('DE', 'BY')).toBe(false);
+  });
+
+  it('markiert DE/HH als unerwartet', () => {
+    expect(isUnexpectedOrigin('DE', 'HH')).toBe(true);
+  });
+
+  it('markiert AT/9 als unerwartet', () => {
+    expect(isUnexpectedOrigin('AT', '9')).toBe(true);
+  });
+
+  it('behandelt fehlende Angaben NICHT als unerwartet — sonst wären alle Altgeräte falsch markiert', () => {
+    expect(isUnexpectedOrigin(null, null)).toBe(false);
+    expect(isUnexpectedOrigin('DE', null)).toBe(false);
   });
 });

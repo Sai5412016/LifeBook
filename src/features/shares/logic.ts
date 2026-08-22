@@ -276,6 +276,45 @@ export function formatShareDeviceName(
 export const DEVICE_LIMIT_CHOICES = [1, 3, 5, 10, 20] as const;
 export const DEFAULT_DEVICE_LIMIT = 5;
 
+/* ────────────────────────────── Herkunft eines Gastgeräts (2026-08-22) ────────────────────────────── */
+
+/**
+ * „Germering, BY, DE" wenn alles da ist, sinnvoll gekürzt bei fehlenden
+ * Teilen, leer wenn nichts vorliegt. Reihenfolge grob nach Menschen, nicht
+ * nach Adressstandard — die Stadt zuerst ist das, was ein Elternteil beim
+ * Überfliegen der Geräteliste tatsächlich interessiert.
+ */
+export function formatShareDeviceOrigin(
+  country: string | null | undefined,
+  region: string | null | undefined,
+  city: string | null | undefined,
+): string {
+  return [city, region, country]
+    .map((part) => part?.trim())
+    .filter((part): part is string => !!part)
+    .join(', ');
+}
+
+/** Der Heimatstandort des Haushalts — siehe Aufgabenbeschreibung vom 2026-08-22. */
+const HOME_COUNTRY = 'DE';
+const HOME_REGION = 'BY';
+
+/**
+ * Nur ein Hinweis, keine Alarmanlage: `true`, sobald Land oder Region
+ * bekannt sind UND von DE/BY abweichen. Fehlende Angaben gelten
+ * ausdrücklich NICHT als unerwartet — sonst wären alle zehn Altgeräte
+ * (NULL/NULL, siehe types.ts) fälschlich markiert.
+ */
+export function isUnexpectedOrigin(
+  country: string | null | undefined,
+  region: string | null | undefined,
+): boolean {
+  if (!country || !region) {
+    return false;
+  }
+  return country.trim().toUpperCase() !== HOME_COUNTRY || region.trim().toUpperCase() !== HOME_REGION;
+}
+
 /* ────────────────────────────── Aufgabe 2: repository-facing pure helpers ────────────────────────────── */
 
 /**
