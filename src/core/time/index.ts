@@ -264,3 +264,35 @@ export const pickerDateToLocalDate = (date: Date): string => {
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+/**
+ * A wall-clock time (HH:mm) as a `Date` carrying today's calendar date with
+ * that time-of-day — the time-only counterpart to `localDateToPickerDate`,
+ * for `@expo/ui`'s `DateTimePicker` in `mode="time"` (2026-08-22:
+ * features/events, whose date needs both a day AND a time, unlike
+ * features/people's day-only "Von"/"Bis"). The calendar date carried is
+ * irrelevant — only `getHours`/`getMinutes` are ever read back by
+ * `pickerDateToLocalTime` — so "today" is as good as any other day and
+ * needs no caller-supplied date to stay pure. Falls back to the current
+ * moment for a malformed input, same as `localDateToPickerDate`.
+ */
+export const localTimeToPickerDate = (time: string): Date => {
+  const now = new Date();
+  const match = time.match(/^(\d{2}):(\d{2})$/);
+  if (!match) {
+    return now;
+  }
+  const [, hour, minute] = match;
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), Number(hour), Number(minute));
+};
+
+/**
+ * Inverse of `localTimeToPickerDate` — reads the `Date` the picker widget
+ * handed back using its LOCAL time getters, matching how the value was
+ * constructed, so the round trip is exact regardless of host timezone.
+ */
+export const pickerDateToLocalTime = (date: Date): string => {
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${hour}:${minute}`;
+};

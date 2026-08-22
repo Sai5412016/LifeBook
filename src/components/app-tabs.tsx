@@ -34,6 +34,12 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      {/* 2026-08-22: besondere Momente mit Titel, Datum, Text und Fotos — zwischen Chronik und Alltag, siehe features/events. */}
+      <NativeTabs.Trigger name="ereignisse">
+        <NativeTabs.Trigger.Label>Ereignisse</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="star.fill" md="star" />
+      </NativeTabs.Trigger>
+
       {/* Formerly "Heute" at route "index" — moved here verbatim (Füttern/Wickeln/Schlafen unchanged) when tab 1 became the child profile. */}
       <NativeTabs.Trigger name="alltag">
         <NativeTabs.Trigger.Label>Alltag</NativeTabs.Trigger.Label>

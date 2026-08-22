@@ -12,7 +12,9 @@ import {
   formatDuration,
   formatTimeLabel,
   localDateToPickerDate,
+  localTimeToPickerDate,
   pickerDateToLocalDate,
+  pickerDateToLocalTime,
   secondsBetween,
 } from './index';
 
@@ -296,5 +298,26 @@ describe('localDateToPickerDate / pickerDateToLocalDate', () => {
 
   it('falls back to the current moment for a malformed input rather than throwing', () => {
     expect(() => localDateToPickerDate('not-a-date')).not.toThrow();
+  });
+});
+
+describe('localTimeToPickerDate / pickerDateToLocalTime', () => {
+  it('round-trips a wall-clock time exactly', () => {
+    const date = localTimeToPickerDate('14:32');
+    expect(pickerDateToLocalTime(date)).toBe('14:32');
+  });
+
+  it('round-trips midnight', () => {
+    const date = localTimeToPickerDate('00:00');
+    expect(pickerDateToLocalTime(date)).toBe('00:00');
+  });
+
+  it('round-trips a single-digit hour/minute with zero-padding', () => {
+    const date = localTimeToPickerDate('05:07');
+    expect(pickerDateToLocalTime(date)).toBe('05:07');
+  });
+
+  it('falls back to the current moment for a malformed input rather than throwing', () => {
+    expect(() => localTimeToPickerDate('not-a-time')).not.toThrow();
   });
 });

@@ -224,9 +224,36 @@ function buildAppSchema() {
       ...eventColumns,
       milestone_key: column.text,
       achieved_at: column.text,
+      // References `photos.id` — the event's title image, always the
+      // first photo of `milestone_photos` below
+      // (features/events/logic.ts#planEventPhotoOrder).
       photo_id: column.text,
+      // 2026-08-22: required title for the new "Ereignisse" tab
+      // (features/events) — `milestone_key`/`achieved_at` predate that
+      // feature and stay unused by it, see that feature's own doc comment.
+      title: column.text,
     },
     { indexes: { child_time: ['child_id', 'occurred_at'] } },
+  );
+
+  /* ────────────────────────────── Ereignisse — Fotos je Ereignis (2026-08-22) ────────────────────────────── */
+
+  // Junction table: which photos belong to a "Ereignis" (milestones row)
+  // and in what order. Unlike shares/share_photos, this DOES go through
+  // PowerSync — an event and its photos are ordinary household data, not a
+  // guest-facing table — so it needs REPLICA IDENTITY FULL like every other
+  // synced table (CLAUDE.md Fallstrick 6; already set on the live table,
+  // see the session report). No `household_id` of its own: the owning
+  // milestone's `household_id` is what sync-rules.yaml filters on via a
+  // JOIN, since this table has no household of its own to key on directly.
+  const milestone_photos = new Table(
+    {
+      milestone_id: column.text,
+      photo_id: column.text,
+      sort_index: column.integer,
+      added_at: column.text,
+    },
+    { indexes: { milestone: ['milestone_id'], photo: ['photo_id'] } },
   );
 
   const notes = new Table(
@@ -390,6 +417,7 @@ function buildAppSchema() {
     vaccinations,
     solid_foods,
     milestones,
+    milestone_photos,
     notes,
     photos,
     photo_backups,

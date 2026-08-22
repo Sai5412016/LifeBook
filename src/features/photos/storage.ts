@@ -21,6 +21,7 @@ import * as Network from 'expo-network';
 import { ENV } from '@/core/env';
 import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
+import { removePhotoFromAllEvents } from '@/features/events/repository';
 import { removePhotoFromAllShares } from '@/features/shares/repository';
 
 import {
@@ -764,6 +765,11 @@ export type PermanentlyDeletablePhoto = Pick<
  *    foreign key back to `photos` (it isn't PowerSync-synced at all, see
  *    features/shares/repository.ts's own doc comment), so nothing removes
  *    these rows automatically once the photo is gone.
+ * 5. Any `milestone_photos` entries referencing this photo, and any
+ *    event's `photo_id` title-image pointer — 2026-08-22, same reasoning
+ *    as step 4, except `milestone_photos` IS a normal synced table (see
+ *    features/events/repository.ts#removePhotoFromAllEvents), so this one
+ *    runs against the local PowerSync database, not Supabase directly.
  */
 export async function permanentlyDeletePhoto(
   db: AbstractPowerSyncDatabase,
@@ -773,6 +779,7 @@ export async function permanentlyDeletePhoto(
   deleteQuietly(photo.local_uri);
   await hardDeletePhoto(db, photo.id);
   await removePhotoFromAllShares(photo.id);
+  await removePhotoFromAllEvents(db, photo.id);
 }
 
 export type TrashSweepResult = { removed: number; failed: number };
