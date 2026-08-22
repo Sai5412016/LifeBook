@@ -71,7 +71,7 @@ export function useRelativeById(relativeId: string | undefined): {
   return { relative: data?.[0], isLoading };
 }
 
-/** Reactive: every partnership of a household — the generation graph's other edge (see logic.ts#FamilyGraphPerson). */
+/** Reactive: every partnership of a household — the relation graph's other edge (see logic.ts#RelationGraphPerson). */
 export function useUnionsOfHousehold(householdId: string | undefined): {
   unions: RelativeUnionRow[];
   isLoading: boolean;

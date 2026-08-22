@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  computeGenerations,
   describeGender,
   displayName,
   excludeSelf,
@@ -9,7 +8,8 @@ import {
   groupForList,
   lifeLine,
   partnerIdFromUnion,
-  type FamilyGraphPerson,
+  relationLabel,
+  type RelationGraphPerson,
 } from './logic';
 
 describe('displayName', () => {
@@ -102,105 +102,153 @@ describe('excludeSelf', () => {
   });
 });
 
-function graph(entries: FamilyGraphPerson[]): FamilyGraphPerson[] {
-  return entries;
+/**
+ * The exact live constellation from the bug report (Fehler 2): Carolin
+ * Fuchs, Barbara Lang's/Ernest Schlag's daughter and Tamara's sister, used
+ * to render under "Eltern" because the old generation-number grouping put
+ * her at the same NUMBER as Marina's actual parents. Every person below
+ * mirrors the task's own test list one-for-one.
+ */
+function relative(
+  id: string,
+  given_name: string,
+  overrides: Partial<Omit<RelationGraphPerson, 'id' | 'given_name'>> = {},
+): RelationGraphPerson {
+  return {
+    id,
+    given_name,
+    gender: null,
+    mother_id: null,
+    father_id: null,
+    partnerIds: [],
+    ...overrides,
+  };
 }
 
-describe('computeGenerations', () => {
-  it('places parents at -1, grandparents at -2, children at +1', () => {
-    const people = graph([
-      { id: 'child', motherId: 'mother', fatherId: 'father', partnerIds: [] },
-      { id: 'mother', motherId: 'grandma', fatherId: null, partnerIds: [] },
-      { id: 'father', motherId: null, fatherId: null, partnerIds: [] },
-      { id: 'grandma', motherId: null, fatherId: null, partnerIds: [] },
-      { id: 'grandchild', motherId: 'child', fatherId: null, partnerIds: [] },
-    ]);
-    const levels = computeGenerations(people, 'child');
-    expect(levels.get('child')).toBe(0);
-    expect(levels.get('mother')).toBe(-1);
-    expect(levels.get('father')).toBe(-1);
-    expect(levels.get('grandma')).toBe(-2);
-    expect(levels.get('grandchild')).toBe(1);
+const FAMILY = [
+  relative('marina', 'Marina', { mother_id: 'tamara', father_id: 'andreas-s' }),
+  relative('andreas-s', 'Andreas Schilling', { mother_id: 'ingrid', father_id: 'rudolf' }),
+  relative('tamara', 'Tamara Lang', { mother_id: 'barbara', father_id: 'ernest' }),
+  relative('carolin', 'Carolin Fuchs', { mother_id: 'barbara', father_id: 'ernest', gender: 'female', partnerIds: ['andreas-f'] }),
+  relative('andreas-f', 'Andreas Fuchs', { gender: 'male', partnerIds: ['carolin'] }),
+  relative('mia', 'Mia Fuchs', { mother_id: 'carolin', father_id: 'andreas-f', gender: 'female' }),
+  relative('bettina', 'Bettina Schilling', { mother_id: 'ingrid', father_id: 'rudolf', gender: 'female' }),
+  relative('rudolf', 'Rudolf'),
+  relative('ingrid', 'Ingrid'),
+  relative('barbara', 'Barbara'),
+  relative('ernest', 'Ernest'),
+  relative('jimmy', 'Jimmy Stalter'),
+];
+
+describe('relationLabel — die echte Konstellation aus dem Fehlerbericht', () => {
+  const label = (id: string) => relationLabel(FAMILY.find((p) => p.id === id) as RelationGraphPerson, FAMILY, 'marina');
+
+  it('nennt die Wurzel selbst, mit dem echten Namen — nie ein Platzhalter', () => {
+    expect(label('marina')).toBe('Marina selbst');
   });
 
-  it('puts a partner at the same level as their partner', () => {
-    const people = graph([
-      { id: 'root', motherId: null, fatherId: null, partnerIds: ['partner'] },
-      { id: 'partner', motherId: null, fatherId: null, partnerIds: ['root'] },
-    ]);
-    const levels = computeGenerations(people, 'root');
-    expect(levels.get('partner')).toBe(0);
+  it('erkennt Mutter und Vater als Eltern', () => {
+    expect(label('tamara')).toBe('Eltern');
+    expect(label('andreas-s')).toBe('Eltern');
   });
 
-  it('never revisits an id, so a circular mother/child reference cannot loop forever', () => {
-    // A data error: 'a' is 'b's mother, and 'b' is ALSO 'a's mother.
-    const people = graph([
-      { id: 'a', motherId: 'b', fatherId: null, partnerIds: [] },
-      { id: 'b', motherId: 'a', fatherId: null, partnerIds: [] },
-    ]);
-    const levels = computeGenerations(people, 'a');
-    expect(levels.size).toBe(2);
-    expect(levels.get('a')).toBe(0);
-    expect(levels.get('b')).toBe(-1);
+  it('erkennt eine Schwester eines Elternteils als Tante — NICHT als Eltern (Fehler 2)', () => {
+    expect(label('carolin')).toBe('Tante');
   });
 
-  it('returns an empty map when the root id is unknown', () => {
-    const people = graph([{ id: 'a', motherId: null, fatherId: null, partnerIds: [] }]);
-    expect(computeGenerations(people, 'missing').size).toBe(0);
+  it('erkennt den angeheirateten Partner einer Tante als Onkel', () => {
+    expect(label('andreas-f')).toBe('Onkel');
   });
 
-  it('ignores a dangling reference to an id that does not exist in the list', () => {
-    const people = graph([{ id: 'a', motherId: 'ghost', fatherId: null, partnerIds: [] }]);
-    const levels = computeGenerations(people, 'a');
-    expect(levels.has('ghost')).toBe(false);
-    expect(levels.size).toBe(1);
+  it('erkennt das Kind einer Tante als Cousine', () => {
+    expect(label('mia')).toBe('Cousine');
+  });
+
+  it('erkennt eine zweite Tante über die andere Elternseite', () => {
+    expect(label('bettina')).toBe('Tante');
+  });
+
+  it('erkennt die Eltern der Eltern als Großeltern, unabhängig vom Geschlecht', () => {
+    expect(label('rudolf')).toBe('Großeltern');
+    expect(label('ingrid')).toBe('Großeltern');
+    expect(label('barbara')).toBe('Großeltern');
+    expect(label('ernest')).toBe('Großeltern');
+  });
+
+  it('erkennt eine Person ganz ohne Verknüpfung als noch nicht verbunden', () => {
+    expect(label('jimmy')).toBe('Noch nicht verbunden');
+  });
+
+  it('fällt auf die neutrale Sammelbezeichnung zurück, wenn das Geschlecht nicht gesetzt ist', () => {
+    const unknownAunt = relative('unknown-aunt', 'X', { mother_id: 'barbara', father_id: 'ernest' });
+    const withUnknown = [...FAMILY, unknownAunt];
+    expect(relationLabel(unknownAunt, withUnknown, 'marina')).toBe('Tanten und Onkel');
+  });
+
+  it('erkennt Geschwister — teilen mindestens einen Elternteil mit der Wurzel', () => {
+    const sibling = relative('sibling', 'Geschwisterkind', { mother_id: 'tamara', father_id: 'andreas-s' });
+    const withSibling = [...FAMILY, sibling];
+    expect(relationLabel(sibling, withSibling, 'marina')).toBe('Geschwister');
+  });
+
+  it('erkennt Urgroßeltern', () => {
+    const greatGrandparent = relative('urgross', 'Urgroß', {});
+    const withUrgross = FAMILY.map((p) => (p.id === 'rudolf' ? { ...p, mother_id: 'urgross' } : p)).concat(
+      greatGrandparent,
+    );
+    expect(relationLabel(greatGrandparent, withUrgross, 'marina')).toBe('Urgroßeltern');
+  });
+
+  it('fällt auf "Weitere Verwandte" zurück, wenn verbunden, aber keine Regel greift', () => {
+    // Ein zweites Kind von Mia (Cousine) — eine Generation zu weit, um noch als Cousine/Cousin zu gelten.
+    const distant = relative('distant', 'Weit weg', { mother_id: 'mia' });
+    const withDistant = [...FAMILY, distant];
+    expect(relationLabel(distant, withDistant, 'marina')).toBe('Weitere Verwandte');
   });
 });
 
 describe('groupForList', () => {
-  const people = [
-    { id: 'root' },
-    { id: 'mother' },
-    { id: 'grandma' },
-    { id: 'greatgrandma' },
-    { id: 'sibling-of-greatgrandma' },
-    { id: 'stray' },
-  ];
-  const generations = new Map<string, number>([
-    ['root', 0],
-    ['mother', -1],
-    ['grandma', -2],
-    ['greatgrandma', -3],
-    ['sibling-of-greatgrandma', -4],
-  ]);
-
-  it('labels the root group with the given root label', () => {
-    const groups = groupForList(people, generations, 'Marina');
-    expect(groups[0]).toEqual({ label: 'Marina', people: [{ id: 'root' }] });
+  it('gruppiert nach Verwandtschaft, in der vorgegebenen Reihenfolge, mit dem echten Wurzelnamen', () => {
+    const groups = groupForList(FAMILY, 'marina');
+    expect(groups.map((g) => g.label)).toEqual([
+      'Marina selbst',
+      'Eltern',
+      'Großeltern',
+      'Tanten und Onkel',
+      'Cousins und Cousinen',
+      'Noch nicht verbunden',
+    ]);
   });
 
-  it('buckets -1/-2/-3 into Eltern/Großeltern/Urgroßeltern', () => {
-    const groups = groupForList(people, generations, 'Marina');
-    const byLabel = Object.fromEntries(groups.map((g) => [g.label, g.people.map((p) => p.id)]));
-    expect(byLabel['Eltern']).toEqual(['mother']);
-    expect(byLabel['Großeltern']).toEqual(['grandma']);
-    expect(byLabel['Urgroßeltern']).toEqual(['greatgrandma']);
+  it('steckt Carolin unter "Tanten und Onkel", nicht unter "Eltern" (Fehler 2)', () => {
+    const groups = groupForList(FAMILY, 'marina');
+    const auntUncle = groups.find((g) => g.label === 'Tanten und Onkel');
+    expect(auntUncle?.people.map((p) => p.id)).toContain('carolin');
+    const parents = groups.find((g) => g.label === 'Eltern');
+    expect(parents?.people.map((p) => p.id)).not.toContain('carolin');
   });
 
-  it('puts anything beyond -3 into Weitere', () => {
-    const groups = groupForList(people, generations, 'Marina');
-    const weitere = groups.find((g) => g.label === 'Weitere');
-    expect(weitere?.people.map((p) => p.id)).toEqual(['sibling-of-greatgrandma']);
+  it('lässt "Noch nicht verbunden" nie jemanden verschwinden (Fehler 1)', () => {
+    const groups = groupForList(FAMILY, 'marina');
+    const unconnected = groups.find((g) => g.label === 'Noch nicht verbunden');
+    expect(unconnected?.people.map((p) => p.id)).toEqual(['jimmy']);
   });
 
-  it('puts anyone with no generation entry into Nicht verbunden', () => {
-    const groups = groupForList(people, generations, 'Marina');
-    const unconnected = groups.find((g) => g.label === 'Nicht verbunden');
-    expect(unconnected?.people.map((p) => p.id)).toEqual(['stray']);
+  it('Summe aller Gruppengrößen == Anzahl der Personen — Fehler 1 darf nicht zurückkehren', () => {
+    const groups = groupForList(FAMILY, 'marina');
+    const total = groups.reduce((sum, group) => sum + group.people.length, 0);
+    expect(total).toBe(FAMILY.length);
   });
 
-  it('drops empty groups entirely', () => {
-    const groups = groupForList([{ id: 'root' }], new Map([['root', 0]]), 'Marina');
-    expect(groups.map((g) => g.label)).toEqual(['Marina']);
+  it('hält diese Summe auch bei einer isolierten, unverbundenen Person', () => {
+    const withStray = [...FAMILY, relative('stray', 'Allein')];
+    const groups = groupForList(withStray, 'marina');
+    const total = groups.reduce((sum, group) => sum + group.people.length, 0);
+    expect(total).toBe(withStray.length);
+  });
+
+  it('lässt leere Gruppen weg', () => {
+    const groups = groupForList([relative('marina', 'Marina')], 'marina');
+    expect(groups.map((g) => g.label)).toEqual(['Marina selbst']);
   });
 });
