@@ -513,6 +513,61 @@ export function relationLabel(
   }
 }
 
+function bloodTieLevel(tie: BloodTie): number {
+  switch (tie.kind) {
+    case 'root':
+      return 0;
+    case 'ancestor':
+      return tie.distance;
+    case 'descendant':
+      return -tie.distance;
+    case 'shared':
+      // `a` = root's distance to the common ancestor, `b` = this person's
+      // own distance to it. A person closer to the shared ancestor than
+      // root is (b < a) sits ABOVE root's own row by the difference; one
+      // further away (b > a) sits below. This one formula produces every
+      // case the graphical tree needs: siblings (1,1) → 0 (Marina's own
+      // row), aunts/uncles (2,1) → 1 (parents' row), a great-aunt (3,1) →
+      // 2 (grandparents' row), a niece (1,2) → -1 (one row below Marina),
+      // any cousin tier (a,a) → 0.
+      return tie.a - tie.b;
+  }
+}
+
+/**
+ * How many rows above Marina's own row this person sits in the graphical
+ * tree (features/tree/layout.ts) — 0 = Marina's row, 1 = the parents' row,
+ * 2 = grandparents', and so on; negative would be a row below Marina
+ * (nieces/nephews), not present in the real data but handled the same
+ * way regardless. `null` means this person gets no row at all — the tree
+ * only ever shows people with a real path to Marina, blood or married-in
+ * (task requirement); the "Noch nicht verbunden" people `relationLabel`
+ * already names, plus the rare "Weitere Verwandte" case with no nameable
+ * tie to hang a row off of, are exactly the ones excluded here too.
+ */
+export function relationLevel(
+  person: RelationGraphPerson,
+  all: readonly RelationGraphPerson[],
+  rootId: string,
+): number | null {
+  const byId = new Map(all.map((p) => [p.id, p]));
+  const relation = findRelation(person.id, rootId, byId, all);
+
+  switch (relation.kind) {
+    case 'blood':
+      return bloodTieLevel(relation.tie);
+    case 'inLawParent':
+      return 1; // Eltern des eigenen Partners sitzen wie Eltern eine Reihe über Marina
+    case 'inLawOf':
+      return bloodTieLevel(relation.xTie); // sitzt in derselben Reihe wie der/die Blutsverwandte
+    case 'directPartnerOfRoot':
+      return 0;
+    case 'unconnected':
+    case 'otherUnrelated':
+      return null;
+  }
+}
+
 /** A short explanation shown under the "Noch nicht verbunden" group — task requirement, so nobody wonders how to fix it. */
 export const UNCONNECTED_GROUP_HINT =
   'Über Mutter, Vater oder Partner mit dem Stammbaum verbinden, damit diese Personen einsortiert werden.';

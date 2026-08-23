@@ -29,6 +29,7 @@ import {
   useRelativesOfHousehold,
 } from '@/features/tree/repository';
 import { useAuth } from '@/core/auth/session-store';
+import { removeStoredObjects } from '@/features/photos/storage';
 
 export default function StammbaumBearbeitenScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -69,8 +70,23 @@ export default function StammbaumBearbeitenScreen() {
 
       if (input.pickedPhotoUri && relative.household_id) {
         try {
+          const previousPhotoKey = relative.photo_key;
           const photoKey = await uploadRelativePhoto(relative.household_id, relative.id, input.pickedPhotoUri);
           await setRelativePhotoKey(db, relative.id, photoKey);
+
+          // Jede Portrait-Aufnahme bekommt einen frischen Speicherschlüssel
+          // (identity.ts#buildRelativePhotoKey) — das alte Objekt räumt
+          // niemand sonst auf, sonst bliebe es als Waise liegen. Best
+          // effort, wie das Löschen eines Menschen-Portraits schon: ein
+          // Fehler hier darf den bereits gespeicherten neuen Schlüssel
+          // nicht rückgängig machen.
+          if (previousPhotoKey) {
+            try {
+              await removeStoredObjects(previousPhotoKey, null, null);
+            } catch (cleanupError) {
+              console.error('[LifeBook] Altes Portrait konnte nicht aufgeräumt werden', cleanupError);
+            }
+          }
         } catch (uploadError) {
           console.error('[LifeBook] Portrait-Upload fehlgeschlagen', uploadError);
         }

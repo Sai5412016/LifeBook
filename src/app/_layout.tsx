@@ -4,6 +4,7 @@ import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider, useSegments } 
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { CrashScreen } from '@/components/diagnostics/crash-screen';
@@ -67,14 +68,16 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <GlobalErrorBoundary>
-        <AnimatedSplashOverlay />
-        <DbAndAuthGate>
-          <NavigationGate />
-        </DbAndAuthGate>
-      </GlobalErrorBoundary>
-    </ThemeProvider>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <GlobalErrorBoundary>
+          <AnimatedSplashOverlay />
+          <DbAndAuthGate>
+            <NavigationGate />
+          </DbAndAuthGate>
+        </GlobalErrorBoundary>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -305,6 +308,9 @@ function FullScreenSpinner() {
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   spinnerContainer: {
     flex: 1,
     alignItems: 'center',

@@ -36,6 +36,7 @@ import { useAuth } from '@/core/auth/session-store';
 import { useActiveChild } from '@/features/household/repository';
 import { PersonAvatar } from '@/features/people/components/person-avatar';
 import { useSignedUrls } from '@/features/photos/hooks';
+import { TreeView } from '@/features/tree/components/tree-view';
 import {
   UNCONNECTED_GROUP_HINT,
   displayName,
@@ -45,7 +46,9 @@ import {
 } from '@/features/tree/logic';
 import { ensureRootRelative, useRelativesOfHousehold, useUnionsOfHousehold } from '@/features/tree/repository';
 import type { RelativeRow } from '@/features/tree/types';
-import { Button } from '@/ui';
+import { Button, Chip } from '@/ui';
+
+type ViewMode = 'list' | 'tree';
 
 export default function StammbaumScreen() {
   const db = usePowerSync();
@@ -54,6 +57,7 @@ export default function StammbaumScreen() {
   const { relatives, isLoading } = useRelativesOfHousehold(child?.householdId);
   const { unions } = useUnionsOfHousehold(child?.householdId);
   const [ensuring, setEnsuring] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   useEffect(() => {
     if (!child || !session?.user.id) {
@@ -105,8 +109,15 @@ export default function StammbaumScreen() {
           <Button label="Person hinzufügen" onPress={() => router.push('/stammbaum/neu')} disabled={!child} />
         </View>
 
+        <View style={styles.viewModeRow}>
+          <Chip label="Liste" selected={viewMode === 'list'} onPress={() => setViewMode('list')} />
+          <Chip label="Baum" selected={viewMode === 'tree'} onPress={() => setViewMode('tree')} />
+        </View>
+
         {(isLoading || ensuring) && relatives.length === 0 ? (
           <ActivityIndicator style={styles.spinner} />
+        ) : viewMode === 'tree' ? (
+          <TreeView relatives={relatives} unions={unions} rootId={rootRelative?.id} onJumpToList={() => setViewMode('list')} />
         ) : (
           <SectionList
             sections={groups.map((group) => ({ title: group.label, data: group.people }))}
@@ -174,6 +185,7 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, paddingHorizontal: Spacing.three },
   header: { paddingTop: Spacing.three },
   actions: { paddingVertical: Spacing.three },
+  viewModeRow: { flexDirection: 'row', gap: Spacing.two, paddingBottom: Spacing.two },
   spinner: { paddingTop: Spacing.five },
   listContent: { paddingBottom: BottomTabInset + Spacing.four, gap: Spacing.two },
   sectionHeader: { paddingTop: Spacing.three, paddingBottom: Spacing.one },
