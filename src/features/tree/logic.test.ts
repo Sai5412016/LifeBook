@@ -9,6 +9,7 @@ import {
   lifeLine,
   partnerIdFromUnion,
   relationLabel,
+  relationLevel,
   type RelationGraphPerson,
 } from './logic';
 
@@ -363,6 +364,73 @@ describe('relationLabel — genealogisch: gemeinsamer Vorfahre plus zwei Abstän
     // also unbenennbar, fällt aber NICHT unter "Noch nicht verbunden" (hat ja
     // eine mother_id).
     expect(relationLabel(anotherIsolated, withIsolated, 'marina')).toBe('Weitere Verwandte');
+  });
+});
+
+describe('relationLevel — Zeilen für die grafische Baumansicht (features/tree/layout.ts)', () => {
+  const level = (id: string) => relationLevel(FAMILY.find((p) => p.id === id) as RelationGraphPerson, FAMILY, 'marina');
+
+  it('Marina selbst ist Reihe 0', () => {
+    expect(level('marina')).toBe(0);
+  });
+
+  it('Eltern sind Reihe 1', () => {
+    expect(level('tamara')).toBe(1);
+    expect(level('andreas-s')).toBe(1);
+  });
+
+  it('Großeltern sind Reihe 2', () => {
+    expect(level('rudolf')).toBe(2);
+    expect(level('ingrid')).toBe(2);
+    expect(level('barbara')).toBe(2);
+  });
+
+  it('Urgroßeltern sind Reihe 3', () => {
+    expect(level('gerlinde')).toBe(3);
+    expect(level('josefa')).toBe(3);
+  });
+
+  it('Cousins bleiben auf Marinas eigener Reihe (0)', () => {
+    expect(level('mia')).toBe(0);
+  });
+
+  it('Tanten und Onkel sind Reihe 1, wie die Eltern', () => {
+    expect(level('carolin')).toBe(1);
+    expect(level('bettina')).toBe(1);
+    expect(level('alexander')).toBe(1);
+  });
+
+  it('Großtanten und Großonkel sind Reihe 2, wie die Großeltern', () => {
+    expect(level('rosi')).toBe(2);
+    expect(level('jutta')).toBe(2);
+  });
+
+  it('ein Angeheirateter sitzt in derselben Reihe wie der/die Blutsverwandte', () => {
+    expect(level('andreas-f')).toBe(level('carolin')); // Onkel (angeheiratet) — Reihe 1, wie Tante Carolin
+    expect(level('anton')).toBe(level('rosi')); // Großonkel (angeheiratet) — Reihe 2, wie Großtante Rosi
+  });
+
+  it('ein Cousin einmal entfernt (Valentin Fink) sitzt eine Reihe über Marina, wie seine Mutter Jutta', () => {
+    expect(level('valentin')).toBe(1);
+  });
+
+  it('eine Person ganz ohne Verknüpfung hat keine Reihe', () => {
+    expect(level('jimmy')).toBeNull();
+  });
+
+  it('eine Person, die nur mit einer unverbundenen Person verbunden ist, hat ebenfalls keine Reihe', () => {
+    const isolatedPartner = relative('level-isolated-partner', 'Isoliert', { partnerIds: ['level-isolated-root'] });
+    const isolatedRoot = relative('level-isolated-root', 'Isolierte Wurzel', { partnerIds: ['level-isolated-partner'] });
+    const anotherIsolated = relative('level-another-isolated', 'Noch einer', { mother_id: 'level-isolated-root' });
+    const withIsolated = [...FAMILY, isolatedPartner, isolatedRoot, anotherIsolated];
+    expect(relationLevel(anotherIsolated, withIsolated, 'marina')).toBeNull();
+  });
+
+  it('eine Nichte sitzt eine Reihe unter Marina', () => {
+    const niece = relative('level-niece', 'Nichte', { mother_id: 'level-sibling' });
+    const sibling = relative('level-sibling', 'Geschwister', { mother_id: 'tamara', father_id: 'andreas-s' });
+    const withNiece = [...FAMILY, sibling, niece];
+    expect(relationLevel(niece, withNiece, 'marina')).toBe(-1);
   });
 });
 
