@@ -214,7 +214,33 @@ const NAMED_SHARED_TIES: Record<string, { female: string; male: string; neutral:
   '4,4': { female: 'Cousine 3. Grades', male: 'Cousin 3. Grades', neutral: 'Cousine/Cousin 3. Grades' },
 };
 
-/** "Cousine/Cousin N. Grades[, M-fach/einmal entfernt]" — the task's general fallback, for any (a, b) not in `NAMED_SHARED_TIES`. `einmal` for exactly one degree removed (task's own example), the literal "M-fach" template otherwise. */
+/**
+ * 2026-08-23, korrigiert: "einmal"/"zweimal" für 1/2 Grade Entfernung —
+ * die üblichen deutschen Multiplikativadverbien — "dreifach"/"vierfach"/…
+ * (die Adjektivform mit -fach) erst ab drei, nicht die vorherige, rein
+ * numerische "N-fach"-Schreibweise für jeden Fall ab 1. Über die Tabelle
+ * hinaus (>10, in einem Stammbaum praktisch nie erreicht) bleibt "N-fach"
+ * als Nur-Zahlen-Fallback, statt für jede denkbare Zahl ein eigenes Wort
+ * vorzuhalten.
+ */
+const GERMAN_MULTIPLICATIVE_WORDS: Record<number, string> = {
+  1: 'einmal',
+  2: 'zweimal',
+  3: 'dreifach',
+  4: 'vierfach',
+  5: 'fünffach',
+  6: 'sechsfach',
+  7: 'siebenfach',
+  8: 'achtfach',
+  9: 'neunfach',
+  10: 'zehnfach',
+};
+
+function removedWord(removed: number): string {
+  return GERMAN_MULTIPLICATIVE_WORDS[removed] ?? `${removed}-fach`;
+}
+
+/** "Cousine/Cousin N. Grades[, einmal/zweimal/dreifach… entfernt]" — the task's general fallback, for any (a, b) not in `NAMED_SHARED_TIES`. */
 function cousinDegreeLabel(a: number, b: number, gender: RelativeGender | null): string {
   const degree = Math.min(a, b) - 1;
   const removed = Math.abs(a - b);
@@ -222,8 +248,7 @@ function cousinDegreeLabel(a: number, b: number, gender: RelativeGender | null):
   if (removed === 0) {
     return base;
   }
-  const removedWord = removed === 1 ? 'einmal' : `${removed}-fach`;
-  return `${base}, ${removedWord} entfernt`;
+  return `${base}, ${removedWord(removed)} entfernt`;
 }
 
 function sharedTieLabel(a: number, b: number, gender: RelativeGender | null): string {

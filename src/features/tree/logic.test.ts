@@ -198,6 +198,29 @@ describe('relationLabel — genealogisch: gemeinsamer Vorfahre plus zwei Abstän
     expect(label('andreas-f')).toBe('Onkel (angeheiratet)');
   });
 
+  /**
+   * 2026-08-23, gegen die echten Daten gemeldet: die Bezeichnung eines
+   * Angeheirateten muss die ROLLE des Partners übernehmen (Tante/Onkel,
+   * Großtante/Großonkel, …), aber das Geschlechtswort richtet sich immer
+   * nach dem GESCHLECHT DER PERSON SELBST — nicht dem des Partners. Ein
+   * männlicher Partner einer Großtante ist "Großonkel (angeheiratet)",
+   * nie "Großtante (angeheiratet)". Bereits so implementiert (relationLabel
+   * übergibt an jeder Stelle `person.gender`, nie `xTie`s eigenes
+   * Geschlecht) — diese drei Fälle sind die im Bericht genannten Personen,
+   * als dauerhafte Regressionssicherung.
+   */
+  it('Herbert Fink (Partner der Großtante Jutta) ist Großonkel, nicht Großtante', () => {
+    expect(label('herbert')).toBe('Großonkel (angeheiratet)');
+  });
+
+  it('Anton Lang (Partner der Großtante Rosi) ist Großonkel, nicht Großtante', () => {
+    expect(label('anton')).toBe('Großonkel (angeheiratet)');
+  });
+
+  it('Jasmin Schilling (Partnerin des Onkels Alexander) ist Tante, nicht Onkel', () => {
+    expect(label('jasmin')).toBe('Tante (angeheiratet)');
+  });
+
   it('erkennt das Kind einer Tante als Cousine 1. Grades', () => {
     expect(label('mia')).toBe('Cousine 1. Grades');
   });
@@ -308,7 +331,7 @@ describe('relationLabel — genealogisch: gemeinsamer Vorfahre plus zwei Abstän
     );
   });
 
-  it('schreibt "M-fach entfernt", wenn der Abstand größer als eins ist', () => {
+  it('schreibt "zweimal entfernt" für zwei Grade Entfernung — die deutsche Form, nicht "2-fach"', () => {
     // Vier Generationen unter Barbara aufgebaut, damit b=4 wird — a (Wurzel
     // -> Tamara -> Barbara) ist bereits 2, also (a=2, b=4): degree=1, removed=2.
     const gen1 = relative('cousin-gen1', 'G1', { mother_id: 'barbara' });
@@ -316,7 +339,18 @@ describe('relationLabel — genealogisch: gemeinsamer Vorfahre plus zwei Abstän
     const gen3 = relative('cousin-gen3', 'G3', { mother_id: 'cousin-gen2' });
     const gen4 = relative('cousin-gen4', 'G4', { mother_id: 'cousin-gen3', gender: 'male' });
     const withChain = [...FAMILY, gen1, gen2, gen3, gen4];
-    expect(relationLabel(gen4, withChain, 'marina')).toBe('Cousin 1. Grades, 2-fach entfernt');
+    expect(relationLabel(gen4, withChain, 'marina')).toBe('Cousin 1. Grades, zweimal entfernt');
+  });
+
+  it('schreibt "dreifach entfernt" ab drei Graden Entfernung — die Adjektivform, nicht "einmal"/"zweimal" weitergezählt', () => {
+    // Fünf Generationen unter Barbara: a=2, b=5 => degree=1, removed=3.
+    const gen1 = relative('far-gen1', 'F1', { mother_id: 'barbara' });
+    const gen2 = relative('far-gen2', 'F2', { mother_id: 'far-gen1' });
+    const gen3 = relative('far-gen3', 'F3', { mother_id: 'far-gen2' });
+    const gen4 = relative('far-gen4', 'F4', { mother_id: 'far-gen3' });
+    const gen5 = relative('far-gen5', 'F5', { mother_id: 'far-gen4', gender: 'female' });
+    const withChain = [...FAMILY, gen1, gen2, gen3, gen4, gen5];
+    expect(relationLabel(gen5, withChain, 'marina')).toBe('Cousine 1. Grades, dreifach entfernt');
   });
 
   it('fällt auf "Weitere Verwandte" zurück, wenn wirklich keine Regel greift (kein gemeinsamer Vorfahre, keine Heirat)', () => {
