@@ -108,6 +108,8 @@ export async function createShare(input: CreateShareInput): Promise<ShareRow> {
     kind: input.kind,
     show_living_details: input.showLivingDetails,
     allow_suggestions: input.allowSuggestions,
+    announcement: null,
+    announcement_at: null,
     device_limit: input.deviceLimit,
     allow_download: true,
     expires_at: null,
@@ -212,6 +214,36 @@ export async function setShareDeviceLimit(shareId: string, deviceLimit: number):
   const { error } = await supabase
     .from('shares')
     .update({ device_limit: deviceLimit, updated_at: nowUtcIso() })
+    .eq('id', shareId);
+  if (error) {
+    throw new Error(describeSupabaseError(error));
+  }
+}
+
+/**
+ * Publishes (or replaces) the guest banner — `text` must already be
+ * normalized (logic.ts#normalizeAnnouncement, never empty) by the caller.
+ * `announcement_at` is set to NOW in the same write, always: the viewer
+ * decides whether to show the banner by comparing it against a device's
+ * last visit, so the two columns must never be written separately (see
+ * types.ts#ShareRow's own doc comment on `announcement`).
+ */
+export async function publishShareAnnouncement(shareId: string, text: string): Promise<void> {
+  const now = nowUtcIso();
+  const { error } = await supabase
+    .from('shares')
+    .update({ announcement: text, announcement_at: now, updated_at: now })
+    .eq('id', shareId);
+  if (error) {
+    throw new Error(describeSupabaseError(error));
+  }
+}
+
+/** "Nachricht entfernen" — both columns to NULL together, same reasoning as `publishShareAnnouncement`. */
+export async function removeShareAnnouncement(shareId: string): Promise<void> {
+  const { error } = await supabase
+    .from('shares')
+    .update({ announcement: null, announcement_at: null, updated_at: nowUtcIso() })
     .eq('id', shareId);
   if (error) {
     throw new Error(describeSupabaseError(error));

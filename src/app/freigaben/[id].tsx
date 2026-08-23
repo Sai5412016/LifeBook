@@ -11,14 +11,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { nowUtcIso } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import {
+  ANNOUNCEMENT_MAX_LENGTH,
   DEVICE_LIMIT_CHOICES,
+  NO_ANNOUNCEMENT_HINT_TEXT,
   SHARE_DISCLOSURE_TEXT,
   VISITOR_NOT_IN_TREE_HINT,
   buildShareLink,
+  describeAnnouncementAge,
   describeShareKind,
   describeShareState,
+  formatAnnouncementPublishedLabel,
   formatDeviceSeenLabel,
   formatShareDeviceName,
   formatShareDeviceOrigin,
@@ -28,19 +33,22 @@ import {
   formatShareMessage,
   isUnexpectedOrigin,
   isVisitorNameKnownRelative,
+  normalizeAnnouncement,
 } from '@/features/shares/logic';
 import {
   deleteShare,
   getShare,
   listSharePhotoIds,
   listShareDevices,
+  publishShareAnnouncement,
+  removeShareAnnouncement,
   removeShareDevice,
   revokeShare,
   setShareDeviceLimit,
 } from '@/features/shares/repository';
 import type { ShareDeviceRow, ShareRow } from '@/features/shares/types';
 import { useRelativesOfHousehold } from '@/features/tree/repository';
-import { Chip, useUiColors } from '@/ui';
+import { Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 export default function FreigabeDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,6 +64,19 @@ export default function FreigabeDetailScreen() {
   // Haushalt ist erst bekannt, sobald `share` geladen ist.
   const { relatives } = useRelativesOfHousehold(share?.household_id);
   const relativeGivenNames = relatives.map((relative) => relative.given_name);
+
+  // Nachricht an die Gäste: eigener Entwurfszustand, weil der Nutzer hier
+  // tippt, bevor er veröffentlicht — deshalb useHydrateOnce statt direkt
+  // aus `share.announcement` zu lesen (Architekturregel 9: `share` ist
+  // beim allerersten Render noch `undefined`, ein `useState(share?.announcement
+  // ?? '')` würde für immer leer bleiben).
+  const [announcementDraft, setAnnouncementDraft] = useState('');
+  const [announcementBusy, setAnnouncementBusy] = useState(false);
+  const [announcementError, setAnnouncementError] = useState<string | null>(null);
+  const hydrateAnnouncement = useCallback((loaded: ShareRow) => {
+    setAnnouncementDraft(loaded.announcement ?? '');
+  }, []);
+  useHydrateOnce(share, share?.id, hydrateAnnouncement);
 
   const reload = useCallback(() => {
     if (!id) {
@@ -105,6 +126,49 @@ export default function FreigabeDetailScreen() {
       setError(updateError instanceof Error ? updateError.message : 'Ändern fehlgeschlagen.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handlePublishAnnouncement = async () => {
+    if (!share) {
+      return;
+    }
+    const normalized = normalizeAnnouncement(announcementDraft);
+    if (!normalized) {
+      setAnnouncementError('Bitte eine Nachricht eingeben.');
+      return;
+    }
+    setAnnouncementError(null);
+    setAnnouncementBusy(true);
+    try {
+      await publishShareAnnouncement(share.id, normalized);
+      setAnnouncementDraft(normalized);
+      reload();
+    } catch (publishError) {
+      console.error('[LifeBook] Nachricht konnte nicht veröffentlicht werden', publishError);
+      setAnnouncementError(publishError instanceof Error ? publishError.message : 'Veröffentlichen fehlgeschlagen.');
+    } finally {
+      setAnnouncementBusy(false);
+    }
+  };
+
+  const handleRemoveAnnouncement = async () => {
+    if (!share) {
+      return;
+    }
+    setAnnouncementError(null);
+    setAnnouncementBusy(true);
+    try {
+      await removeShareAnnouncement(share.id);
+      setAnnouncementDraft('');
+      reload();
+    } catch (removeAnnouncementError) {
+      console.error('[LifeBook] Nachricht konnte nicht entfernt werden', removeAnnouncementError);
+      setAnnouncementError(
+        removeAnnouncementError instanceof Error ? removeAnnouncementError.message : 'Entfernen fehlgeschlagen.',
+      );
+    } finally {
+      setAnnouncementBusy(false);
     }
   };
 
@@ -279,6 +343,54 @@ export default function FreigabeDetailScreen() {
           ) : null}
 
           <View style={styles.section}>
+            <ThemedText type="smallBold">Nachricht an die Gäste</ThemedText>
+            <TextField
+              label="Nachricht"
+              value={announcementDraft}
+              onChangeText={setAnnouncementDraft}
+              multiline
+              numberOfLines={4}
+              maxLength={ANNOUNCEMENT_MAX_LENGTH}
+              style={styles.announcementInput}
+              editable={!announcementBusy}
+            />
+            <ThemedText type="small" themeColor="textSecondary" style={styles.announcementCounter}>
+              {announcementDraft.length} / {ANNOUNCEMENT_MAX_LENGTH}
+            </ThemedText>
+
+            {announcementError ? (
+              <ThemedText type="small" themeColor="dangerText">
+                {announcementError}
+              </ThemedText>
+            ) : null}
+
+            <View style={styles.chipRow}>
+              <Pressable onPress={handlePublishAnnouncement} hitSlop={8} disabled={announcementBusy}>
+                <ThemedText type="linkPrimary">Nachricht veröffentlichen</ThemedText>
+              </Pressable>
+              {share.announcement ? (
+                <Pressable onPress={handleRemoveAnnouncement} hitSlop={8} disabled={announcementBusy}>
+                  <ThemedText type="linkPrimary" themeColor="dangerText">
+                    Nachricht entfernen
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
+
+            <ThemedText type="small" themeColor="textSecondary">
+              {share.announcement && share.announcement_at ? (
+                <>
+                  {formatAnnouncementPublishedLabel(share.announcement_at, deviceTimeZone())}
+                  {' · '}
+                  {describeAnnouncementAge(share.announcement_at, nowUtcIso())}
+                </>
+              ) : (
+                NO_ANNOUNCEMENT_HINT_TEXT
+              )}
+            </ThemedText>
+          </View>
+
+          <View style={styles.section}>
             <ThemedText type="smallBold">Verbundene Geräte</ThemedText>
             {devices.length === 0 ? (
               <ThemedText type="small" themeColor="textSecondary">
@@ -374,6 +486,8 @@ const styles = StyleSheet.create({
   code: { letterSpacing: 4 },
   section: { gap: Spacing.two },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  announcementInput: { height: 96, textAlignVertical: 'top', paddingTop: Spacing.two },
+  announcementCounter: { textAlign: 'right' },
   chipRow: { flexDirection: 'row', gap: Spacing.two, flexWrap: 'wrap' },
   deviceRow: {
     flexDirection: 'row',

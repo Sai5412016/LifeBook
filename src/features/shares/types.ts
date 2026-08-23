@@ -35,6 +35,19 @@ export type ShareRow = {
    * on by default costs nothing a caregiver didn't already control.
    */
   allow_suggestions: boolean;
+  /**
+   * A short message for guests, shown as a dismissible banner on the
+   * shared page until they tap it away (2026-08-24) — the only channel
+   * that reaches a guest, since they have no app and therefore no push
+   * notifications. NULL = no active message. Set together with
+   * `announcement_at` in the same write, always (see
+   * repository.ts#publishShareAnnouncement/removeShareAnnouncement) — the
+   * viewer decides whether to show the banner by comparing
+   * `announcement_at` against the device's own last-visit time, so the two
+   * columns must never disagree about whether a message is "on".
+   */
+  announcement: string | null;
+  announcement_at: string | null;
   device_limit: number;
   allow_download: boolean;
   /** NULL = unbegrenzt. */
