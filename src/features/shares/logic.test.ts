@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACCESS_CODE_LENGTH,
+  ALLOW_SUGGESTIONS_HINT_TEXT,
+  ALLOW_SUGGESTIONS_LABEL,
   DEFAULT_DEVICE_LIMIT,
   DEVICE_LIMIT_CHOICES,
   SHARE_DISCLOSURE_TEXT,
+  SHOW_LIVING_DETAILS_HINT_TEXT,
+  TREE_SHARE_GUEST_NAME_HINT_TEXT,
   buildShareLink,
   describeDeviceFromUserAgent,
+  describeShareKind,
   describeShareState,
   describeSupabaseError,
   diffPhotoSelection,
@@ -22,6 +27,7 @@ import {
   generateShareToken,
   isPhotoReadyForShare,
   isUnexpectedOrigin,
+  isVisitorNameKnownRelative,
   summarizeShares,
 } from './logic';
 import type { ShareRow } from './types';
@@ -127,6 +133,16 @@ describe('describeShareState', () => {
   });
 });
 
+describe('describeShareKind', () => {
+  it('nennt "photos" ein Fotoalbum', () => {
+    expect(describeShareKind('photos')).toBe('Fotoalbum');
+  });
+
+  it('nennt "tree" einen Stammbaum', () => {
+    expect(describeShareKind('tree')).toBe('Stammbaum');
+  });
+});
+
 describe('formatDeviceCountLabel', () => {
   it('formats count against the limit', () => {
     expect(formatDeviceCountLabel(2, 5)).toBe('2 von 5 Geräten');
@@ -189,6 +205,9 @@ describe('summarizeShares', () => {
     name: 'Sommerurlaub',
     token: 'token',
     access_code: 'ABCDEF',
+    kind: 'photos',
+    show_living_details: false,
+    allow_suggestions: true,
     device_limit: 5,
     allow_download: true,
     expires_at: null,
@@ -362,6 +381,44 @@ describe('formatShareDeviceOrigin', () => {
 
   it('gibt eine leere Zeichenkette zurück, wenn nichts vorliegt', () => {
     expect(formatShareDeviceOrigin(null, null, null)).toBe('');
+  });
+});
+
+describe('SHOW_LIVING_DETAILS_HINT_TEXT / TREE_SHARE_GUEST_NAME_HINT_TEXT', () => {
+  it('sind nicht-leere, erklärende Sätze', () => {
+    expect(SHOW_LIVING_DETAILS_HINT_TEXT.length).toBeGreaterThan(0);
+    expect(SHOW_LIVING_DETAILS_HINT_TEXT).toContain('Aus bedeutet');
+    expect(TREE_SHARE_GUEST_NAME_HINT_TEXT.length).toBeGreaterThan(0);
+    expect(TREE_SHARE_GUEST_NAME_HINT_TEXT).toContain('Vornamen');
+  });
+});
+
+describe('ALLOW_SUGGESTIONS_LABEL / ALLOW_SUGGESTIONS_HINT_TEXT', () => {
+  it('sind nicht-leere, erklärende Sätze', () => {
+    expect(ALLOW_SUGGESTIONS_LABEL.length).toBeGreaterThan(0);
+    expect(ALLOW_SUGGESTIONS_HINT_TEXT).toContain('Vorschläge');
+  });
+});
+
+describe('isVisitorNameKnownRelative', () => {
+  it('erkennt eine Übereinstimmung ohne Gross-/Kleinschreibung und ohne Randleerzeichen', () => {
+    expect(isVisitorNameKnownRelative('Rosi', ['rosi '])).toBe(true);
+  });
+
+  it('behandelt einen längeren, ähnlichen Namen NICHT als Übereinstimmung', () => {
+    expect(isVisitorNameKnownRelative('Rosemarie', ['Rosi'])).toBe(false);
+  });
+
+  it('findet eine Übereinstimmung irgendwo in der Liste', () => {
+    expect(isVisitorNameKnownRelative('Peter', ['Anna', 'Peter', 'Klaus'])).toBe(true);
+  });
+
+  it('ist false, wenn niemand passt', () => {
+    expect(isVisitorNameKnownRelative('Unbekannt', ['Anna', 'Peter'])).toBe(false);
+  });
+
+  it('ist false bei einer leeren Liste', () => {
+    expect(isVisitorNameKnownRelative('Anna', [])).toBe(false);
   });
 });
 

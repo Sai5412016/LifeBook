@@ -24,8 +24,9 @@ import { PersonAvatar } from '@/features/people/components/person-avatar';
 import { Chip, KeyboardSafeScreen, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 import { GENDER_OPTIONS, displayName, excludeSelf } from '../logic';
-import { RelativePhotoPickCancelledError, pickRelativePhotoUri } from '../photo';
+import { RelativePhotoPickCancelledError, pickRelativePhoto, type PickedPortrait } from '../photo';
 import type { RelativeGender, RelativeRow } from '../types';
+import { PortraitCropper } from './portrait-cropper';
 
 export type RelativeFormSubmitInput = {
   givenName: string;
@@ -70,9 +71,20 @@ export type RelativeFormRecord = {
   values: RelativeFormValues;
 };
 
-/** Which of the two jobs this form is doing — see the file header. */
+/**
+ * Which job this form is doing — see the file header. `createFromSuggestion`
+ * is a third case (2026-08-24, "Vorschläge übernehmen" — Task 4's
+ * "Bearbeiten und übernehmen"): still creates a brand-new relative, exactly
+ * like `create`, but its initial values come from a `tree_suggestions` row
+ * loaded asynchronously — so it needs the SAME hydrate-once/"Speichern"-
+ * locked-until-loaded mechanics as `edit`, not `create`'s always-ready
+ * blank start. An explicit third case rather than an optional field on
+ * `create`, per CLAUDE.md Architekturregel 9: "ein gemeinsam genutztes
+ * Formular muss ausdrücklich erfahren, welchen Fall es bedient".
+ */
 export type RelativeFormMode =
   | { kind: 'create' }
+  | { kind: 'createFromSuggestion'; record: RelativeFormRecord | null }
   | { kind: 'edit'; record: RelativeFormRecord | null };
 
 export type RelativeFormProps = {
@@ -117,6 +129,8 @@ export function RelativeForm({
   const [pickedPhotoUri, setPickedPhotoUri] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+  /** Set while the crop step (portrait-cropper.tsx) is open for a JUST-picked, not-yet-cropped image — see handlePickPhoto. */
+  const [cropSource, setCropSource] = useState<PickedPortrait | null>(null);
 
   const hydrate = useCallback((loaded: RelativeFormRecord) => {
     setGivenName(loaded.values.givenName);
@@ -135,10 +149,11 @@ export function RelativeForm({
     setNote(loaded.values.note);
   }, []);
 
-  const editRecord = mode.kind === 'edit' ? mode.record : null;
+  const editRecord = mode.kind === 'edit' || mode.kind === 'createFromSuggestion' ? mode.record : null;
   const hydrated = useHydrateOnce(editRecord, editRecord?.id, hydrate);
   // Anlegen hat nichts zu laden und ist deshalb sofort benutzbar; beim
-  // Bearbeiten erst, wenn der Datensatz wirklich da ist (Architekturregel 9).
+  // Bearbeiten UND beim Anlegen aus einem Vorschlag erst, wenn die Daten
+  // wirklich da sind (Architekturregel 9).
   const ready = mode.kind === 'create' || hydrated;
   const selfId = mode.kind === 'edit' ? editRecord?.id ?? null : null;
   const pickerCandidates = useMemo(() => excludeSelf(candidates, selfId), [candidates, selfId]);
@@ -149,8 +164,12 @@ export function RelativeForm({
 
   const handlePickPhoto = async () => {
     try {
-      const uri = await pickRelativePhotoUri();
-      setPickedPhotoUri(uri);
+      const picked = await pickRelativePhoto();
+      // Öffnet den Zuschnitt (portrait-cropper.tsx) — NICHT direkt als
+      // Vorschau übernommen. Bricht der Nutzer den Zuschnitt ab, bleibt
+      // `pickedPhotoUri` unangetastet, also das bisherige Portrait sichtbar
+      // (task requirement).
+      setCropSource(picked);
     } catch (pickError) {
       if (!(pickError instanceof RelativePhotoPickCancelledError)) {
         console.error('[LifeBook] Portrait konnte nicht ausgewählt werden', pickError);
@@ -337,6 +356,19 @@ export function RelativeForm({
           </Pressable>
         ) : null}
       </KeyboardSafeScreen>
+
+      {cropSource ? (
+        <PortraitCropper
+          imageUri={cropSource.uri}
+          imageWidth={cropSource.width}
+          imageHeight={cropSource.height}
+          onCancel={() => setCropSource(null)}
+          onConfirm={(croppedUri) => {
+            setPickedPhotoUri(croppedUri);
+            setCropSource(null);
+          }}
+        />
+      ) : null}
     </ThemedView>
   );
 }

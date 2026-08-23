@@ -27,8 +27,17 @@ export class PersonPhotoPickCancelledError extends Error {
   }
 }
 
-/** Opens the same system picker as the Chronik, restricted to a single image. */
-export async function pickPersonPhotoUri(): Promise<string> {
+/** A freshly picked, not-yet-cropped image and its natural pixel size — the size the picker already knows, so the crop step (features/tree/components/portrait-cropper.tsx, shared between both features) never needs a separate probe. */
+export type PickedPortrait = { uri: string; width: number; height: number };
+
+/**
+ * Opens the same system picker as the Chronik, restricted to a single
+ * image. Returns the RAW picked image — 2026-08-24: callers must now run
+ * it through features/tree/components/portrait-cropper.tsx before treating
+ * it as the new portrait (task requirement: the picked photo must never
+ * reach the bucket unchanged, see that file's own doc comment for why).
+ */
+export async function pickPersonPhoto(): Promise<PickedPortrait> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
     allowsMultipleSelection: false,
@@ -39,7 +48,8 @@ export async function pickPersonPhotoUri(): Promise<string> {
     throw new PersonPhotoPickCancelledError();
   }
 
-  return result.assets[0].uri;
+  const asset = result.assets[0];
+  return { uri: asset.uri, width: asset.width, height: asset.height };
 }
 
 /**

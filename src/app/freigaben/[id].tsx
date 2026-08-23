@@ -15,7 +15,9 @@ import { deviceTimeZone } from '@/core/time/device';
 import {
   DEVICE_LIMIT_CHOICES,
   SHARE_DISCLOSURE_TEXT,
+  VISITOR_NOT_IN_TREE_HINT,
   buildShareLink,
+  describeShareKind,
   describeShareState,
   formatDeviceSeenLabel,
   formatShareDeviceName,
@@ -25,6 +27,7 @@ import {
   formatRevokeConfirmation,
   formatShareMessage,
   isUnexpectedOrigin,
+  isVisitorNameKnownRelative,
 } from '@/features/shares/logic';
 import {
   deleteShare,
@@ -36,6 +39,7 @@ import {
   setShareDeviceLimit,
 } from '@/features/shares/repository';
 import type { ShareDeviceRow, ShareRow } from '@/features/shares/types';
+import { useRelativesOfHousehold } from '@/features/tree/repository';
 import { Chip, useUiColors } from '@/ui';
 
 export default function FreigabeDetailScreen() {
@@ -47,6 +51,11 @@ export default function FreigabeDetailScreen() {
   const [photoCount, setPhotoCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Für den "nicht im Stammbaum"-Hinweis in der Geräteliste (Task 3) — der
+  // Haushalt ist erst bekannt, sobald `share` geladen ist.
+  const { relatives } = useRelativesOfHousehold(share?.household_id);
+  const relativeGivenNames = relatives.map((relative) => relative.given_name);
 
   const reload = useCallback(() => {
     if (!id) {
@@ -209,7 +218,8 @@ export default function FreigabeDetailScreen() {
             type="small"
             themeColor={share.revoked_at ? 'dangerText' : undefined}
             style={!share.revoked_at ? { color: accent } : undefined}>
-            {describeShareState(share.revoked_at)} · {formatPhotoCountLabel(photoCount)}
+            {describeShareState(share.revoked_at)} · {describeShareKind(share.kind)}
+            {share.kind === 'photos' ? ` · ${formatPhotoCountLabel(photoCount)}` : ''}
           </ThemedText>
 
           {error ? (
@@ -254,17 +264,19 @@ export default function FreigabeDetailScreen() {
             </View>
           </View>
 
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <ThemedText type="smallBold">Fotos</ThemedText>
-              <Pressable onPress={() => router.push(`/freigaben/${share.id}/fotos`)} hitSlop={8}>
-                <ThemedText type="linkPrimary">Ändern</ThemedText>
-              </Pressable>
+          {share.kind === 'photos' ? (
+            <View style={styles.section}>
+              <View style={styles.sectionHeaderRow}>
+                <ThemedText type="smallBold">Fotos</ThemedText>
+                <Pressable onPress={() => router.push(`/freigaben/${share.id}/fotos`)} hitSlop={8}>
+                  <ThemedText type="linkPrimary">Ändern</ThemedText>
+                </Pressable>
+              </View>
+              <ThemedText type="small" themeColor="textSecondary">
+                {formatPhotoCountLabel(photoCount)}
+              </ThemedText>
             </View>
-            <ThemedText type="small" themeColor="textSecondary">
-              {formatPhotoCountLabel(photoCount)}
-            </ThemedText>
-          </View>
+          ) : null}
 
           <View style={styles.section}>
             <ThemedText type="smallBold">Verbundene Geräte</ThemedText>
@@ -276,10 +288,22 @@ export default function FreigabeDetailScreen() {
               devices.map((device) => {
                 const origin = formatShareDeviceOrigin(device.geo_country, device.geo_region, device.geo_city);
                 const unexpected = isUnexpectedOrigin(device.geo_country, device.geo_region);
+                const visitorName = device.visitor_name?.trim();
+                const visitorNotInTree = !!visitorName && !isVisitorNameKnownRelative(visitorName, relativeGivenNames);
                 return (
                   <ThemedView key={device.id} type="backgroundElement" style={styles.deviceRow}>
                     <View style={styles.deviceInfo}>
-                      <ThemedText type="small">
+                      {visitorName ? (
+                        <View style={styles.visitorNameRow}>
+                          <ThemedText type="smallBold">{visitorName}</ThemedText>
+                          {visitorNotInTree ? (
+                            <ThemedText type="small" themeColor="dangerText">
+                              {VISITOR_NOT_IN_TREE_HINT}
+                            </ThemedText>
+                          ) : null}
+                        </View>
+                      ) : null}
+                      <ThemedText type="small" themeColor={visitorName ? 'textSecondary' : undefined}>
                         {formatShareDeviceName(device.label, device.user_agent)}
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
@@ -361,5 +385,6 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.two,
   },
   deviceInfo: { flex: 1, gap: 2 },
+  visitorNameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   dangerSection: { gap: Spacing.two, marginTop: Spacing.two },
 });

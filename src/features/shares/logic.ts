@@ -10,7 +10,7 @@
 
 import { formatDayLabel, formatTimeLabel, toLocalDate } from '@/core/time';
 
-import type { ShareDeviceRow, ShareRow, ShareSummary } from './types';
+import type { ShareDeviceRow, ShareKind, ShareRow, ShareSummary } from './types';
 
 /* ────────────────────────────── Aufgabe 1: token & access code ────────────────────────────── */
 
@@ -136,6 +136,11 @@ export function formatShareMessage(name: string, link: string, accessCode: strin
 /** "aktiv" / "widerrufen" — the overview list's state label. */
 export function describeShareState(revokedAt: string | null): 'aktiv' | 'widerrufen' {
   return revokedAt ? 'widerrufen' : 'aktiv';
+}
+
+/** "Fotoalbum" / "Stammbaum" — the overview list's and detail screen's kind label. */
+export function describeShareKind(kind: ShareKind): 'Fotoalbum' | 'Stammbaum' {
+  return kind === 'tree' ? 'Stammbaum' : 'Fotoalbum';
 }
 
 /** "3 von 5 Geräten" — the overview list's device count, always against the CURRENT limit. */
@@ -313,6 +318,50 @@ export function isUnexpectedOrigin(
     return false;
   }
   return country.trim().toUpperCase() !== HOME_COUNTRY || region.trim().toUpperCase() !== HOME_REGION;
+}
+
+/* ────────────────────────────── Stammbaum-Freigaben (2026-08-23) ────────────────────────────── */
+
+/** Label neben dem Schalter beim Anlegen einer Stammbaum-Freigabe. */
+export const SHOW_LIVING_DETAILS_LABEL = 'Auch Fotos und Geburtsdaten lebender Personen zeigen';
+
+/** Erklärsatz direkt darunter — Standard ist AUS, dieser Satz sagt, was das bedeutet. */
+export const SHOW_LIVING_DETAILS_HINT_TEXT =
+  'Aus bedeutet: Verstorbene mit allen Angaben, Lebende nur mit Namen.';
+
+/**
+ * Hinweistext beim Anlegen einer Stammbaum-Freigabe (Task 4): stellt klar,
+ * dass Gäste ihren Vornamen eingeben müssen, und dass das in der App
+ * sichtbar wird — siehe isVisitorNameKnownRelative unten, das genau diesen
+ * eingegebenen Namen gegen den Stammbaum abgleicht.
+ */
+export const TREE_SHARE_GUEST_NAME_HINT_TEXT =
+  'Gäste geben beim Öffnen ihren Vornamen ein. Wer den Stammbaum geöffnet hat, siehst du bei den verbundenen Geräten dieser Freigabe.';
+
+/** Hinweiszeile in der Geräteliste, wenn der eingegebene Vorname zu niemandem im Stammbaum passt — ein Hinweis, keine Sperre (Task 3). */
+export const VISITOR_NOT_IN_TREE_HINT = 'nicht im Stammbaum';
+
+/** Label neben dem Schalter für Ergänzungsvorschläge beim Anlegen einer Stammbaum-Freigabe (2026-08-24). */
+export const ALLOW_SUGGESTIONS_LABEL = 'Verwandte dürfen Ergänzungen vorschlagen';
+
+/** Erklärsatz direkt darunter — Standard ist AN, dieser Satz sagt, was das bedeutet. */
+export const ALLOW_SUGGESTIONS_HINT_TEXT =
+  'Vorschläge landen bei dir zur Freigabe und ändern nichts von selbst.';
+
+/**
+ * Vergleicht den beim Einlösen eingegebenen Vornamen gegen die Vornamen
+ * aller Personen im Stammbaum des Haushalts — ohne Gross-/Kleinschreibung
+ * und ohne Leerzeichen am Rand, aber sonst exakt: "Rosi" gilt gegen
+ * "Rosemarie" NICHT als enthalten, nur eine vollständige Übereinstimmung
+ * zählt. Ein Hinweis für die Eltern ("könnte das falsche Gerät sein"),
+ * keine Zugriffsprüfung — der Zugang funktioniert unabhängig vom Ergebnis.
+ */
+export function isVisitorNameKnownRelative(
+  visitorName: string,
+  relativeGivenNames: readonly string[],
+): boolean {
+  const normalized = visitorName.trim().toLowerCase();
+  return relativeGivenNames.some((name) => name.trim().toLowerCase() === normalized);
 }
 
 /* ────────────────────────────── Aufgabe 2: repository-facing pure helpers ────────────────────────────── */

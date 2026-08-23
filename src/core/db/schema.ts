@@ -474,6 +474,51 @@ function buildAppSchema() {
     { indexes: { relative: ['relative_id'], photo: ['photo_id'] } },
   );
 
+  // Guest-submitted proposals from the shared "Stammbaum" viewer (Live
+  // angelegt, migration `tree_suggestions`) — read-write for the app,
+  // WRITE-ONLY-BY-GUESTS-VIA-EDGE-FUNCTION in intent: nothing in this
+  // client ever inserts a row here, only reads and updates `status`/
+  // `decided_at`/`decided_by` (see features/tree/repository.ts). Every
+  // guest-typed column below (`visitor_name`, `given_name`, `family_name`,
+  // `birth_name`, `born_place`, `died_place`, `message`) is untrusted free
+  // text — displayed only, never evaluated, always length-limited on
+  // screen (features/tree/suggestions.ts#truncateGuestText). `relative_id`/
+  // `mother_id`/`father_id` are NOT foreign keys, same convention as
+  // `relatives` itself. `deceased` is a TRI-STATE integer here, unlike
+  // `relatives.deceased`: NULL means "not proposed", 0/1 is an actual
+  // proposed value — a kind 'edit' suggestion only sets the fields the
+  // guest actually touched.
+  const tree_suggestions = new Table(
+    {
+      household_id: column.text,
+      share_id: column.text,
+      device_id: column.text,
+      visitor_name: column.text,
+      kind: column.text, // add | edit | note
+      relative_id: column.text, // set only for kind 'edit' — NOT a foreign key
+      given_name: column.text,
+      family_name: column.text,
+      birth_name: column.text,
+      gender: column.text,
+      born_on: column.text,
+      born_place: column.text,
+      deceased: column.integer, // NULL = not proposed, 0/1 = proposed value
+      died_on: column.text,
+      died_place: column.text,
+      mother_id: column.text, // NOT a foreign key
+      father_id: column.text, // NOT a foreign key
+      message: column.text, // the whole content for kind 'note', unused otherwise
+      status: column.text, // open | accepted | rejected
+      created_at: column.text,
+      decided_at: column.text,
+      decided_by: column.text,
+      updated_at: column.text,
+      deleted_at: column.text,
+      source_device_id: column.text,
+    },
+    { indexes: { household_status: ['household_id', 'status'] } },
+  );
+
   /* ────────────────────────────── Erinnerungen & Einstellungen (§5.5) ────────────────────────────── */
 
   const reminders = new Table({
@@ -523,6 +568,7 @@ function buildAppSchema() {
     relatives,
     relative_unions,
     relative_photos,
+    tree_suggestions,
     reminders,
     user_preferences,
   });

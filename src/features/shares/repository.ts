@@ -56,7 +56,7 @@ import {
   generateShareToken,
   summarizeShares,
 } from './logic';
-import type { ShareDeviceRow, ShareRow, ShareSummary } from './types';
+import type { ShareDeviceRow, ShareKind, ShareRow, ShareSummary } from './types';
 
 /** Generous relative to the 32-byte floor `generateShareToken` requires — no margin concerns. */
 const TOKEN_RANDOM_BYTES = 32;
@@ -74,7 +74,13 @@ export type CreateShareInput = {
   householdId: string;
   userId: string;
   name: string;
+  kind: ShareKind;
+  /** Only meaningful for `kind: 'tree'` — see types.ts#ShareRow.show_living_details. */
+  showLivingDetails: boolean;
+  /** Only meaningful for `kind: 'tree'` — see types.ts#ShareRow.allow_suggestions. */
+  allowSuggestions: boolean;
   deviceLimit: number;
+  /** Ignored for `kind: 'tree'` — a tree share always shares the whole tree, never a photo selection. */
   photoIds: readonly string[];
 };
 
@@ -99,6 +105,9 @@ export async function createShare(input: CreateShareInput): Promise<ShareRow> {
     name: input.name,
     token,
     access_code: accessCode,
+    kind: input.kind,
+    show_living_details: input.showLivingDetails,
+    allow_suggestions: input.allowSuggestions,
     device_limit: input.deviceLimit,
     allow_download: true,
     expires_at: null,
@@ -117,7 +126,10 @@ export async function createShare(input: CreateShareInput): Promise<ShareRow> {
     throw new Error(describeSupabaseError(error));
   }
 
-  if (input.photoIds.length > 0) {
+  // Eine Stammbaum-Freigabe teilt immer den ganzen Baum — eine Fotoauswahl
+  // ergibt für sie keinen Sinn und wird hier bewusst ignoriert, selbst wenn
+  // der Aufrufer versehentlich welche mitgäbe.
+  if (input.kind === 'photos' && input.photoIds.length > 0) {
     await addPhotosToShare(id, input.photoIds);
   }
 
