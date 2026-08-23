@@ -14,7 +14,12 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useActiveChild } from '@/features/household/repository';
-import { describeShareState, formatDeviceCountLabel, formatPhotoCountLabel } from '@/features/shares/logic';
+import {
+  describeShareKind,
+  describeShareState,
+  formatDeviceCountLabel,
+  formatPhotoCountLabel,
+} from '@/features/shares/logic';
 import { listShareSummaries } from '@/features/shares/repository';
 import type { ShareSummary } from '@/features/shares/types';
 import { Button, useUiColors } from '@/ui';
@@ -65,8 +70,8 @@ export default function FreigabenScreen() {
 
         <ScrollView contentContainerStyle={styles.content}>
           <ThemedText type="small" themeColor="textSecondary">
-            Freigaben teilen ausgewählte Fotos über einen Link und einen Zugangscode — ohne dass die
-            Empfänger die App installieren müssen.
+            Freigaben teilen ausgewählte Fotos oder den Stammbaum über einen Link und einen Zugangscode
+            — ohne dass die Empfänger die App installieren müssen.
           </ThemedText>
 
           <Button label="Freigabe anlegen" onPress={() => router.push('/freigaben/neu')} disabled={!child} />
@@ -88,9 +93,18 @@ export default function FreigabenScreen() {
           {(shares ?? []).map((share) => (
             <Pressable key={share.id} onPress={() => router.push(`/freigaben/${share.id}`)}>
               <ThemedView type="backgroundElement" style={styles.card}>
-                <ThemedText type="smallBold">{share.name}</ThemedText>
+                <View style={styles.cardTitleRow}>
+                  <ThemedText type="smallBold">{share.name}</ThemedText>
+                  <View style={[styles.kindBadge, { borderColor: accent }]}>
+                    <ThemedText type="small" style={{ color: accent }}>
+                      {describeShareKind(share.kind)}
+                    </ThemedText>
+                  </View>
+                </View>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {formatPhotoCountLabel(share.photoCount)} · {formatDeviceCountLabel(share.deviceCount, share.device_limit)}
+                  {share.kind === 'tree'
+                    ? formatDeviceCountLabel(share.deviceCount, share.device_limit)
+                    : `${formatPhotoCountLabel(share.photoCount)} · ${formatDeviceCountLabel(share.deviceCount, share.device_limit)}`}
                 </ThemedText>
                 <ThemedText
                   type="small"
@@ -129,5 +143,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     borderRadius: Spacing.three,
+  },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  kindBadge: {
+    borderWidth: 1,
+    borderRadius: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 2,
   },
 });

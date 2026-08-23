@@ -1,6 +1,8 @@
 /**
- * Freigabe anlegen — Name, Gerätelimit, Fotoauswahl. Erreichbar über den
- * "Freigabe anlegen"-Knopf in Freigaben (index.tsx).
+ * Freigabe anlegen — zuerst die Art wählen (Fotoalbum oder Stammbaum), dann
+ * Name, Gerätelimit und je nach Art entweder Fotoauswahl oder den Schalter
+ * für Lebende. Erreichbar über den "Freigabe anlegen"-Knopf in Freigaben
+ * (index.tsx).
  *
  * Enthält ein Textfeld (Name), daher in KeyboardSafeScreen (CLAUDE.md
  * Architekturregel 7).
@@ -8,7 +10,7 @@
 
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -16,8 +18,15 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { useActiveChild } from '@/features/household/repository';
 import { SharePhotoPicker } from '@/features/shares/components/photo-picker';
-import { DEFAULT_DEVICE_LIMIT, DEVICE_LIMIT_CHOICES } from '@/features/shares/logic';
+import {
+  DEFAULT_DEVICE_LIMIT,
+  DEVICE_LIMIT_CHOICES,
+  SHOW_LIVING_DETAILS_HINT_TEXT,
+  SHOW_LIVING_DETAILS_LABEL,
+  TREE_SHARE_GUEST_NAME_HINT_TEXT,
+} from '@/features/shares/logic';
 import { createShare } from '@/features/shares/repository';
+import type { ShareKind } from '@/features/shares/types';
 import { toggleSelected } from '@/features/photos/selection';
 import { Chip, KeyboardSafeScreen, TextField } from '@/ui';
 
@@ -25,9 +34,11 @@ export default function NeueFreigabeScreen() {
   const { session } = useAuth();
   const { child } = useActiveChild();
 
+  const [kind, setKind] = useState<ShareKind>('photos');
   const [name, setName] = useState('');
   const [deviceLimit, setDeviceLimit] = useState<number>(DEFAULT_DEVICE_LIMIT);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [showLivingDetails, setShowLivingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -48,8 +59,10 @@ export default function NeueFreigabeScreen() {
         householdId: child.householdId,
         userId: session.user.id,
         name: name.trim(),
+        kind,
+        showLivingDetails,
         deviceLimit,
-        photoIds: selectedPhotoIds,
+        photoIds: kind === 'photos' ? selectedPhotoIds : [],
       });
       router.replace(`/freigaben/${share.id}`);
     } catch (saveError) {
@@ -83,6 +96,16 @@ export default function NeueFreigabeScreen() {
   return (
     <ThemedView style={styles.root}>
       <KeyboardSafeScreen header={header} contentContainerStyle={styles.content}>
+        <View style={styles.section}>
+          <ThemedText type="small" themeColor="textSecondary">
+            Art der Freigabe
+          </ThemedText>
+          <View style={styles.chipRow}>
+            <Chip label="Fotoalbum" selected={kind === 'photos'} onPress={() => setKind('photos')} />
+            <Chip label="Stammbaum" selected={kind === 'tree'} onPress={() => setKind('tree')} />
+          </View>
+        </View>
+
         <TextField label="Name" value={name} onChangeText={setName} placeholder="z. B. Oma und Opa" autoCapitalize="words" />
 
         <View style={styles.section}>
@@ -102,14 +125,29 @@ export default function NeueFreigabeScreen() {
           </ThemedText>
         ) : null}
 
-        <View style={styles.section}>
-          <ThemedText type="smallBold">Fotos</ThemedText>
-          <SharePhotoPicker
-            childId={child?.childId}
-            selectedIds={selectedPhotoIds}
-            onToggle={(photoId) => setSelectedPhotoIds((current) => toggleSelected(current, photoId))}
-          />
-        </View>
+        {kind === 'photos' ? (
+          <View style={styles.section}>
+            <ThemedText type="smallBold">Fotos</ThemedText>
+            <SharePhotoPicker
+              childId={child?.childId}
+              selectedIds={selectedPhotoIds}
+              onToggle={(photoId) => setSelectedPhotoIds((current) => toggleSelected(current, photoId))}
+            />
+          </View>
+        ) : (
+          <View style={styles.section}>
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>{SHOW_LIVING_DETAILS_LABEL}</ThemedText>
+              <Switch value={showLivingDetails} onValueChange={setShowLivingDetails} />
+            </View>
+            <ThemedText type="small" themeColor="textSecondary">
+              {SHOW_LIVING_DETAILS_HINT_TEXT}
+            </ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {TREE_SHARE_GUEST_NAME_HINT_TEXT}
+            </ThemedText>
+          </View>
+        )}
       </KeyboardSafeScreen>
     </ThemedView>
   );
@@ -131,4 +169,6 @@ const styles = StyleSheet.create({
   },
   section: { gap: Spacing.two },
   chipRow: { flexDirection: 'row', gap: Spacing.two, flexWrap: 'wrap' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  switchLabel: { flex: 1 },
 });

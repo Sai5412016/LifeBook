@@ -6,6 +6,9 @@
  * see the session report).
  */
 
+/** What a share hands a guest: the household's photo selection, or the whole family tree. */
+export type ShareKind = 'photos' | 'tree';
+
 /** One row of `public.shares`. */
 export type ShareRow = {
   id: string;
@@ -15,6 +18,15 @@ export type ShareRow = {
   token: string;
   /** The 6-character human-readable code — see logic.ts#generateAccessCode. */
   access_code: string;
+  kind: ShareKind;
+  /**
+   * Only meaningful for `kind: 'tree'` — whether a guest also sees photos
+   * and birth dates of LIVING relatives, not just deceased ones. Default
+   * `false`: a tree share is safe to send by default, showing living
+   * people's names only (see logic.ts#SHOW_LIVING_DETAILS_HINT_TEXT for the
+   * exact wording shown next to the switch that sets this).
+   */
+  show_living_details: boolean;
   device_limit: number;
   allow_download: boolean;
   /** NULL = unbegrenzt. */
@@ -48,6 +60,14 @@ export type ShareDeviceRow = {
   geo_country: string | null;
   geo_region: string | null;
   geo_city: string | null;
+  /**
+   * Vorname, den der Gast beim Einlösen des Codes eingegeben hat — von der
+   * (noch nicht in dieser Sitzung gebauten) Viewer-Funktion gefüllt, aus
+   * der App heraus nie geschrieben. NULL bei jedem Foto-Album-Zugriff, für
+   * den kein Name abgefragt wird, und bei jedem älteren Gerät von vor
+   * dieser Spalte.
+   */
+  visitor_name: string | null;
 };
 
 /** A share plus the counts the overview list needs — computed by the repository, not stored. */
