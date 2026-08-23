@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACCESS_CODE_LENGTH,
+  ALLOW_SUGGESTIONS_HINT_TEXT,
+  ALLOW_SUGGESTIONS_LABEL,
   DEFAULT_DEVICE_LIMIT,
   DEVICE_LIMIT_CHOICES,
   SHARE_DISCLOSURE_TEXT,
@@ -205,6 +207,7 @@ describe('summarizeShares', () => {
     access_code: 'ABCDEF',
     kind: 'photos',
     show_living_details: false,
+    allow_suggestions: true,
     device_limit: 5,
     allow_download: true,
     expires_at: null,
@@ -387,6 +390,13 @@ describe('SHOW_LIVING_DETAILS_HINT_TEXT / TREE_SHARE_GUEST_NAME_HINT_TEXT', () =
     expect(SHOW_LIVING_DETAILS_HINT_TEXT).toContain('Aus bedeutet');
     expect(TREE_SHARE_GUEST_NAME_HINT_TEXT.length).toBeGreaterThan(0);
     expect(TREE_SHARE_GUEST_NAME_HINT_TEXT).toContain('Vornamen');
+  });
+});
+
+describe('ALLOW_SUGGESTIONS_LABEL / ALLOW_SUGGESTIONS_HINT_TEXT', () => {
+  it('sind nicht-leere, erklärende Sätze', () => {
+    expect(ALLOW_SUGGESTIONS_LABEL.length).toBeGreaterThan(0);
+    expect(ALLOW_SUGGESTIONS_HINT_TEXT).toContain('Vorschläge');
   });
 });
 

@@ -77,6 +77,8 @@ export type CreateShareInput = {
   kind: ShareKind;
   /** Only meaningful for `kind: 'tree'` — see types.ts#ShareRow.show_living_details. */
   showLivingDetails: boolean;
+  /** Only meaningful for `kind: 'tree'` — see types.ts#ShareRow.allow_suggestions. */
+  allowSuggestions: boolean;
   deviceLimit: number;
   /** Ignored for `kind: 'tree'` — a tree share always shares the whole tree, never a photo selection. */
   photoIds: readonly string[];
@@ -105,6 +107,7 @@ export async function createShare(input: CreateShareInput): Promise<ShareRow> {
     access_code: accessCode,
     kind: input.kind,
     show_living_details: input.showLivingDetails,
+    allow_suggestions: input.allowSuggestions,
     device_limit: input.deviceLimit,
     allow_download: true,
     expires_at: null,

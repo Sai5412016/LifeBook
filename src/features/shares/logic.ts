@@ -341,6 +341,13 @@ export const TREE_SHARE_GUEST_NAME_HINT_TEXT =
 /** Hinweiszeile in der Geräteliste, wenn der eingegebene Vorname zu niemandem im Stammbaum passt — ein Hinweis, keine Sperre (Task 3). */
 export const VISITOR_NOT_IN_TREE_HINT = 'nicht im Stammbaum';
 
+/** Label neben dem Schalter für Ergänzungsvorschläge beim Anlegen einer Stammbaum-Freigabe (2026-08-24). */
+export const ALLOW_SUGGESTIONS_LABEL = 'Verwandte dürfen Ergänzungen vorschlagen';
+
+/** Erklärsatz direkt darunter — Standard ist AN, dieser Satz sagt, was das bedeutet. */
+export const ALLOW_SUGGESTIONS_HINT_TEXT =
+  'Vorschläge landen bei dir zur Freigabe und ändern nichts von selbst.';
+
 /**
  * Vergleicht den beim Einlösen eingegebenen Vornamen gegen die Vornamen
  * aller Personen im Stammbaum des Haushalts — ohne Gross-/Kleinschreibung

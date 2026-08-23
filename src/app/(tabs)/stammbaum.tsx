@@ -44,7 +44,12 @@ import {
   lifeLine,
   relationLabel,
 } from '@/features/tree/logic';
-import { ensureRootRelative, useRelativesOfHousehold, useUnionsOfHousehold } from '@/features/tree/repository';
+import {
+  ensureRootRelative,
+  useRelativesOfHousehold,
+  useTreeSuggestionsOfHousehold,
+  useUnionsOfHousehold,
+} from '@/features/tree/repository';
 import type { RelativeRow } from '@/features/tree/types';
 import { Button, Chip } from '@/ui';
 
@@ -56,6 +61,8 @@ export default function StammbaumScreen() {
   const { child } = useActiveChild();
   const { relatives, isLoading } = useRelativesOfHousehold(child?.householdId);
   const { unions } = useUnionsOfHousehold(child?.householdId);
+  const { suggestions } = useTreeSuggestionsOfHousehold(child?.householdId);
+  const openSuggestionCount = suggestions.filter((suggestion) => suggestion.status === 'open').length;
   const [ensuring, setEnsuring] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
@@ -107,6 +114,19 @@ export default function StammbaumScreen() {
 
         <View style={styles.actions}>
           <Button label="Person hinzufügen" onPress={() => router.push('/stammbaum/neu')} disabled={!child} />
+          <View>
+            <Button
+              label="Vorschläge"
+              variant="secondary"
+              onPress={() => router.push('/stammbaum/vorschlaege')}
+              disabled={!child}
+            />
+            {openSuggestionCount > 0 ? (
+              <View style={styles.suggestionBadge}>
+                <ThemedText style={styles.suggestionBadgeText}>{openSuggestionCount}</ThemedText>
+              </View>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.viewModeRow}>
@@ -184,7 +204,20 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   safeArea: { flex: 1, paddingHorizontal: Spacing.three },
   header: { paddingTop: Spacing.three },
-  actions: { paddingVertical: Spacing.three },
+  actions: { flexDirection: 'row', gap: Spacing.two, paddingVertical: Spacing.three },
+  suggestionBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 4,
+    backgroundColor: '#C0392B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionBadgeText: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
   viewModeRow: { flexDirection: 'row', gap: Spacing.two, paddingBottom: Spacing.two },
   spinner: { paddingTop: Spacing.five },
   listContent: { paddingBottom: BottomTabInset + Spacing.four, gap: Spacing.two },

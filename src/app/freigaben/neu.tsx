@@ -19,6 +19,8 @@ import { useAuth } from '@/core/auth/session-store';
 import { useActiveChild } from '@/features/household/repository';
 import { SharePhotoPicker } from '@/features/shares/components/photo-picker';
 import {
+  ALLOW_SUGGESTIONS_HINT_TEXT,
+  ALLOW_SUGGESTIONS_LABEL,
   DEFAULT_DEVICE_LIMIT,
   DEVICE_LIMIT_CHOICES,
   SHOW_LIVING_DETAILS_HINT_TEXT,
@@ -39,6 +41,7 @@ export default function NeueFreigabeScreen() {
   const [deviceLimit, setDeviceLimit] = useState<number>(DEFAULT_DEVICE_LIMIT);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [showLivingDetails, setShowLivingDetails] = useState(false);
+  const [allowSuggestions, setAllowSuggestions] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -61,6 +64,7 @@ export default function NeueFreigabeScreen() {
         name: name.trim(),
         kind,
         showLivingDetails,
+        allowSuggestions,
         deviceLimit,
         photoIds: kind === 'photos' ? selectedPhotoIds : [],
       });
@@ -143,6 +147,15 @@ export default function NeueFreigabeScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               {SHOW_LIVING_DETAILS_HINT_TEXT}
             </ThemedText>
+
+            <View style={styles.switchRow}>
+              <ThemedText style={styles.switchLabel}>{ALLOW_SUGGESTIONS_LABEL}</ThemedText>
+              <Switch value={allowSuggestions} onValueChange={setAllowSuggestions} />
+            </View>
+            <ThemedText type="small" themeColor="textSecondary">
+              {ALLOW_SUGGESTIONS_HINT_TEXT}
+            </ThemedText>
+
             <ThemedText type="small" themeColor="textSecondary">
               {TREE_SHARE_GUEST_NAME_HINT_TEXT}
             </ThemedText>

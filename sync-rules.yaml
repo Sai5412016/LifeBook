@@ -36,6 +36,7 @@ bucket_definitions:
       - SELECT * FROM relatives           WHERE household_id = bucket.household_id
       - SELECT * FROM relative_unions     WHERE household_id = bucket.household_id
       - SELECT * FROM relative_photos     WHERE household_id = bucket.household_id
+      - SELECT * FROM tree_suggestions    WHERE household_id = bucket.household_id
       - SELECT * FROM reminders           WHERE household_id = bucket.household_id
 
   user_data:

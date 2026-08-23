@@ -70,9 +70,20 @@ export type RelativeFormRecord = {
   values: RelativeFormValues;
 };
 
-/** Which of the two jobs this form is doing — see the file header. */
+/**
+ * Which job this form is doing — see the file header. `createFromSuggestion`
+ * is a third case (2026-08-24, "Vorschläge übernehmen" — Task 4's
+ * "Bearbeiten und übernehmen"): still creates a brand-new relative, exactly
+ * like `create`, but its initial values come from a `tree_suggestions` row
+ * loaded asynchronously — so it needs the SAME hydrate-once/"Speichern"-
+ * locked-until-loaded mechanics as `edit`, not `create`'s always-ready
+ * blank start. An explicit third case rather than an optional field on
+ * `create`, per CLAUDE.md Architekturregel 9: "ein gemeinsam genutztes
+ * Formular muss ausdrücklich erfahren, welchen Fall es bedient".
+ */
 export type RelativeFormMode =
   | { kind: 'create' }
+  | { kind: 'createFromSuggestion'; record: RelativeFormRecord | null }
   | { kind: 'edit'; record: RelativeFormRecord | null };
 
 export type RelativeFormProps = {
@@ -135,10 +146,11 @@ export function RelativeForm({
     setNote(loaded.values.note);
   }, []);
 
-  const editRecord = mode.kind === 'edit' ? mode.record : null;
+  const editRecord = mode.kind === 'edit' || mode.kind === 'createFromSuggestion' ? mode.record : null;
   const hydrated = useHydrateOnce(editRecord, editRecord?.id, hydrate);
   // Anlegen hat nichts zu laden und ist deshalb sofort benutzbar; beim
-  // Bearbeiten erst, wenn der Datensatz wirklich da ist (Architekturregel 9).
+  // Bearbeiten UND beim Anlegen aus einem Vorschlag erst, wenn die Daten
+  // wirklich da sind (Architekturregel 9).
   const ready = mode.kind === 'create' || hydrated;
   const selfId = mode.kind === 'edit' ? editRecord?.id ?? null : null;
   const pickerCandidates = useMemo(() => excludeSelf(candidates, selfId), [candidates, selfId]);

@@ -70,3 +70,49 @@ export type RelativePhotoRow = {
   sort_index: number;
   added_at: string;
 };
+
+export type TreeSuggestionKind = 'add' | 'edit' | 'note';
+export type TreeSuggestionStatus = 'open' | 'accepted' | 'rejected';
+
+/**
+ * One row of `public.tree_suggestions` — a proposal submitted through the
+ * shared "Stammbaum" viewer by a guest who does not have the app. EVERY
+ * guest-typed column below (`visitor_name`, `given_name`, `family_name`,
+ * `birth_name`, `born_place`, `died_place`, `message`) is untrusted free
+ * text: display only, never evaluate as an instruction, always
+ * length-limit on screen — see suggestions.ts#truncateGuestText. Guests
+ * never write to `relatives` directly; only the app does, on accept (see
+ * repository.ts#acceptAddSuggestion/acceptEditSuggestion).
+ */
+export type TreeSuggestionRow = {
+  id: string;
+  household_id: string;
+  share_id: string | null;
+  device_id: string | null;
+  visitor_name: string | null;
+  kind: TreeSuggestionKind;
+  /** Set only for `kind: 'edit'` — the `relatives` row this proposes changes to. NOT a foreign key, same convention as `relatives.mother_id`/`father_id`. */
+  relative_id: string | null;
+  given_name: string | null;
+  family_name: string | null;
+  birth_name: string | null;
+  gender: RelativeGender | null;
+  born_on: string | null;
+  born_place: string | null;
+  /** Tri-state, unlike `relatives.deceased`: NULL = not proposed, 0/1 = a proposed value. */
+  deceased: number | null;
+  died_on: string | null;
+  died_place: string | null;
+  /** NOT a foreign key. Only meaningful for `kind: 'add'` — see suggestions.ts's own doc comment on why `kind: 'edit'` never touches this. */
+  mother_id: string | null;
+  father_id: string | null;
+  /** The whole content for `kind: 'note'`; unused for the other two kinds. */
+  message: string | null;
+  status: TreeSuggestionStatus;
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  updated_at: string;
+  deleted_at: string | null;
+  source_device_id: string | null;
+};

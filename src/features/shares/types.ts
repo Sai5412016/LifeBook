@@ -27,6 +27,14 @@ export type ShareRow = {
    * exact wording shown next to the switch that sets this).
    */
   show_living_details: boolean;
+  /**
+   * Only meaningful for `kind: 'tree'` — whether a guest sees the "Ergänzung
+   * vorschlagen" action at all in the viewer. Default `true`: proposals are
+   * always reviewed by a household member before anything changes (see
+   * features/tree/repository.ts's accept/reject functions), so leaving this
+   * on by default costs nothing a caregiver didn't already control.
+   */
+  allow_suggestions: boolean;
   device_limit: number;
   allow_download: boolean;
   /** NULL = unbegrenzt. */

@@ -24,7 +24,8 @@ import { nowUtcIso, toLocalDate } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
 
 import { DEFAULT_UNION_KIND, formatGermanDate, partnerIdFromUnion } from './logic';
-import type { RelativeGender, RelativeRow, RelativeUnionRow } from './types';
+import { SUGGESTIBLE_RELATIVE_FIELDS, isSuggestionFieldSet } from './suggestions';
+import type { RelativeGender, RelativeRow, RelativeUnionRow, TreeSuggestionRow } from './types';
 
 const RELATIVE_COLUMNS = `
   id, household_id, child_id, given_name, family_name, birth_name, gender,
@@ -35,6 +36,13 @@ const RELATIVE_COLUMNS = `
 const UNION_COLUMNS = `
   id, household_id, a_id, b_id, kind, since_on, until_on,
   created_by, created_at, updated_at, deleted_at, source_device_id
+`;
+
+const SUGGESTION_COLUMNS = `
+  id, household_id, share_id, device_id, visitor_name, kind, relative_id,
+  given_name, family_name, birth_name, gender, born_on, born_place, deceased,
+  died_on, died_place, mother_id, father_id, message, status,
+  created_at, decided_at, decided_by, updated_at, deleted_at, source_device_id
 `;
 
 async function loadRelativeById(db: AbstractPowerSyncDatabase, relativeId: string): Promise<RelativeRow | null> {
@@ -360,4 +368,182 @@ export async function ensureRootRelative(
  */
 export async function removePhotoFromAllRelatives(db: AbstractPowerSyncDatabase, photoId: string): Promise<void> {
   await db.execute('DELETE FROM relative_photos WHERE photo_id = ?', [photoId]);
+}
+
+/* ────────────────────────────── Vorschläge aus dem geteilten Stammbaum (2026-08-24) ────────────────────────────── */
+
+/** Reactive: every non-deleted suggestion of a household, newest first — the review screen splits this into "offen"/"erledigt" itself, and the tab button's badge just counts `status === 'open'` from the same list. */
+export function useTreeSuggestionsOfHousehold(householdId: string | undefined): {
+  suggestions: TreeSuggestionRow[];
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useQuery<TreeSuggestionRow>(
+    `SELECT ${SUGGESTION_COLUMNS} FROM tree_suggestions
+      WHERE household_id = ? AND deleted_at IS NULL
+      ORDER BY created_at DESC`,
+    [householdId ?? ''],
+  );
+  return { suggestions: data ?? [], isLoading };
+}
+
+/** Reactive single suggestion by id, for the "Bearbeiten und übernehmen" prefill in neu.tsx/bearbeiten.tsx. `isLoading` — not the value itself — is what tells a caller "still loading" apart from "does not exist", same convention as `useRelativeById`. */
+export function useTreeSuggestionById(suggestionId: string | undefined): {
+  suggestion: TreeSuggestionRow | undefined;
+  isLoading: boolean;
+} {
+  const { data, isLoading } = useQuery<TreeSuggestionRow>(
+    `SELECT ${SUGGESTION_COLUMNS} FROM tree_suggestions WHERE id = ? AND deleted_at IS NULL`,
+    [suggestionId ?? ''],
+  );
+  return { suggestion: data?.[0], isLoading };
+}
+
+async function existingRelativeId(
+  db: AbstractPowerSyncDatabase,
+  householdId: string,
+  candidateId: string | null,
+): Promise<string | null> {
+  if (!candidateId) {
+    return null;
+  }
+  const rows = await db.getAll<{ id: string }>(
+    'SELECT id FROM relatives WHERE id = ? AND household_id = ? AND deleted_at IS NULL',
+    [candidateId, householdId],
+  );
+  return rows[0]?.id ?? null;
+}
+
+async function markSuggestionDecided(
+  db: AbstractPowerSyncDatabase,
+  suggestionId: string,
+  userId: string,
+  status: 'accepted' | 'rejected',
+): Promise<void> {
+  const now = nowUtcIso();
+  await db.execute('UPDATE tree_suggestions SET status = ?, decided_at = ?, decided_by = ?, updated_at = ? WHERE id = ?', [
+    status,
+    now,
+    userId,
+    now,
+    suggestionId,
+  ]);
+}
+
+/**
+ * Marks a suggestion accepted without touching `relatives` — used both by
+ * this module's own direct-accept functions below AND by the "Bearbeiten
+ * und übernehmen" screens (neu.tsx/bearbeiten.tsx), which write the
+ * `relatives` row themselves via the normal form path (`addRelative`/
+ * `updateRelative`) and then call this once that write has succeeded —
+ * same write-before-decide order as the direct-accept path (Fallstrick 12).
+ */
+export async function markSuggestionAccepted(
+  db: AbstractPowerSyncDatabase,
+  suggestionId: string,
+  userId: string,
+): Promise<void> {
+  await markSuggestionDecided(db, suggestionId, userId, 'accepted');
+}
+
+/** "Ablehnen" — status only, nothing deleted (task requirement: stays readable in the collapsed "Erledigt" section). */
+export async function rejectSuggestion(db: AbstractPowerSyncDatabase, suggestionId: string, userId: string): Promise<void> {
+  await markSuggestionDecided(db, suggestionId, userId, 'rejected');
+}
+
+export type AcceptAddSuggestionResult = {
+  relativeId: string;
+  /** true when the suggestion named a mother_id/father_id that is NOT a real, current relative of this household — dropped rather than written, see this function's own doc comment. */
+  droppedMotherId: boolean;
+  droppedFatherId: boolean;
+};
+
+/**
+ * Direct "Übernehmen" for a `kind: 'add'` suggestion — creates the
+ * `relatives` row straight from the suggested fields, no form step.
+ * `mother_id`/`father_id` are carried over ONLY when that id is a REAL,
+ * non-deleted relative of THIS household right now (task requirement): a
+ * guest cannot be trusted to have typed a valid id, and a dangling
+ * reference would silently point at nothing. Writes the relative BEFORE
+ * marking the suggestion accepted (Fallstrick 12).
+ */
+export async function acceptAddSuggestion(
+  db: AbstractPowerSyncDatabase,
+  suggestion: TreeSuggestionRow,
+  userId: string,
+): Promise<AcceptAddSuggestionResult> {
+  const [motherId, fatherId] = await Promise.all([
+    existingRelativeId(db, suggestion.household_id, suggestion.mother_id),
+    existingRelativeId(db, suggestion.household_id, suggestion.father_id),
+  ]);
+
+  const relativeId = await addRelative(db, {
+    householdId: suggestion.household_id,
+    userId,
+    givenName: suggestion.given_name ?? '',
+    familyName: suggestion.family_name,
+    birthName: suggestion.birth_name,
+    gender: suggestion.gender,
+    bornOn: suggestion.born_on,
+    bornPlace: suggestion.born_place,
+    deceased: suggestion.deceased === 1,
+    diedOn: suggestion.died_on,
+    diedPlace: suggestion.died_place,
+    motherId,
+    fatherId,
+    partnerId: null,
+    note: null,
+  });
+
+  await markSuggestionAccepted(db, suggestion.id, userId);
+
+  return {
+    relativeId,
+    droppedMotherId: !!suggestion.mother_id && !motherId,
+    droppedFatherId: !!suggestion.father_id && !fatherId,
+  };
+}
+
+/**
+ * Direct "Übernehmen" for a `kind: 'edit'` suggestion — overwrites ONLY the
+ * fields the suggestion actually proposed (task requirement), using the
+ * exact same field list `suggestions.ts#changedFields` displays, so what a
+ * caregiver saw on screen is exactly what this writes — never
+ * `mother_id`/`father_id`, see `SUGGESTIBLE_RELATIVE_FIELDS`'s own doc
+ * comment for why. Writes the relative BEFORE marking the suggestion
+ * accepted (Fallstrick 12).
+ */
+export async function acceptEditSuggestion(
+  db: AbstractPowerSyncDatabase,
+  suggestion: TreeSuggestionRow,
+  userId: string,
+): Promise<void> {
+  if (!suggestion.relative_id) {
+    throw new Error('tree: Änderungsvorschlag ohne Zielperson');
+  }
+  const relative = await loadRelativeById(db, suggestion.relative_id);
+  if (!relative) {
+    throw new Error('tree: Zielperson des Vorschlags existiert nicht mehr');
+  }
+
+  const setFields = SUGGESTIBLE_RELATIVE_FIELDS.filter((field) => isSuggestionFieldSet(suggestion, field));
+  if (setFields.length > 0) {
+    const setClause = setFields.map((field) => `${field} = ?`).join(', ');
+    const values = setFields.map((field) => suggestion[field]);
+    await db.execute(`UPDATE relatives SET ${setClause}, updated_at = ? WHERE id = ?`, [
+      ...values,
+      nowUtcIso(),
+      suggestion.relative_id,
+    ]);
+  }
+
+  await markSuggestionAccepted(db, suggestion.id, userId);
+}
+
+/** Direct "Übernehmen" for a `kind: 'note'` suggestion — no data change at all, just marks it done (task requirement). */
+export async function acceptNoteSuggestion(
+  db: AbstractPowerSyncDatabase,
+  suggestion: TreeSuggestionRow,
+  userId: string,
+): Promise<void> {
+  await markSuggestionAccepted(db, suggestion.id, userId);
 }
