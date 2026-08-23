@@ -24,8 +24,9 @@ import { PersonAvatar } from '@/features/people/components/person-avatar';
 import { Chip, KeyboardSafeScreen, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 import { GENDER_OPTIONS, displayName, excludeSelf } from '../logic';
-import { RelativePhotoPickCancelledError, pickRelativePhotoUri } from '../photo';
+import { RelativePhotoPickCancelledError, pickRelativePhoto, type PickedPortrait } from '../photo';
 import type { RelativeGender, RelativeRow } from '../types';
+import { PortraitCropper } from './portrait-cropper';
 
 export type RelativeFormSubmitInput = {
   givenName: string;
@@ -128,6 +129,8 @@ export function RelativeForm({
   const [pickedPhotoUri, setPickedPhotoUri] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+  /** Set while the crop step (portrait-cropper.tsx) is open for a JUST-picked, not-yet-cropped image — see handlePickPhoto. */
+  const [cropSource, setCropSource] = useState<PickedPortrait | null>(null);
 
   const hydrate = useCallback((loaded: RelativeFormRecord) => {
     setGivenName(loaded.values.givenName);
@@ -161,8 +164,12 @@ export function RelativeForm({
 
   const handlePickPhoto = async () => {
     try {
-      const uri = await pickRelativePhotoUri();
-      setPickedPhotoUri(uri);
+      const picked = await pickRelativePhoto();
+      // Öffnet den Zuschnitt (portrait-cropper.tsx) — NICHT direkt als
+      // Vorschau übernommen. Bricht der Nutzer den Zuschnitt ab, bleibt
+      // `pickedPhotoUri` unangetastet, also das bisherige Portrait sichtbar
+      // (task requirement).
+      setCropSource(picked);
     } catch (pickError) {
       if (!(pickError instanceof RelativePhotoPickCancelledError)) {
         console.error('[LifeBook] Portrait konnte nicht ausgewählt werden', pickError);
@@ -349,6 +356,19 @@ export function RelativeForm({
           </Pressable>
         ) : null}
       </KeyboardSafeScreen>
+
+      {cropSource ? (
+        <PortraitCropper
+          imageUri={cropSource.uri}
+          imageWidth={cropSource.width}
+          imageHeight={cropSource.height}
+          onCancel={() => setCropSource(null)}
+          onConfirm={(croppedUri) => {
+            setPickedPhotoUri(croppedUri);
+            setCropSource(null);
+          }}
+        />
+      ) : null}
     </ThemedView>
   );
 }
