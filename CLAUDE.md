@@ -316,6 +316,16 @@ deshalb tragen `relatives`, `relative_unions` und `relative_photos`
 absichtlich KEINE Fremdschlüssel zueinander (nur `household_id` hat einen)
 — siehe `core/db/schema.ts`s Kommentar auf `relatives`.
 
+### 13. Reanimated-Gestenhandler und der UI-Faden
+
+Reanimated-Gestenhandler (.onUpdate, .onBegin, .onEnd) laufen als Worklets
+auf dem UI-Faden. Jede Hilfsfunktion, die von dort gerufen wird, braucht
+'worklet' als erste Zeile. Fehlt sie, springt jeder Aufruf zurück auf den
+JS-Faden — bei einer Fingerbewegung mehrfach pro Sekunde, und das Gerät
+friert ein. Am 23.08.2026 im Portrait-Zuschnitt passiert. Die Direktive ist
+außerhalb von Reanimated ein wirkungsloser String, die Funktionen bleiben
+also mit Vitest testbar.
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste
