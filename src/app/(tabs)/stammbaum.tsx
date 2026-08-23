@@ -1,7 +1,12 @@
 /**
- * Stammbaum — Verwandte, nach tatsächlicher Beziehung zu Marina gruppiert
- * (features/tree/logic.ts#relationLabel — NICHT nach Generation, siehe
- * dessen Dateikopf zu Fehler 2 vom 22.08.2026). Legt beim ersten Öffnen den
+ * Stammbaum — Verwandte, nach der echten genealogischen Beziehung zu
+ * Marina gruppiert: gemeinsamer Vorfahre plus zwei Abstände, nicht mehr
+ * ein festes Zwei-Schritte-Regelwerk (features/tree/logic.ts#relationLabel
+ * — siehe dessen Dateikopf zur Historie dieser beiden Fehler). Jede Karte
+ * zeigt zusätzlich die genaue Bezeichnung dieser einen Person (Task-Vorgabe,
+ * 23.08.2026), auch wenn sie gröber unter derselben Gruppenüberschrift
+ * steht wie andere — "Cousins und Cousinen" etwa sammelt jeden Grad und
+ * jede Entfernung unter einer Überschrift. Legt beim ersten Öffnen den
  * Wurzelknoten an (die eine `relatives`-Zeile mit `child_id`), ohne
  * Rückfrage — siehe features/tree/repository.ts#ensureRootRelative.
  *
@@ -9,13 +14,13 @@
  * bereits lesbar in der Lebensdaten-Zeile (features/tree/logic.ts#lifeLine),
  * das reicht als Kennzeichnung.
  *
- * Fehler 1 vom 22.08.2026: JEDE nicht gelöschte Person des Haushalts muss
- * in dieser Liste auftauchen — eine Person, die hier fehlt, ist über die
- * Oberfläche nicht mehr erreichbar und nicht mehr korrigierbar. Dafür
- * garantiert `groupForList` per Konstruktion, dass niemand aus jeder
- * Gruppe herausfällt (siehe dessen eigenen Kommentar und den
- * "Summe aller Gruppengrößen"-Test in logic.test.ts) — diese Datei muss
- * nur `relatives` VOLLSTÄNDIG hineingeben, ohne eigene Filterung davor.
+ * JEDE nicht gelöschte Person des Haushalts muss in dieser Liste
+ * auftauchen — eine Person, die hier fehlt, ist über die Oberfläche nicht
+ * mehr erreichbar und nicht mehr korrigierbar. Dafür garantiert
+ * `groupForList` per Konstruktion, dass niemand aus jeder Gruppe
+ * herausfällt (siehe dessen eigenen Kommentar und den "Summe aller
+ * Gruppengrößen"-Test in logic.test.ts) — diese Datei muss nur `relatives`
+ * VOLLSTÄNDIG hineingeben, ohne eigene Filterung davor.
  */
 
 import { usePowerSync } from '@powersync/react-native';
@@ -75,9 +80,12 @@ export default function StammbaumScreen() {
   }));
 
   const groups = rootRelative ? groupForList(graphPeople, rootRelative.id) : [];
-  // Each person's OWN precise relation ("Tante"/"Onkel"/"Cousine"/"Cousin"
-  // when gender is known) — shown on the row only where it says more than
-  // the section heading already does (see RelativeListRow below).
+  // Every person's own precise relation (task requirement, 2026-08-23:
+  // "Auf der Karte jeder Person steht die genaue Bezeichnung aus
+  // classifyRelation" — no longer optional, unlike the previous task's
+  // "darf... stehen") — the section heading is a coarser bucket (e.g.
+  // "Cousins und Cousinen" covers 1st/2nd/3rd degree and removed cousins
+  // alike), this is the exact wording for THIS one person.
   const personalLabels = new Map(
     rootRelative ? graphPeople.map((person) => [person.id, relationLabel(person, graphPeople, rootRelative.id)]) : [],
   );
@@ -110,11 +118,10 @@ export default function StammbaumScreen() {
                 {section.title}
               </ThemedText>
             )}
-            renderItem={({ item, section }) => (
+            renderItem={({ item }) => (
               <RelativeListRow
                 relative={item}
-                sectionLabel={section.title}
-                personalLabel={personalLabels.get(item.id) ?? section.title}
+                personalLabel={personalLabels.get(item.id) ?? ''}
                 signedUrl={item.photo_key ? signedUrls.get(item.photo_key) : undefined}
               />
             )}
@@ -134,23 +141,16 @@ export default function StammbaumScreen() {
 
 function RelativeListRow({
   relative,
-  sectionLabel,
   personalLabel,
   signedUrl,
 }: {
   relative: RelativeRow;
-  sectionLabel: string;
-  /** Same as `sectionLabel` for every category except Tanten/Onkel and Cousins/Cousinen, where it can be the gendered form. */
+  /** The exact `relationLabel` for this one person — always shown (task requirement), even where it repeats the section heading (only the root's own row, whose heading already says the same thing). */
   personalLabel: string;
   signedUrl: string | undefined;
 }) {
   const life = lifeLine(relative);
-  // Only worth repeating on the row when it says MORE than the section
-  // heading already does — true only for the gendered aunt/uncle/cousin
-  // case (task: "Auf der Personenkarte darf, wenn gender gesetzt ist, die
-  // genaue Form stehen").
-  const relationText = personalLabel !== sectionLabel ? personalLabel : '';
-  const subtitle = [relationText, life].filter((part) => part.length > 0).join(' · ');
+  const subtitle = [personalLabel, life].filter((part) => part.length > 0).join(' · ');
 
   return (
     <Pressable onPress={() => router.push(`/stammbaum/${relative.id}`)}>

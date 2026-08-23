@@ -96,112 +96,331 @@ export type RelationGraphPerson = Pick<RelativeRow, 'id' | 'given_name' | 'gende
 };
 
 /**
- * 2026-08-22, Fehler 2: the list used to group by BFS generation NUMBER
- * (`computeGenerations`, removed) — which put an aunt at "generation -1"
- * (her own parents' generation, same number as Marina's actual parents)
- * and rendered her under "Eltern". A number is not a relationship. This
- * derives the real, named relation to `rootId` directly from the
- * mother/father/partner links instead — see the task's own definitions,
- * mirrored one-for-one in the checks below, most-specific first (a person
- * can only ever match ONE of them, checked in order of closeness).
+ * 2026-08-23: `classifyRelation` (removed, superseded below) grouped by a
+ * fixed small rule set that only went two steps out (parent/sibling/
+ * grandparent/aunt-uncle/cousin) — anyone further out (a great-aunt, a
+ * cousin's child, a spouse's family) fell into the catch-all "Weitere
+ * Verwandte", which is not a relationship, it's an admission of not
+ * having computed one. This replaces it with the actual genealogical
+ * method: find the closest common ancestor of the root and the person,
+ * measure the distance from each side to that ancestor, and look the
+ * pair up — the same method a family-tree book uses. See `findBloodTie`
+ * below for the mechanics and `TIE_LABELS` for the exact wording table
+ * the task specifies.
  */
-type RelationCategory =
-  | 'root'
-  | 'parent'
-  | 'sibling'
-  | 'grandparent'
-  | 'greatGrandparent'
-  | 'auntUncle'
-  | 'cousin'
-  | 'unconnected'
-  | 'other';
 
-function parentIdsOf(person: RelationGraphPerson | undefined): string[] {
-  if (!person) {
-    return [];
-  }
-  return [person.mother_id, person.father_id].filter((id): id is string => id !== null);
-}
-
-/** Two people "share a parent" only when the shared side is actually known on both — two unrelated `null`s never count as a match. */
-function sharesParentWith(byId: ReadonlyMap<string, RelationGraphPerson>, aId: string, bId: string): boolean {
-  const a = byId.get(aId);
-  const b = byId.get(bId);
-  if (!a || !b) {
-    return false;
-  }
-  return (a.mother_id !== null && a.mother_id === b.mother_id) || (a.father_id !== null && a.father_id === b.father_id);
-}
-
-function classifyRelation(
-  personId: string,
-  all: readonly RelationGraphPerson[],
-  rootId: string,
-): RelationCategory {
-  const byId = new Map(all.map((person) => [person.id, person]));
-  const root = byId.get(rootId);
-  if (!root) {
-    return 'other';
-  }
-  if (personId === rootId) {
-    return 'root';
-  }
-
-  const rootParentIds = new Set(parentIdsOf(root));
-  if (rootParentIds.has(personId)) {
-    return 'parent';
-  }
-  if (sharesParentWith(byId, rootId, personId)) {
-    return 'sibling';
-  }
-
-  const grandparentIds = new Set<string>();
-  for (const parentId of rootParentIds) {
-    for (const gpId of parentIdsOf(byId.get(parentId))) {
-      grandparentIds.add(gpId);
+/** How far back `mother_id`/`father_id` reaches from `id`, `id` itself included at 0 — a person is their own 0th ancestor. Visited-once, so a data-entry cycle (mother_id/father_id pointing in a loop) can never spin forever, same guard the removed `computeGenerations` used. */
+function ancestorDistances(id: string, byId: ReadonlyMap<string, RelationGraphPerson>): Map<string, number> {
+  const distances = new Map<string, number>();
+  distances.set(id, 0);
+  const queue: string[] = [id];
+  while (queue.length > 0) {
+    const currentId = queue.shift() as string;
+    const distance = distances.get(currentId) as number;
+    const person = byId.get(currentId);
+    if (!person) {
+      continue;
     }
-  }
-  if (grandparentIds.has(personId)) {
-    return 'grandparent';
-  }
-
-  const greatGrandparentIds = new Set<string>();
-  for (const gpId of grandparentIds) {
-    for (const ggpId of parentIdsOf(byId.get(gpId))) {
-      greatGrandparentIds.add(ggpId);
-    }
-  }
-  if (greatGrandparentIds.has(personId)) {
-    return 'greatGrandparent';
-  }
-
-  // Tanten und Onkel: siblings of Marina's parents, plus those siblings'
-  // partners ("angeheiratet" — task requirement).
-  const auntUncleIds = new Set<string>();
-  for (const parentId of rootParentIds) {
-    for (const candidate of all) {
-      if (candidate.id !== parentId && sharesParentWith(byId, parentId, candidate.id)) {
-        auntUncleIds.add(candidate.id);
+    for (const parentId of [person.mother_id, person.father_id]) {
+      if (parentId && !distances.has(parentId)) {
+        distances.set(parentId, distance + 1);
+        queue.push(parentId);
       }
     }
   }
-  for (const id of [...auntUncleIds]) {
-    for (const partnerId of byId.get(id)?.partnerIds ?? []) {
-      auntUncleIds.add(partnerId);
-    }
+  return distances;
+}
+
+/**
+ * A blood tie to the root, purely from `mother_id`/`father_id` chains —
+ * NOT `relative_unions` (that's step 5, layered on top separately, see
+ * `findRelation` below). `ancestor`/`descendant` are the direct-line
+ * cases; `shared` is everyone else, with `a` = root's distance to the
+ * closest common ancestor and `b` = the person's own distance to it —
+ * the two numbers `TIE_LABELS`/the cousin formula key off.
+ */
+type BloodTie =
+  | { kind: 'root' }
+  | { kind: 'ancestor'; distance: number }
+  | { kind: 'descendant'; distance: number }
+  | { kind: 'shared'; a: number; b: number };
+
+/**
+ * The closest common ancestor of `rootId` and `personId`, as an (a, b)
+ * distance pair, or the direct-line case if one is the other's ancestor.
+ * "Closest" = smallest a+b — ties (rare: e.g. full siblings share both
+ * parents, each an equally-close common ancestor) don't matter here since
+ * every tied candidate yields the SAME (a, b) pair for a straightforward
+ * case; a mixed tie (different (a, b) pairs at the same a+b) is exotic
+ * enough that any deterministic pick is defensible, and `Math.max` is
+ * used as the tiebreak below (closest generation-wise) for one.
+ */
+function findBloodTie(personId: string, rootId: string, byId: ReadonlyMap<string, RelationGraphPerson>): BloodTie | null {
+  if (personId === rootId) {
+    return { kind: 'root' };
   }
-  if (auntUncleIds.has(personId)) {
-    return 'auntUncle';
+  if (!byId.has(rootId) || !byId.has(personId)) {
+    return null;
   }
 
-  // Cousins und Cousinen: children of anyone in `auntUncleIds`.
+  const rootAncestors = ancestorDistances(rootId, byId);
+  const personAncestors = ancestorDistances(personId, byId);
+
+  const asAncestor = rootAncestors.get(personId);
+  if (asAncestor !== undefined && asAncestor > 0) {
+    return { kind: 'ancestor', distance: asAncestor };
+  }
+  const asDescendant = personAncestors.get(rootId);
+  if (asDescendant !== undefined && asDescendant > 0) {
+    return { kind: 'descendant', distance: asDescendant };
+  }
+
+  let best: { a: number; b: number } | null = null;
+  for (const [ancestorId, a] of rootAncestors) {
+    if (a === 0) {
+      continue;
+    }
+    const b = personAncestors.get(ancestorId);
+    if (b === undefined || b === 0) {
+      continue;
+    }
+    if (!best || a + b < best.a + best.b || (a + b === best.a + best.b && Math.max(a, b) < Math.max(best.a, best.b))) {
+      best = { a, b };
+    }
+  }
+  return best ? { kind: 'shared', a: best.a, b: best.b } : null;
+}
+
+function pair(gender: RelativeGender | null, female: string, male: string, neutral: string): string {
+  if (gender === 'female') {
+    return female;
+  }
+  if (gender === 'male') {
+    return male;
+  }
+  return neutral;
+}
+
+/** The nine exact (a, b) pairs the task names, keyed as `"a,b"` — everything else falls through to the cousin-degree formula in `sharedTieLabel`. */
+const NAMED_SHARED_TIES: Record<string, { female: string; male: string; neutral: string }> = {
+  '1,1': { female: 'Schwester', male: 'Bruder', neutral: 'Schwester/Bruder' },
+  '2,1': { female: 'Tante', male: 'Onkel', neutral: 'Tante/Onkel' },
+  '3,1': { female: 'Großtante', male: 'Großonkel', neutral: 'Großtante/Großonkel' },
+  '4,1': { female: 'Urgroßtante', male: 'Urgroßonkel', neutral: 'Urgroßtante/Urgroßonkel' },
+  '1,2': { female: 'Nichte', male: 'Neffe', neutral: 'Nichte/Neffe' },
+  '1,3': { female: 'Großnichte', male: 'Großneffe', neutral: 'Großnichte/Großneffe' },
+  '2,2': { female: 'Cousine 1. Grades', male: 'Cousin 1. Grades', neutral: 'Cousine/Cousin 1. Grades' },
+  '3,3': { female: 'Cousine 2. Grades', male: 'Cousin 2. Grades', neutral: 'Cousine/Cousin 2. Grades' },
+  '4,4': { female: 'Cousine 3. Grades', male: 'Cousin 3. Grades', neutral: 'Cousine/Cousin 3. Grades' },
+};
+
+/** "Cousine/Cousin N. Grades[, M-fach/einmal entfernt]" — the task's general fallback, for any (a, b) not in `NAMED_SHARED_TIES`. `einmal` for exactly one degree removed (task's own example), the literal "M-fach" template otherwise. */
+function cousinDegreeLabel(a: number, b: number, gender: RelativeGender | null): string {
+  const degree = Math.min(a, b) - 1;
+  const removed = Math.abs(a - b);
+  const base = pair(gender, `Cousine ${degree}. Grades`, `Cousin ${degree}. Grades`, `Cousine/Cousin ${degree}. Grades`);
+  if (removed === 0) {
+    return base;
+  }
+  const removedWord = removed === 1 ? 'einmal' : `${removed}-fach`;
+  return `${base}, ${removedWord} entfernt`;
+}
+
+function sharedTieLabel(a: number, b: number, gender: RelativeGender | null): string {
+  const named = NAMED_SHARED_TIES[`${a},${b}`];
+  return named ? pair(gender, named.female, named.male, named.neutral) : cousinDegreeLabel(a, b, gender);
+}
+
+function ancestorTieLabel(distance: number, gender: RelativeGender | null): string {
+  if (distance === 1) {
+    return pair(gender, 'Mutter', 'Vater', 'Mutter/Vater');
+  }
+  if (distance === 2) {
+    return pair(gender, 'Großmutter', 'Großvater', 'Großmutter/Großvater');
+  }
+  if (distance === 3) {
+    return pair(gender, 'Urgroßmutter', 'Urgroßvater', 'Urgroßmutter/Urgroßvater');
+  }
+  if (distance === 4) {
+    return pair(gender, 'Ururgroßmutter', 'Ururgroßvater', 'Ururgroßmutter/Ururgroßvater');
+  }
+  return `Vorfahre der ${distance - 2}. Generation`;
+}
+
+function descendantTieLabel(distance: number, gender: RelativeGender | null): string {
+  if (distance === 1) {
+    return pair(gender, 'Tochter', 'Sohn', 'Tochter/Sohn');
+  }
+  if (distance === 2) {
+    return pair(gender, 'Enkelin', 'Enkel', 'Enkelin/Enkel');
+  }
+  if (distance === 3) {
+    return pair(gender, 'Urenkelin', 'Urenkel', 'Urenkelin/Urenkel');
+  }
+  return `Nachfahre der ${distance - 2}. Generation`;
+}
+
+function bloodTieLabel(tie: BloodTie, gender: RelativeGender | null, rootGivenName: string): string {
+  switch (tie.kind) {
+    case 'root':
+      return `${rootGivenName} selbst`;
+    case 'ancestor':
+      return ancestorTieLabel(tie.distance, gender);
+    case 'descendant':
+      return descendantTieLabel(tie.distance, gender);
+    case 'shared':
+      return sharedTieLabel(tie.a, tie.b, gender);
+  }
+}
+
+/** Bucket key for the root's own group — a sentinel, not the display label: the label is the root's real given name plus " selbst" (resolved once in `groupForList`), but the BUCKET KEY must be a fixed, name-independent string so it can appear in `GROUP_ORDER` without knowing the root's name in advance. */
+const ROOT_GROUP_KEY = '\0root';
+
+/** Which list group a blood tie belongs to — a COARSER bucket than the precise label: every cousin-formula result (named degree or not) shares one "Cousins und Cousinen" heading, same idea for the great-aunt/uncle and niece/nephew tiers, since the task's fixed heading list has no separate heading per exact degree. */
+function bloodTieGroup(tie: BloodTie): string {
+  switch (tie.kind) {
+    case 'root':
+      return ROOT_GROUP_KEY;
+    case 'ancestor':
+      if (tie.distance === 1) {
+        return 'Eltern';
+      }
+      if (tie.distance === 2) {
+        return 'Großeltern';
+      }
+      if (tie.distance === 3) {
+        return 'Urgroßeltern';
+      }
+      return 'Weitere Verwandte';
+    case 'descendant':
+      return 'Weitere Verwandte'; // no heading for children/grandchildren in the task's fixed list
+    case 'shared':
+      if (tie.a === 1 && tie.b === 1) {
+        return 'Geschwister';
+      }
+      if (tie.b === 1 && tie.a === 2) {
+        return 'Tanten und Onkel';
+      }
+      if (tie.b === 1 && tie.a >= 3) {
+        return 'Grosstanten und Grossonkel';
+      }
+      if (tie.a === 1 && tie.b >= 2) {
+        return 'Nichten und Neffen';
+      }
+      return 'Cousins und Cousinen'; // every a>=2,b>=2 case, named degree or the general formula alike
+  }
+}
+
+/** Whether a blood tie is exactly "Geschwister" (a=1,b=1) — the "Partner eines Geschwisterteils" special case (step 5). */
+function isSiblingTie(tie: BloodTie): boolean {
+  return tie.kind === 'shared' && tie.a === 1 && tie.b === 1;
+}
+
+/** Whether a blood tie is exactly "Tochter/Sohn" (descendant, distance 1) — the "Partner eines Kindes" special case (step 5). */
+function isChildTie(tie: BloodTie): boolean {
+  return tie.kind === 'descendant' && tie.distance === 1;
+}
+
+/**
+ * Step 5: someone with NO blood tie of their own who is a `relative_unions`
+ * partner of a blood relative X, OR shares a child with X (even without a
+ * formal union row — task requirement "ODER... gemeinsame Kinder hat"),
+ * inherits X's tie. Root itself is never considered as X here (root has
+ * no blood label to append "(angeheiratet)" to) — root's own direct
+ * partner is handled separately in `findRelation`. Ties among several
+ * candidate X's are broken by the closest one (smallest a+b / distance) —
+ * not exercised by any given test, just a deterministic fallback.
+ */
+function findMarriedInTie(
+  personId: string,
+  rootId: string,
+  byId: ReadonlyMap<string, RelationGraphPerson>,
+  all: readonly RelationGraphPerson[],
+): { xTie: BloodTie; special: 'sibling' | 'child' | null } | null {
   const person = byId.get(personId);
-  const isCousin =
-    !!person &&
-    ((person.mother_id !== null && auntUncleIds.has(person.mother_id)) ||
-      (person.father_id !== null && auntUncleIds.has(person.father_id)));
-  if (isCousin) {
-    return 'cousin';
+  if (!person) {
+    return null;
+  }
+
+  const candidateIds = new Set<string>();
+  for (const partnerId of person.partnerIds) {
+    candidateIds.add(partnerId);
+  }
+  for (const child of all) {
+    if (child.mother_id === personId && child.father_id) {
+      candidateIds.add(child.father_id);
+    }
+    if (child.father_id === personId && child.mother_id) {
+      candidateIds.add(child.mother_id);
+    }
+  }
+
+  let best: { xTie: BloodTie; closeness: number } | null = null;
+  for (const candidateId of candidateIds) {
+    if (candidateId === personId || candidateId === rootId) {
+      continue;
+    }
+    const xTie = findBloodTie(candidateId, rootId, byId);
+    if (!xTie || xTie.kind === 'root') {
+      continue;
+    }
+    const closeness = xTie.kind === 'shared' ? xTie.a + xTie.b : xTie.distance;
+    if (!best || closeness < best.closeness) {
+      best = { xTie, closeness };
+    }
+  }
+  if (!best) {
+    return null;
+  }
+  const special = isSiblingTie(best.xTie) ? 'sibling' : isChildTie(best.xTie) ? 'child' : null;
+  return { xTie: best.xTie, special };
+}
+
+/** Whether `personId` is a parent of one of root's OWN partners — "Eltern des eigenen Partners" (step 5's third special case). */
+function isInLawParent(personId: string, rootId: string, byId: ReadonlyMap<string, RelationGraphPerson>): boolean {
+  const root = byId.get(rootId);
+  if (!root) {
+    return false;
+  }
+  return root.partnerIds.some((partnerId) => {
+    const partner = byId.get(partnerId);
+    return !!partner && (partner.mother_id === personId || partner.father_id === personId);
+  });
+}
+
+/** The full relation of `personId` to `rootId` — blood tie first, then the three marriage-in shapes step 5 describes, then "Noch nicht verbunden"/"Weitere Verwandte" as the last resorts. */
+type Relation =
+  | { kind: 'blood'; tie: BloodTie }
+  | { kind: 'inLawParent' }
+  | { kind: 'inLawOf'; xTie: BloodTie; special: 'sibling' | 'child' | null }
+  | { kind: 'directPartnerOfRoot' }
+  | { kind: 'unconnected' }
+  | { kind: 'otherUnrelated' };
+
+function findRelation(
+  personId: string,
+  rootId: string,
+  byId: ReadonlyMap<string, RelationGraphPerson>,
+  all: readonly RelationGraphPerson[],
+): Relation {
+  const blood = findBloodTie(personId, rootId, byId);
+  if (blood) {
+    return { kind: 'blood', tie: blood };
+  }
+
+  if (isInLawParent(personId, rootId, byId)) {
+    return { kind: 'inLawParent' };
+  }
+
+  const marriedIn = findMarriedInTie(personId, rootId, byId, all);
+  if (marriedIn) {
+    return { kind: 'inLawOf', xTie: marriedIn.xTie, special: marriedIn.special };
+  }
+
+  const person = byId.get(personId);
+  const root = byId.get(rootId);
+  if (person && root && (person.partnerIds.includes(rootId) || root.partnerIds.includes(personId))) {
+    return { kind: 'directPartnerOfRoot' };
   }
 
   const hasNoLinksAtAll =
@@ -211,44 +430,31 @@ function classifyRelation(
     person.partnerIds.length === 0 &&
     !all.some((candidate) => candidate.mother_id === personId || candidate.father_id === personId);
   if (hasNoLinksAtAll) {
-    return 'unconnected';
+    return { kind: 'unconnected' };
   }
 
-  return 'other';
-}
-
-/** "Tante"/"Onkel" when the gender is known, the gender-neutral group name otherwise — never guessed (task requirement). */
-function describeAuntOrUncle(gender: RelativeGender | null): string {
-  if (gender === 'female') {
-    return 'Tante';
-  }
-  if (gender === 'male') {
-    return 'Onkel';
-  }
-  return 'Tanten und Onkel';
-}
-
-/** Same idea as `describeAuntOrUncle`, for cousins. */
-function describeCousin(gender: RelativeGender | null): string {
-  if (gender === 'female') {
-    return 'Cousine';
-  }
-  if (gender === 'male') {
-    return 'Cousin';
-  }
-  return 'Cousins und Cousinen';
+  return { kind: 'otherUnrelated' };
 }
 
 /**
- * The actual relationship of `person` to the root (Marina), derived from
- * `mother_id`/`father_id`/partnerships — never a generation number (Fehler
- * 2). For the root themselves this is "{ihr eigener Vorname} selbst" —
- * built from the real data on screen, never a literal placeholder name.
- * For "Tanten und Onkel"/"Cousins und Cousinen" specifically, the precise
- * gendered form is used ONLY when `gender` is actually set on that
- * person's own record — nothing here infers it any other way (task
- * requirement). Every other category has no gendered variant to begin
- * with ("Eltern"/"Geschwister"/"Großeltern"/… are already neutral).
+ * The actual relationship of `person` to the root (Marina), by the usual
+ * genealogical method — common ancestor plus two distances (see
+ * `findBloodTie`) — never a fixed two-step rule set (Fehler, 2026-08-23:
+ * a great-aunt, a cousin's child, or an in-law all used to fall into the
+ * meaningless "Weitere Verwandte" catch-all).
+ *
+ * For the root themselves this is "{ihr eigener Vorname} selbst" — built
+ * from the real data on screen, never a literal placeholder name. Gender
+ * is used ONLY when actually set on the relevant person's own record —
+ * an unknown gender always gets the neutral paired form ("Tante/Onkel",
+ * "Cousine/Cousin 1. Grades"), never guessed from a name (task
+ * requirement, step 6) — even a name as conventionally gendered as
+ * "Josefa" or "Joseph".
+ *
+ * Married-in relatives (step 5) use THEIR OWN gender against the blood
+ * relative's tie they inherit, not the blood relative's gender — Jasmin
+ * (female), partnered to Onkel Alexander, is "Tante (angeheiratet)", not
+ * "Onkel (angeheiratet)".
  */
 export function relationLabel(
   person: RelationGraphPerson,
@@ -256,26 +462,28 @@ export function relationLabel(
   rootId: string,
 ): string {
   const byId = new Map(all.map((p) => [p.id, p]));
-  const category = classifyRelation(person.id, all, rootId);
+  const root = byId.get(rootId);
+  const rootGivenName = root?.given_name ?? person.given_name;
+  const relation = findRelation(person.id, rootId, byId, all);
 
-  switch (category) {
-    case 'root':
-      return `${byId.get(rootId)?.given_name ?? person.given_name} selbst`;
-    case 'parent':
-      return 'Eltern';
-    case 'sibling':
-      return 'Geschwister';
-    case 'grandparent':
-      return 'Großeltern';
-    case 'greatGrandparent':
-      return 'Urgroßeltern';
-    case 'auntUncle':
-      return describeAuntOrUncle(person.gender);
-    case 'cousin':
-      return describeCousin(person.gender);
+  switch (relation.kind) {
+    case 'blood':
+      return bloodTieLabel(relation.tie, person.gender, rootGivenName);
+    case 'inLawParent':
+      return pair(person.gender, 'Schwiegermutter', 'Schwiegervater', 'Schwiegermutter/Schwiegervater');
+    case 'inLawOf':
+      if (relation.special === 'sibling') {
+        return pair(person.gender, 'Schwägerin', 'Schwager', 'Schwägerin/Schwager');
+      }
+      if (relation.special === 'child') {
+        return pair(person.gender, 'Schwiegertochter', 'Schwiegersohn', 'Schwiegertochter/Schwiegersohn');
+      }
+      return `${bloodTieLabel(relation.xTie, person.gender, rootGivenName)} (angeheiratet)`;
+    case 'directPartnerOfRoot':
+      return pair(person.gender, 'Partnerin', 'Partner', 'Partnerin/Partner');
     case 'unconnected':
       return 'Noch nicht verbunden';
-    case 'other':
+    case 'otherUnrelated':
       return 'Weitere Verwandte';
   }
 }
@@ -286,49 +494,74 @@ export const UNCONNECTED_GROUP_HINT =
 
 export type FamilyGroup<T> = { label: string; people: T[] };
 
-const CATEGORY_ORDER: { category: RelationCategory; label: string }[] = [
-  { category: 'root', label: '' }, // label overridden per-tree with the root's real name, see below
-  { category: 'parent', label: 'Eltern' },
-  { category: 'sibling', label: 'Geschwister' },
-  { category: 'grandparent', label: 'Großeltern' },
-  { category: 'greatGrandparent', label: 'Urgroßeltern' },
-  { category: 'auntUncle', label: 'Tanten und Onkel' },
-  { category: 'cousin', label: 'Cousins und Cousinen' },
-  { category: 'other', label: 'Weitere Verwandte' },
-  { category: 'unconnected', label: 'Noch nicht verbunden' },
-];
+/** Fixed heading order the task specifies, keyed by bucket ("Marina" is `ROOT_GROUP_KEY`, resolved to the root's real name only when rendering — see `groupForList`). "Weitere Verwandte" stays a pure last-resort catch-all (task requirement: empty for the real data). */
+const GROUP_ORDER = [
+  ROOT_GROUP_KEY,
+  'Eltern',
+  'Geschwister',
+  'Großeltern',
+  'Urgroßeltern',
+  'Tanten und Onkel',
+  'Cousins und Cousinen',
+  'Grosstanten und Grossonkel',
+  'Nichten und Neffen',
+  'Weitere Verwandte',
+  'Noch nicht verbunden',
+] as const;
+
+/** The list group a full `Relation` belongs to — mirrors `relationLabel`'s switch, but resolves to one of the fixed `GROUP_ORDER` bucket keys instead of the precise per-person wording. */
+function relationGroup(relation: Relation): string {
+  switch (relation.kind) {
+    case 'blood':
+      return bloodTieGroup(relation.tie);
+    case 'inLawParent':
+      return 'Weitere Verwandte'; // no "Schwiegereltern" heading in the task's fixed list
+    case 'inLawOf':
+      return bloodTieGroup(relation.xTie); // groups with whichever blood tier X belongs to
+    case 'directPartnerOfRoot':
+      return 'Weitere Verwandte'; // not covered by the task's list either; untested, low-risk default
+    case 'unconnected':
+      return 'Noch nicht verbunden';
+    case 'otherUnrelated':
+      return 'Weitere Verwandte';
+  }
+}
 
 /**
  * Groups EVERY person in `people` by their relation to `rootId`, in the
  * fixed order the task specifies, "Noch nicht verbunden" last. Lossless by
- * construction: `classifyRelation` always returns exactly one of the nine
- * categories above for any person (checked most-specific-first, with
- * `'other'` as the unconditional catch-all), so every person lands in
- * exactly one bucket — see logic.test.ts's own "Summe aller
- * Gruppengrößen" test for the guard this replaces (Fehler 1: relatives
- * that fell out of every bucket were simply unreachable in the app, the
- * worst state this screen can be in). Empty groups are dropped so the
- * list never shows a heading with nothing under it.
+ * construction: `findRelation` always returns exactly one of its six
+ * shapes for any person, and `relationGroup` maps EVERY one of those
+ * (recursively, every `BloodTie` shape too) to one of the eleven fixed
+ * headings — there is no path through either function that returns
+ * nothing, so nobody can fall out of every bucket (Fehler 1, 2026-08-22).
+ * See logic.test.ts's own "Summe aller Gruppengrößen" test for the guard
+ * this keeps enforcing. Empty groups are dropped so the list never shows
+ * a heading with nothing under it.
  */
 export function groupForList<T extends RelationGraphPerson>(
   people: readonly T[],
   rootId: string,
 ): FamilyGroup<T>[] {
-  const byCategory = new Map<RelationCategory, T[]>();
+  const byId = new Map(people.map((person) => [person.id, person]));
+  const root = byId.get(rootId);
+  const rootGivenName = root?.given_name ?? 'Stammbaum';
+
+  const byGroup = new Map<string, T[]>();
   for (const person of people) {
-    const category = classifyRelation(person.id, people, rootId);
-    const bucket = byCategory.get(category);
+    const relation = findRelation(person.id, rootId, byId, people);
+    const group = relationGroup(relation);
+    const bucket = byGroup.get(group);
     if (bucket) {
       bucket.push(person);
     } else {
-      byCategory.set(category, [person]);
+      byGroup.set(group, [person]);
     }
   }
 
-  const root = people.find((person) => person.id === rootId);
-  return CATEGORY_ORDER.map(({ category, label }) => ({
-    label: category === 'root' ? `${root?.given_name ?? 'Stammbaum'} selbst` : label,
-    people: byCategory.get(category) ?? [],
+  return GROUP_ORDER.map((heading) => ({
+    label: heading === ROOT_GROUP_KEY ? `${rootGivenName} selbst` : heading,
+    people: byGroup.get(heading) ?? [],
   })).filter((group) => group.people.length > 0);
 }
 
