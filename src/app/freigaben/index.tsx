@@ -95,10 +95,19 @@ export default function FreigabenScreen() {
               <ThemedView type="backgroundElement" style={styles.card}>
                 <View style={styles.cardTitleRow}>
                   <ThemedText type="smallBold">{share.name}</ThemedText>
-                  <View style={[styles.kindBadge, { borderColor: accent }]}>
-                    <ThemedText type="small" style={{ color: accent }}>
-                      {describeShareKind(share.kind)}
-                    </ThemedText>
+                  <View style={styles.badgeRow}>
+                    {share.announcement ? (
+                      <View style={[styles.announcementBadge, { backgroundColor: accent }]}>
+                        <ThemedText type="small" style={styles.announcementBadgeText}>
+                          Nachricht
+                        </ThemedText>
+                      </View>
+                    ) : null}
+                    <View style={[styles.kindBadge, { borderColor: accent }]}>
+                      <ThemedText type="small" style={{ color: accent }}>
+                        {describeShareKind(share.kind)}
+                      </ThemedText>
+                    </View>
                   </View>
                 </View>
                 <ThemedText type="small" themeColor="textSecondary">
@@ -145,10 +154,17 @@ const styles = StyleSheet.create({
     borderRadius: Spacing.three,
   },
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
   kindBadge: {
     borderWidth: 1,
     borderRadius: Spacing.two,
     paddingHorizontal: Spacing.two,
     paddingVertical: 2,
   },
+  announcementBadge: {
+    borderRadius: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 2,
+  },
+  announcementBadgeText: { color: '#ffffff' },
 });

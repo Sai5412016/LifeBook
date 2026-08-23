@@ -8,7 +8,7 @@
  * ./repository.
  */
 
-import { formatDayLabel, formatTimeLabel, toLocalDate } from '@/core/time';
+import { formatDayLabel, formatTimeLabel, secondsBetween, toLocalDate } from '@/core/time';
 
 import type { ShareDeviceRow, ShareKind, ShareRow, ShareSummary } from './types';
 
@@ -363,6 +363,66 @@ export function isVisitorNameKnownRelative(
   const normalized = visitorName.trim().toLowerCase();
   return relativeGivenNames.some((name) => name.trim().toLowerCase() === normalized);
 }
+
+/* ────────────────────────────── Nachricht an die Gäste (2026-08-24) ────────────────────────────── */
+
+/** "hoechstens 300 Zeichen" — the announcement's own length cap, task requirement. */
+export const ANNOUNCEMENT_MAX_LENGTH = 300;
+
+/**
+ * Trims and caps a draft announcement at `ANNOUNCEMENT_MAX_LENGTH`;
+ * whitespace-only or empty text becomes `null` — the same "empty means no
+ * value" contract every optional free-text field in this project follows,
+ * so `repository.ts#publishShareAnnouncement`'s caller can tell "publish
+ * this text" from "there is nothing to publish" without a second check.
+ */
+export function normalizeAnnouncement(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  return trimmed.length > ANNOUNCEMENT_MAX_LENGTH ? trimmed.slice(0, ANNOUNCEMENT_MAX_LENGTH) : trimmed;
+}
+
+/**
+ * "veröffentlicht am {Datum} um {Uhrzeit}" — composed from the SAME two
+ * core/time helpers `formatDeviceSeenLabel` above already uses
+ * (`formatDayLabel`/`formatTimeLabel`), not a new date format (task's own
+ * explicit instruction: reuse the existing core/time helpers).
+ */
+export function formatAnnouncementPublishedLabel(publishedAtUtcIso: string, tz: string): string {
+  return `veröffentlicht am ${formatDayLabel(toLocalDate(publishedAtUtcIso, tz))} um ${formatTimeLabel(publishedAtUtcIso, tz)}`;
+}
+
+/**
+ * "gerade veröffentlicht" / "vor 3 Tagen veröffentlicht" — how old the
+ * CURRENT announcement is, so a caregiver can tell a fresh message from
+ * one that has sat there for a week apart from the exact timestamp above.
+ * The duration itself comes from core/time#secondsBetween (no new date
+ * arithmetic here) — only the German wording tiers are this function's
+ * own job. Negative/clock-skew input floors to "gerade veröffentlicht"
+ * rather than a nonsensical negative age.
+ */
+export function describeAnnouncementAge(publishedAtUtcIso: string, nowUtcIso: string): string {
+  const seconds = Math.max(0, secondsBetween(publishedAtUtcIso, nowUtcIso));
+  if (seconds < 60) {
+    return 'gerade veröffentlicht';
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `vor ${minutes} ${minutes === 1 ? 'Minute' : 'Minuten'} veröffentlicht`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `vor ${hours} ${hours === 1 ? 'Stunde' : 'Stunden'} veröffentlicht`;
+  }
+  const days = Math.floor(hours / 24);
+  return `vor ${days} ${days === 1 ? 'Tag' : 'Tagen'} veröffentlicht`;
+}
+
+/** Beim Anlegen einer Freigabe ist noch keine Nachricht gesetzt (Task 1) — erklärt, wo sie später erscheint. */
+export const NO_ANNOUNCEMENT_HINT_TEXT =
+  'Erscheint als Hinweis oben auf der geteilten Seite. Wer die Seite seither schon offen hatte, sieht sie beim nächsten Öffnen.';
 
 /* ────────────────────────────── Aufgabe 2: repository-facing pure helpers ────────────────────────────── */
 

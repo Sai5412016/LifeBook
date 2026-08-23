@@ -4,17 +4,21 @@ import {
   ACCESS_CODE_LENGTH,
   ALLOW_SUGGESTIONS_HINT_TEXT,
   ALLOW_SUGGESTIONS_LABEL,
+  ANNOUNCEMENT_MAX_LENGTH,
   DEFAULT_DEVICE_LIMIT,
   DEVICE_LIMIT_CHOICES,
+  NO_ANNOUNCEMENT_HINT_TEXT,
   SHARE_DISCLOSURE_TEXT,
   SHOW_LIVING_DETAILS_HINT_TEXT,
   TREE_SHARE_GUEST_NAME_HINT_TEXT,
   buildShareLink,
+  describeAnnouncementAge,
   describeDeviceFromUserAgent,
   describeShareKind,
   describeShareState,
   describeSupabaseError,
   diffPhotoSelection,
+  formatAnnouncementPublishedLabel,
   formatShareDeviceName,
   formatShareDeviceOrigin,
   formatDeviceCountLabel,
@@ -28,6 +32,7 @@ import {
   isPhotoReadyForShare,
   isUnexpectedOrigin,
   isVisitorNameKnownRelative,
+  normalizeAnnouncement,
   summarizeShares,
 } from './logic';
 import type { ShareRow } from './types';
@@ -208,6 +213,8 @@ describe('summarizeShares', () => {
     kind: 'photos',
     show_living_details: false,
     allow_suggestions: true,
+    announcement: null,
+    announcement_at: null,
     device_limit: 5,
     allow_download: true,
     expires_at: null,
@@ -419,6 +426,86 @@ describe('isVisitorNameKnownRelative', () => {
 
   it('ist false bei einer leeren Liste', () => {
     expect(isVisitorNameKnownRelative('Anna', [])).toBe(false);
+  });
+});
+
+describe('normalizeAnnouncement', () => {
+  it('trimmt Randleerzeichen', () => {
+    expect(normalizeAnnouncement('  Hallo!  ')).toBe('Hallo!');
+  });
+
+  it('gibt null für leeren oder nur aus Leerzeichen bestehenden Text zurück', () => {
+    expect(normalizeAnnouncement('')).toBeNull();
+    expect(normalizeAnnouncement('   ')).toBeNull();
+  });
+
+  it('kappt bei ANNOUNCEMENT_MAX_LENGTH Zeichen', () => {
+    const long = 'x'.repeat(ANNOUNCEMENT_MAX_LENGTH + 50);
+    const result = normalizeAnnouncement(long);
+    expect(result).toHaveLength(ANNOUNCEMENT_MAX_LENGTH);
+  });
+
+  it('lässt Text bis genau zur Höchstlänge unverändert', () => {
+    const exact = 'y'.repeat(ANNOUNCEMENT_MAX_LENGTH);
+    expect(normalizeAnnouncement(exact)).toBe(exact);
+  });
+});
+
+describe('formatAnnouncementPublishedLabel', () => {
+  it('formatiert Datum und Uhrzeit mit den vorhandenen core/time-Helfern', () => {
+    const label = formatAnnouncementPublishedLabel('2026-08-23T17:12:00.000Z', 'Europe/Berlin');
+    expect(label).toContain('veröffentlicht am');
+    expect(label).toContain('August 2026');
+    expect(label).toContain('19:12');
+    expect(label).toContain(' um ');
+  });
+});
+
+describe('describeAnnouncementAge', () => {
+  it('nennt eine Nachricht der letzten Minute "gerade veröffentlicht"', () => {
+    expect(describeAnnouncementAge('2026-08-23T10:00:00.000Z', '2026-08-23T10:00:30.000Z')).toBe(
+      'gerade veröffentlicht',
+    );
+  });
+
+  it('rechnet in Minuten, solange unter einer Stunde', () => {
+    expect(describeAnnouncementAge('2026-08-23T10:00:00.000Z', '2026-08-23T10:05:00.000Z')).toBe(
+      'vor 5 Minuten veröffentlicht',
+    );
+    expect(describeAnnouncementAge('2026-08-23T10:00:00.000Z', '2026-08-23T10:01:00.000Z')).toBe(
+      'vor 1 Minute veröffentlicht',
+    );
+  });
+
+  it('rechnet in Stunden, solange unter einem Tag', () => {
+    expect(describeAnnouncementAge('2026-08-23T10:00:00.000Z', '2026-08-23T13:00:00.000Z')).toBe(
+      'vor 3 Stunden veröffentlicht',
+    );
+    expect(describeAnnouncementAge('2026-08-23T10:00:00.000Z', '2026-08-23T11:00:00.000Z')).toBe(
+      'vor 1 Stunde veröffentlicht',
+    );
+  });
+
+  it('rechnet in Tagen ab 24 Stunden', () => {
+    expect(describeAnnouncementAge('2026-08-20T10:00:00.000Z', '2026-08-23T10:00:00.000Z')).toBe(
+      'vor 3 Tagen veröffentlicht',
+    );
+    expect(describeAnnouncementAge('2026-08-22T10:00:00.000Z', '2026-08-23T10:00:00.000Z')).toBe(
+      'vor 1 Tag veröffentlicht',
+    );
+  });
+
+  it('behandelt einen negativen (Uhr-Drift-)Abstand wie "gerade veröffentlicht"', () => {
+    expect(describeAnnouncementAge('2026-08-23T10:00:30.000Z', '2026-08-23T10:00:00.000Z')).toBe(
+      'gerade veröffentlicht',
+    );
+  });
+});
+
+describe('NO_ANNOUNCEMENT_HINT_TEXT', () => {
+  it('ist ein nicht-leerer Hinweissatz', () => {
+    expect(NO_ANNOUNCEMENT_HINT_TEXT.length).toBeGreaterThan(0);
+    expect(NO_ANNOUNCEMENT_HINT_TEXT).toContain('geteilten Seite');
   });
 });
 
