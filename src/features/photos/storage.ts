@@ -857,18 +857,26 @@ let backupAlbumId: string | null = null;
  */
 async function saveOriginalToDeviceAlbum(localUri: string): Promise<void> {
   if (backupAlbumId) {
+    console.log('[backup] MediaLibrary.createAssetAsync(uri, albumId) — Album aus dem Cache', { albumId: backupAlbumId });
     await MediaLibrary.createAssetAsync(localUri, backupAlbumId);
+    console.log('[backup] createAssetAsync fertig');
     return;
   }
 
+  console.log('[backup] MediaLibrary.getAlbumAsync', { album: PHOTO_BACKUP_ALBUM_NAME });
   const existingAlbum = await MediaLibrary.getAlbumAsync(PHOTO_BACKUP_ALBUM_NAME);
+  console.log('[backup] getAlbumAsync fertig', { gefunden: !!existingAlbum, albumId: existingAlbum?.id ?? null });
   if (existingAlbum) {
     backupAlbumId = existingAlbum.id;
+    console.log('[backup] MediaLibrary.createAssetAsync(uri, albumId) — vorhandenes Album', { albumId: existingAlbum.id });
     await MediaLibrary.createAssetAsync(localUri, existingAlbum.id);
+    console.log('[backup] createAssetAsync fertig');
     return;
   }
 
+  console.log('[backup] MediaLibrary.createAlbumAsync(name, undefined, undefined, localUri) — Album wird neu angelegt');
   const createdAlbum = await MediaLibrary.createAlbumAsync(PHOTO_BACKUP_ALBUM_NAME, undefined, undefined, localUri);
+  console.log('[backup] createAlbumAsync fertig', { albumId: createdAlbum?.id ?? null });
   backupAlbumId = createdAlbum.id;
 }
 
@@ -882,9 +890,20 @@ async function saveOriginalToDeviceAlbum(localUri: string): Promise<void> {
  * album, then cleans up the temporary file either way.
  */
 async function backUpOnePhoto(photo: PhotoBackupCandidatePhoto): Promise<void> {
+  // Hält fest, ob das Original noch lokal lag oder erst geladen werden
+  // musste — die Frage, ob es für den lokalen Fall einen zweiten,
+  // MediaLibrary-anfassenden Weg gibt, lässt sich am Gerät nur so
+  // beantworten statt zu vermuten. Beide Zweige münden hier in DIESELBE
+  // Album-Funktion, siehe unten.
+  console.log('[backup] Foto beginnt', {
+    photoId: photo.id,
+    quelle: photo.local_uri ? 'lokal (local_uri)' : 'Download aus Supabase',
+  });
   const resolved = await resolveOriginalForSharing(photo);
+  console.log('[backup] Original bereitgestellt', { photoId: photo.id, uri: resolved.uri, bytes: resolved.bytes });
   try {
     await saveOriginalToDeviceAlbum(resolved.uri);
+    console.log('[backup] Foto fertig gesichert', { photoId: photo.id });
   } finally {
     cleanupSharedFiles([resolved]);
   }
@@ -953,7 +972,19 @@ export async function runPhotoBackup(
     throw new Error('photos: Sammellauf zum Sichern läuft bereits');
   }
 
+  // Kennzeichnet im Protokoll, WELCHER Stand der App gerade läuft. Ohne das
+  // ist am Gerät nicht unterscheidbar, ob eine Änderung nicht wirkt oder ob
+  // das Funkupdate schlicht noch nicht angekommen ist.
+  console.log('[backup] Lauf startet — Fassung vom 24.08.2026, createAssetAsync(uri, albumId)', {
+    fotos: photos.length,
+  });
+  console.log('[backup] MediaLibrary.requestPermissionsAsync(true)');
   const permission = await MediaLibrary.requestPermissionsAsync(true);
+  console.log('[backup] requestPermissionsAsync fertig', {
+    granted: permission.granted,
+    accessPrivileges: permission.accessPrivileges ?? null,
+    canAskAgain: permission.canAskAgain,
+  });
   const permissionState = classifyPhotoBackupPermission(permission);
   if (permissionState !== 'ready') {
     throw new PhotoBackupPermissionError(permissionState, permission.canAskAgain);
