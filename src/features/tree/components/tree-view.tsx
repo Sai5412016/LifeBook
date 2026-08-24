@@ -93,7 +93,9 @@ export function TreeView({
       partnerIds: person.partnerIds,
     }));
 
-    const computedPositions = layoutTree(layoutInput);
+    // rootId anchors the Ahnentafel (layout.ts step 1) — Marina's ancestors
+    // get the exact recursive placement, everyone else attaches beside them.
+    const computedPositions = layoutTree(layoutInput, rootId);
     return {
       positions: computedPositions,
       connectors: computeConnectors(computedPositions, layoutInput),

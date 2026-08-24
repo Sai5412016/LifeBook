@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeConnectors,
   layoutTree,
+  LEVEL_ROW_HEIGHT,
   NODE_SLOT_WIDTH,
   orderRow,
   type TreeLayoutPerson,
@@ -136,6 +137,141 @@ describe('layoutTree', () => {
 
   it('returns an empty array for no people', () => {
     expect(layoutTree([])).toEqual([]);
+  });
+});
+
+/**
+ * Fehler 24.08.2026: neu angelegte Eltern (Peter+Barbara, Eltern von
+ * Rudolf) standen NICHT nebeneinander direkt über ihrem Kind — der alte
+ * Algorithmus schob sie beim Überlappungs-Auflösen ans rechte Ende ihrer
+ * Reihe (Neuanlagen haben den höchsten sort_index). Der Viewer ordnet
+ * dieselbe Konstellation korrekt an; diese Tests halten die vier
+ * Eigenschaften seines Verfahrens fest. Die Konstellation entspricht den
+ * Live-Daten: Marina (Wurzel) → Vater → dessen Eltern Rudolf+Ingrid →
+ * Rudolfs nachträglich ergänzte Eltern, mit den echten IDs aus dem
+ * Fehlerbericht.
+ */
+describe('layoutTree — Ahnentafel-Anordnung (Fehler 24.08.2026)', () => {
+  const RUDOLF = '7dbe0c41-fdfa-4066-8375-0b3f05fc4f63';
+  const PETER = '01a0359f-159b-766e-a7a1-2f47d2741de0';
+  const BARBARA = '01a035a0-0478-7467-b70c-038453ce2eaf';
+
+  const family = (): TreeLayoutPerson[] => [
+    person('marina', 0, { sort_index: 0, father_id: 'gerhard', mother_id: 'petra' }),
+    person('gerhard', 1, { sort_index: 0, father_id: RUDOLF, mother_id: 'ingrid', partnerIds: ['petra'] }),
+    person('petra', 1, { sort_index: 1, partnerIds: ['gerhard'] }),
+    person(RUDOLF, 2, { sort_index: 0, father_id: PETER, mother_id: BARBARA, partnerIds: ['ingrid'] }),
+    person('ingrid', 2, { sort_index: 1, partnerIds: [RUDOLF] }),
+    // Nachträglich ergänzt: höchster sort_index, genau wie bei einer
+    // Neuanlage über "Person hinzufügen" — der auslösende Fall.
+    person(PETER, 3, { sort_index: 98, partnerIds: [BARBARA] }),
+    person(BARBARA, 3, { sort_index: 99, partnerIds: [PETER] }),
+  ];
+
+  const positionsById = (people: TreeLayoutPerson[]) =>
+    new Map(layoutTree(people, 'marina').map((p) => [p.id, p]));
+
+  it('nachträglich ergänzte Eltern stehen nebeneinander direkt über ihrem Kind', () => {
+    const byId = positionsById(family());
+    const rudolf = byId.get(RUDOLF)!;
+    const peter = byId.get(PETER)!;
+    const barbara = byId.get(BARBARA)!;
+
+    // Nebeneinander: beide sind Blätter der Ahnentafel, also exakt ein Slot.
+    expect(Math.abs(peter.x - barbara.x)).toBeCloseTo(NODE_SLOT_WIDTH, 5);
+    // Direkt über dem Kind: Rudolf sitzt EXAKT auf der Mitte der beiden.
+    expect((peter.x + barbara.x) / 2).toBeCloseTo(rudolf.x, 5);
+    // Eine Reihe darüber, beide in derselben Reihe.
+    expect(peter.y).toBe(barbara.y);
+    expect(rudolf.y - peter.y).toBe(LEVEL_ROW_HEIGHT);
+  });
+
+  it('jedes Kind mit beiden Eltern im Baum sitzt mittig unter ihnen, auf jeder Ebene', () => {
+    const byId = positionsById(family());
+    expect(byId.get('marina')!.x).toBeCloseTo((byId.get('gerhard')!.x + byId.get('petra')!.x) / 2, 5);
+    expect(byId.get('gerhard')!.x).toBeCloseTo((byId.get(RUDOLF)!.x + byId.get('ingrid')!.x) / 2, 5);
+    expect(byId.get(RUDOLF)!.x).toBeCloseTo((byId.get(PETER)!.x + byId.get(BARBARA)!.x) / 2, 5);
+  });
+
+  it('wer nicht zur Ahnentafel gehört, findet einen freien Platz NEBEN seinen Bezugspersonen', () => {
+    // Tante (Schwester von Gerhard, gleiche Eltern) und ihr angeheirateter
+    // Partner — beide keine Vorfahren von Marina.
+    const people = [
+      ...family(),
+      person('tante', 1, { sort_index: 5, father_id: RUDOLF, mother_id: 'ingrid', partnerIds: ['onkel'] }),
+      person('onkel', 1, { sort_index: 6, partnerIds: ['tante'] }),
+    ];
+    const byId = positionsById(people);
+    const tante = byId.get('tante')!;
+    const onkel = byId.get('onkel')!;
+    const gerhard = byId.get('gerhard')!;
+
+    // Der Partner rückt direkt neben die Tante (genau ein Slot).
+    expect(Math.abs(onkel.x - tante.x)).toBeCloseTo(NODE_SLOT_WIDTH, 5);
+    // Die Tante bleibt in der Nähe ihrer Eltern-Mitte, ohne Gerhard zu
+    // überlappen — nie ans Reihenende verbannt wie beim alten Algorithmus.
+    const parentsMidpoint = (byId.get(RUDOLF)!.x + byId.get('ingrid')!.x) / 2;
+    expect(Math.abs(tante.x - parentsMidpoint)).toBeLessThanOrEqual(2 * NODE_SLOT_WIDTH + 1e-6);
+    expect(Math.abs(tante.x - gerhard.x)).toBeGreaterThanOrEqual(NODE_SLOT_WIDTH - 1e-6);
+  });
+
+  it('niemand steht in der Lücke zwischen zwei Partnern', () => {
+    const people = [
+      ...family(),
+      person('tante', 1, { sort_index: 5, father_id: RUDOLF, mother_id: 'ingrid', partnerIds: ['onkel'] }),
+      person('onkel', 1, { sort_index: 6, partnerIds: ['tante'] }),
+    ];
+    const byId = positionsById(people);
+    const pairs: [string, string][] = [
+      ['gerhard', 'petra'],
+      [RUDOLF, 'ingrid'],
+      [PETER, BARBARA],
+      ['tante', 'onkel'],
+    ];
+    for (const [a, b] of pairs) {
+      const lo = Math.min(byId.get(a)!.x, byId.get(b)!.x);
+      const hi = Math.max(byId.get(a)!.x, byId.get(b)!.x);
+      const level = byId.get(a)!.level;
+      for (const [id, pos] of byId) {
+        if (id === a || id === b || pos.level !== level) {
+          continue;
+        }
+        const insideGap = pos.x > lo + 1e-6 && pos.x < hi - 1e-6;
+        expect(insideGap, `${id} steht in der Paarlücke ${a}–${b}`).toBe(false);
+      }
+    }
+  });
+
+  it('auch mit Nebenpersonen in der Reihe bleiben die Eltern exakt über dem Kind (der gemeldete Fall)', () => {
+    // Weitere Personen in Peters/Barbaras Reihe mit NIEDRIGEREM sort_index
+    // — beim alten Algorithmus schoben genau solche Reihennachbarn die
+    // frisch angelegten Eltern nach rechts, weg von Rudolf.
+    const people = [
+      ...family(),
+      person('ingrids-vater', 3, { sort_index: 0, partnerIds: ['ingrids-mutter'] }),
+      person('ingrids-mutter', 3, { sort_index: 1, partnerIds: ['ingrids-vater'] }),
+    ];
+    // Ingrid bekommt ihre Eltern, damit die Reihe 3 wirklich gefüllt ist.
+    const ingrid = people.find((p) => p.id === 'ingrid')!;
+    (ingrid as { father_id: string | null }).father_id = 'ingrids-vater';
+    (ingrid as { mother_id: string | null }).mother_id = 'ingrids-mutter';
+
+    const byId = positionsById(people);
+    expect((byId.get(PETER)!.x + byId.get(BARBARA)!.x) / 2).toBeCloseTo(byId.get(RUDOLF)!.x, 5);
+    expect(Math.abs(byId.get(PETER)!.x - byId.get(BARBARA)!.x)).toBeCloseTo(NODE_SLOT_WIDTH, 5);
+    // Und weiterhin: keine zwei Personen einer Reihe überlappen.
+    const byRow = new Map<number, number[]>();
+    for (const pos of byId.values()) {
+      const xs = byRow.get(pos.level) ?? [];
+      xs.push(pos.x);
+      byRow.set(pos.level, xs);
+    }
+    for (const xs of byRow.values()) {
+      const sorted = [...xs].sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i += 1) {
+        expect(sorted[i] - sorted[i - 1]).toBeGreaterThanOrEqual(NODE_SLOT_WIDTH - 0.0001);
+      }
+    }
   });
 });
 
