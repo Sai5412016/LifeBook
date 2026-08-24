@@ -12,6 +12,7 @@ import {
   buildThumbKey,
   chronologicalRank,
   chunkPhotos,
+  classifyPhotoBackupPermission,
   composeContentHash,
   countMediumBackfillProgress,
   dedupeByHash,
@@ -24,6 +25,7 @@ import {
   formatMediumBackfillLabel,
   formatPermanentDeleteConfirmation,
   formatPhotoBackupConfirmation,
+  formatPhotoBackupPermissionMessage,
   formatPhotoBackupStatusLabel,
   formatPhotoRestoreConfirmation,
   formatTrashRemainingLabel,
@@ -738,6 +740,50 @@ describe('formatPhotoBackupConfirmation', () => {
 
   it('uses the singular for exactly one photo', () => {
     expect(formatPhotoBackupConfirmation(1, 1_000_000)).toContain('1 Foto ist noch nicht gesichert');
+  });
+});
+
+describe('classifyPhotoBackupPermission', () => {
+  it('is ready when fully granted with "all" access', () => {
+    expect(classifyPhotoBackupPermission({ granted: true, accessPrivileges: 'all' })).toBe('ready');
+  });
+
+  it('is ready when granted and the platform reports no accessPrivileges at all', () => {
+    expect(classifyPhotoBackupPermission({ granted: true })).toBe('ready');
+  });
+
+  it('is limited when accessPrivileges is "limited", even though granted already reads true', () => {
+    // The exact Android 14 "Nur ausgewählte zulassen" case from the bug report.
+    expect(classifyPhotoBackupPermission({ granted: true, accessPrivileges: 'limited' })).toBe('limited');
+  });
+
+  it('is denied when not granted and accessPrivileges is missing', () => {
+    expect(classifyPhotoBackupPermission({ granted: false })).toBe('denied');
+  });
+
+  it('is denied when accessPrivileges is explicitly "none", even if granted were true', () => {
+    expect(classifyPhotoBackupPermission({ granted: true, accessPrivileges: 'none' })).toBe('denied');
+  });
+
+  it('is denied when not granted and accessPrivileges is "none"', () => {
+    expect(classifyPhotoBackupPermission({ granted: false, accessPrivileges: 'none' })).toBe('denied');
+  });
+});
+
+describe('formatPhotoBackupPermissionMessage', () => {
+  it('names what is missing and why for the limited case, without saying "nicht erteilt"', () => {
+    const text = formatPhotoBackupPermissionMessage('limited');
+    expect(text).toContain('ausgewählte');
+    expect(text).not.toContain('nicht erteilt');
+  });
+
+  it('names the device album for the denied case, matching the confirmation text', () => {
+    const text = formatPhotoBackupPermissionMessage('denied');
+    expect(text).toContain(PHOTO_BACKUP_ALBUM_NAME);
+  });
+
+  it('produces two distinct texts for the two states', () => {
+    expect(formatPhotoBackupPermissionMessage('limited')).not.toBe(formatPhotoBackupPermissionMessage('denied'));
   });
 });
 

@@ -543,6 +543,51 @@ export function formatPhotoBackupConfirmation(pendingCount: number, averageOrigi
   return `${photosLabel}, geschätzt ${estimate} werden über WLAN in das Gerätealbum „${PHOTO_BACKUP_ALBUM_NAME}" gespeichert.`;
 }
 
+export type PhotoBackupPermissionState = 'ready' | 'limited' | 'denied';
+
+/**
+ * Classifies expo-media-library's write-permission response for "Alle Fotos
+ * sichern" into what the screen actually needs to know.
+ *
+ * `granted` alone is not enough on Android 14+: "Nur ausgewählte zulassen"
+ * (READ_MEDIA_VISUAL_USER_SELECTED) reports `accessPrivileges: 'limited'`
+ * while `granted` can already read `true` — formally permitted, but a
+ * backup that only ever sees the photos the user hand-picked in the OS
+ * chooser is not a real backup of the album. Seen on-device 24.08.2026: the
+ * app reported a flat "Berechtigung … nicht erteilt" for exactly this case
+ * — technically wrong (something WAS granted) and gave the user nothing to
+ * act on. `accessPrivileges` is checked first and wins over `granted`
+ * precisely for this reason; platforms that don't report it (iOS, or an
+ * older expo-media-library) fall through to the plain `granted` check.
+ */
+export function classifyPhotoBackupPermission(permission: {
+  granted: boolean;
+  accessPrivileges?: 'all' | 'limited' | 'none';
+}): PhotoBackupPermissionState {
+  if (permission.accessPrivileges === 'limited') {
+    return 'limited';
+  }
+  if (!permission.granted || permission.accessPrivileges === 'none') {
+    return 'denied';
+  }
+  return 'ready';
+}
+
+/**
+ * The "Alle Fotos sichern" permission panel's explanatory text — what is
+ * missing and why it's needed, task requirement. Deliberately two distinct
+ * texts rather than one generic one: "limited" already has SOME access
+ * granted (the fix is widening it), "denied" has none (the fix is granting
+ * it in the first place) — collapsing them back into one sentence is the
+ * exact bug this function exists to avoid repeating.
+ */
+export function formatPhotoBackupPermissionMessage(state: 'limited' | 'denied'): string {
+  if (state === 'limited') {
+    return `Nur ausgewählte Fotos sind für LifeBook freigegeben. Für eine vollständige Sicherung braucht LifeBook Zugriff auf die ganze Galerie — sonst werden nur die ausgewählten Fotos gesichert, ohne dass das sichtbar wäre.`;
+  }
+  return `Der Zugriff auf die Fotogalerie fehlt. LifeBook braucht ihn, um Originale zusätzlich im Gerätealbum „${PHOTO_BACKUP_ALBUM_NAME}" zu sichern.`;
+}
+
 /**
  * The Einstellungen backup-status line — task requirement: without it,
  * nobody can tell whether the backup is current. `pendingCount` is every

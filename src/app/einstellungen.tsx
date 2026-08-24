@@ -31,7 +31,7 @@
 import { usePowerSync, useStatus } from '@powersync/react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Linking, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -61,12 +61,14 @@ import {
   formatMediumBackfillConfirmation,
   formatMediumBackfillLabel,
   formatPhotoBackupConfirmation,
+  formatPhotoBackupPermissionMessage,
   formatPhotoBackupStatusLabel,
   selectMediumBackfillCandidates,
   selectPhotoBackupCandidates,
   startMediumBackfillRun,
   startPhotoBackupRun,
   type MediumBackfillRunState,
+  type PhotoBackupPermissionState,
   type PhotoBackupRunState,
 } from '@/features/photos/identity';
 import {
@@ -77,6 +79,7 @@ import {
   usePhotoBackupCandidatePhotos,
 } from '@/features/photos/repository';
 import {
+  PhotoBackupPermissionError,
   cancelMediumBackfillRun,
   cancelPhotoBackupRun,
   runMediumBackfill,
@@ -157,6 +160,14 @@ function PhotoStatusRow() {
 
   const [backupRunState, setBackupRunState] = useState<PhotoBackupRunState | null>(null);
   const [backupResultMessage, setBackupResultMessage] = useState<string | null>(null);
+  // Set instead of backupResultMessage when the run fails specifically on
+  // the gallery permission — that case gets its own panel (explanation +
+  // "Einstellungen öffnen"), not a one-line dangerText message, see
+  // storage.ts#PhotoBackupPermissionError's own doc comment for why.
+  const [backupPermissionIssue, setBackupPermissionIssue] = useState<{
+    state: Exclude<PhotoBackupPermissionState, 'ready'>;
+    canAskAgain: boolean;
+  } | null>(null);
   const backupRunningRef = useRef(false);
 
   // Verlässt man Einstellungen …
@@ -230,6 +241,7 @@ function PhotoStatusRow() {
     }
     backupRunningRef.current = true;
     setBackupResultMessage(null);
+    setBackupPermissionIssue(null);
     setBackupRunState(startPhotoBackupRun(backupCandidates.map((photo) => photo.id)));
     try {
       const result = await runPhotoBackup(db, backupCandidates, setBackupRunState);
@@ -241,13 +253,14 @@ function PhotoStatusRow() {
         );
       }
     } catch (error) {
-      // Deckt auch eine abgelehnte Galerie-Berechtigung ab
-      // (storage.ts#runPhotoBackup wirft dafür einen eigenen Fehler) — sonst
-      // bliebe der Knopf ohne jede Rückmeldung stumm.
-      console.error('[LifeBook] Sammellauf zum Sichern fehlgeschlagen', error);
-      setBackupResultMessage(
-        error instanceof Error ? error.message : 'Sichern fehlgeschlagen. Bitte erneut versuchen.',
-      );
+      if (error instanceof PhotoBackupPermissionError) {
+        setBackupPermissionIssue({ state: error.state, canAskAgain: error.canAskAgain });
+      } else {
+        console.error('[LifeBook] Sammellauf zum Sichern fehlgeschlagen', error);
+        setBackupResultMessage(
+          error instanceof Error ? error.message : 'Sichern fehlgeschlagen. Bitte erneut versuchen.',
+        );
+      }
     } finally {
       backupRunningRef.current = false;
       setBackupRunState(null);
@@ -333,6 +346,24 @@ function PhotoStatusRow() {
           <Pressable onPress={cancelPhotoBackupRun} hitSlop={8}>
             <ThemedText type="linkPrimary">Abbrechen</ThemedText>
           </Pressable>
+        </>
+      ) : backupPermissionIssue ? (
+        <>
+          <ThemedText type="small" themeColor="dangerText">
+            {formatPhotoBackupPermissionMessage(backupPermissionIssue.state)}
+          </ThemedText>
+          <Pressable onPress={() => Linking.openSettings()} hitSlop={8}>
+            <ThemedText type="linkPrimary">Einstellungen öffnen</ThemedText>
+          </Pressable>
+          {backupPermissionIssue.canAskAgain ? (
+            // Erneutes Fragen kann hier tatsächlich etwas ändern (z. B.
+            // "Nur ausgewählte zulassen" -> "Alle zulassen" im selben
+            // Dialog) — bei canAskAgain=false zeigt das System den Dialog
+            // gar nicht mehr, dann bleibt nur der Weg über die Einstellungen.
+            <Pressable onPress={() => void handleStartBackup()} hitSlop={8}>
+              <ThemedText type="linkPrimary">Erneut versuchen</ThemedText>
+            </Pressable>
+          ) : null}
         </>
       ) : (
         <>

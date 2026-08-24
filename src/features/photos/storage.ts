@@ -29,6 +29,7 @@ import {
   advanceMediumBackfillRun,
   advancePhotoBackupRun,
   buildMediumKey,
+  classifyPhotoBackupPermission,
   extensionForMime,
   isMediumBackfillRunComplete,
   isPhotoBackupRunComplete,
@@ -39,6 +40,7 @@ import {
   startMediumBackfillRun,
   startPhotoBackupRun,
   type MediumBackfillRunState,
+  type PhotoBackupPermissionState,
   type PhotoBackupRunState,
 } from './identity';
 import { createMediumImage, createThumbnail, deleteQuietly } from './media';
@@ -834,6 +836,27 @@ export type PhotoBackupRunResult = {
 };
 
 /**
+ * Thrown by `runPhotoBackup` when the gallery permission isn't sufficient
+ * for a real backup — `state` is `identity.ts#classifyPhotoBackupPermission`'s
+ * verdict (never `'ready'`, since that case doesn't throw), `canAskAgain`
+ * carries the OS's own answer to "would asking again do anything" straight
+ * through. A dedicated error type, not a plain `Error` with a message
+ * string, because the screen needs to render a DIFFERENT panel for this
+ * case (explanation + "Einstellungen öffnen") than for an ordinary failure
+ * (a one-line "fehlgeschlagen" message) — string-matching an error message
+ * to decide that would be one accidental wording change away from breaking.
+ */
+export class PhotoBackupPermissionError extends Error {
+  constructor(
+    readonly state: Exclude<PhotoBackupPermissionState, 'ready'>,
+    readonly canAskAgain: boolean,
+  ) {
+    super('photos: Berechtigung für die Fotogalerie reicht für eine Sicherung nicht aus');
+    this.name = 'PhotoBackupPermissionError';
+  }
+}
+
+/**
  * Runs the "Alle Fotos sichern" batch: one photo at a time (task
  * requirement — sequential, never parallel), WLAN-gated (`isOnWifi()`,
  * the SAME check the ordinary upload queue and the medium backfill
@@ -862,8 +885,9 @@ export async function runPhotoBackup(
   }
 
   const permission = await MediaLibrary.requestPermissionsAsync(true);
-  if (!permission.granted) {
-    throw new Error('photos: Berechtigung für die Fotogalerie wurde nicht erteilt');
+  const permissionState = classifyPhotoBackupPermission(permission);
+  if (permissionState !== 'ready') {
+    throw new PhotoBackupPermissionError(permissionState, permission.canAskAgain);
   }
 
   const controller = new AbortController();
