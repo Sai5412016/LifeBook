@@ -15,14 +15,12 @@
  * constraint enforces it here, but this module still writes a relative
  * BEFORE any union that references it, by convention — see `addRelative`.
  *
- * CIRCULAR IMPORT, KNOWN AND SAFE: this module imports
- * `removeStoredObjects` from features/photos/storage.ts, which itself
- * imports `removePhotoFromAllRelatives` (below) from THIS module — a real
- * cycle. Both sides only ever call the other's export from inside an
- * async function body, never at module-evaluation time, so by the time
- * either is actually invoked (a user tapping a button, long after both
- * modules finished loading) every export is fully bound — the same
- * lazy-binding guarantee CommonJS/Metro give any circular `require`.
+ * `removeStoredObjects` below comes from core/storage/objects.ts, NOT
+ * features/photos/storage.ts — that file imports `removePhotoFromAllRelatives`
+ * from THIS module, so importing back from it here would be a real import
+ * cycle (2026-08-25: found and removed, see core/storage/objects.ts's own
+ * doc comment for why "only call it from inside a function body" was not
+ * good enough for code that deletes files).
  */
 
 import { useQuery } from '@powersync/react-native';
@@ -32,7 +30,7 @@ import { newId } from '@/core/db/ids';
 import { nowUtcIso, toLocalDate } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
 
-import { removeStoredObjects } from '@/features/photos/storage';
+import { removeStoredObjects } from '@/core/storage/objects';
 
 import { DEFAULT_UNION_KIND, formatGermanDate, partnerIdFromUnion } from './logic';
 import { uploadRelativePhoto } from './photo';

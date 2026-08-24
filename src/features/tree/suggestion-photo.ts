@@ -11,7 +11,7 @@
  * segment is the share id, exactly what the `suggestions_read`/
  * `suggestions_delete` storage policies key off of (the SAME pattern the
  * `photos` bucket uses with the household id as its first segment — see
- * photos/storage.ts's own module doc comment).
+ * core/storage/objects.ts's own `objectUrl`).
  *
  * TRUST MODEL: a guest's photo is untrusted content from a stranger. This
  * module never assumes anything about its size, aspect ratio, or that it
@@ -26,8 +26,8 @@ import { ImageManipulator } from 'expo-image-manipulator';
 
 import { newId } from '@/core/db/ids';
 import { supabase } from '@/core/supabase';
+import { PHOTOS_BUCKET, uploadToPhotosBucket } from '@/core/storage/objects';
 import { deleteQuietly } from '@/features/photos/media';
-import { PHOTOS_BUCKET, uploadToPhotosBucket } from '@/features/photos/storage';
 
 export const SUGGESTIONS_BUCKET = 'suggestions';
 

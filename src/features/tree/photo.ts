@@ -21,8 +21,8 @@
 import * as ImagePicker from 'expo-image-picker';
 
 import { newId } from '@/core/db/ids';
+import { uploadToPhotosBucket } from '@/core/storage/objects';
 import { createThumbnail, deleteQuietly } from '@/features/photos/media';
-import { uploadToPhotosBucket } from '@/features/photos/storage';
 
 import { buildRelativePhotoKey } from './identity';
 

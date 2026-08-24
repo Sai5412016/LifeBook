@@ -30,7 +30,7 @@ import {
 } from '@/features/people/components/person-form';
 import { uploadPersonPhoto } from '@/features/people/photo';
 import { setPersonPhotoKey, softDeletePerson, updatePerson, usePersonById } from '@/features/people/repository';
-import { removeStoredObjects } from '@/features/photos/storage';
+import { removeStoredObjects } from '@/core/storage/objects';
 
 export default function PersonEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

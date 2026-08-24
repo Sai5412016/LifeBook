@@ -2,25 +2,24 @@
  * photos/storage — moves the actual bytes between the device and the private
  * `photos` bucket, and hands out short-lived URLs for displaying them.
  *
- * WHY NOT THE supabase-js STORAGE CLIENT FOR UPLOADS
- * --------------------------------------------------
- * supabase-js wants the file contents in JS memory (ArrayBuffer / Blob). A dozen
- * 8 MB photos in flight is enough to kill a mid-range Android app. expo-file-
- * system streams the file from disk into the request natively, so memory stays
- * flat regardless of file size. The endpoint is Supabase's ordinary Storage REST
- * API and the row-level access rules apply exactly the same — we just skip the
- * client library for this one call. Downloads and signed URLs still go through
- * supabase-js, where payloads are small.
+ * The actual upload/remove primitives (`uploadToPhotosBucket`,
+ * `removeStoredObjects`, `PHOTOS_BUCKET`) live in core/storage/objects.ts,
+ * not here — see that module's own doc comment for why: this file also
+ * imports from features/tree/repository.ts below, and the tree feature
+ * needs those same two functions, which used to make this a real import
+ * cycle (before 2026-08-25). Every caller that only needs upload/remove —
+ * not this file's higher-level queue/backup/trash logic — imports
+ * core/storage/objects.ts directly, not this file.
  */
 
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
-import { Directory, File, Paths, UploadType } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Network from 'expo-network';
 
-import { ENV } from '@/core/env';
 import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
+import { PHOTOS_BUCKET, removeStoredObjects, uploadToPhotosBucket } from '@/core/storage/objects';
 import { removePhotoFromAllEvents } from '@/features/events/repository';
 import { removePhotoFromAllShares } from '@/features/shares/repository';
 import { removePhotoFromAllRelatives } from '@/features/tree/repository';
@@ -56,8 +55,6 @@ import {
 import { setTrashCleanupDiagnostics } from './trashDiagnostics';
 import type { PhotoRow } from './types';
 
-export const PHOTOS_BUCKET = 'photos';
-
 /** How long a display URL stays valid. Long enough to scroll, short enough to leak little. */
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
 
@@ -72,73 +69,6 @@ const SIGNED_URL_TTL_SECONDS = 60 * 60;
  * mean a stale photo sticking around.
  */
 const IMMUTABLE_CACHE_CONTROL_SECONDS = 60 * 60 * 24 * 365;
-
-export class StorageUploadError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: string,
-  ) {
-    super(`storage upload failed with HTTP ${status}: ${body.slice(0, 300)}`);
-    this.name = 'StorageUploadError';
-  }
-}
-
-/**
- * Build the REST URL for an object key. Each path SEGMENT is encoded separately
- * so the slashes that separate household / photo / filename survive — encoding
- * the whole key would turn them into %2F and break the folder layout the access
- * rules match on.
- */
-const objectUrl = (key: string): string =>
-  `${ENV.SUPABASE_URL}/storage/v1/object/${PHOTOS_BUCKET}/` +
-  key.split('/').map(encodeURIComponent).join('/');
-
-async function requireAccessToken(): Promise<string> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) {
-    throw new Error('photos: not signed in — cannot upload');
-  }
-  return token;
-}
-
-/**
- * Stream one local file into the bucket, overwriting any previous attempt.
- * Exported as the one shared uploader into the `photos` bucket — features/people
- * uploads a person's portrait through this same function rather than
- * duplicating the auth-header/retry-safe upload request.
- */
-export async function uploadToPhotosBucket(
-  localUri: string,
-  key: string,
-  mime: string,
-  cacheControlSeconds: number = SIGNED_URL_TTL_SECONDS,
-): Promise<void> {
-  const token = await requireAccessToken();
-  const file = new File(localUri);
-
-  if (!file.info().exists) {
-    throw new Error(`photos: local file vanished before upload (${key})`);
-  }
-
-  const response = await file.upload(objectUrl(key), {
-    httpMethod: 'POST',
-    uploadType: UploadType.BINARY_CONTENT,
-    mimeType: mime,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'content-type': mime,
-      // Retries must not fail on "object already exists" — an upload that timed
-      // out client-side may well have landed server-side.
-      'x-upsert': 'true',
-      'cache-control': `max-age=${cacheControlSeconds}`,
-    },
-  });
-
-  if (response.status < 200 || response.status >= 300) {
-    throw new StorageUploadError(response.status, response.body);
-  }
-}
 
 /** True when the device is on Wi-Fi. Errs on the side of "no" if unknown. */
 export async function isOnWifi(): Promise<boolean> {
@@ -348,39 +278,6 @@ export async function getCachedSignedUrls(keys: readonly string[]): Promise<Map<
   }
 
   return result;
-}
-
-/**
- * Remove every stored rendition of a photo.
- *
- * 2026-08-15: THROWS on failure now, no longer best-effort — its only
- * caller is `permanentlyDeletePhoto` below, where a storage failure MUST
- * stop the operation before the row is deleted (task requirement: an
- * orphaned object that nobody can attribute to anything any more is worse
- * than a trash entry that stays a little longer). When soft-delete alone
- * was still paired with this call, a swallowed failure was harmless — that
- * caller is gone (see repository.ts#softDeletePhoto's own doc comment).
- *
- * Idempotent by construction: Supabase Storage's `remove()` is a thin
- * wrapper over S3-style object deletion, which returns success for a key
- * that is already gone rather than erroring — removing the same photo's
- * files twice (e.g. two phones sweeping the trash at the same moment,
- * Aufgabe 3) is therefore not a failure case this function can even see.
- */
-export async function removeStoredObjects(
-  thumbKey: string | null,
-  mediumKey: string | null,
-  originalKey: string | null,
-): Promise<void> {
-  const keys = [thumbKey, mediumKey, originalKey].filter((key): key is string => Boolean(key));
-  if (keys.length === 0) {
-    return;
-  }
-
-  const { error } = await supabase.storage.from(PHOTOS_BUCKET).remove(keys);
-  if (error) {
-    throw new Error(`photos: Speicherobjekte konnten nicht entfernt werden: ${error.message}`);
-  }
 }
 
 /* ────────────────────────────── Sharing ────────────────────────────── */
