@@ -108,6 +108,16 @@ export type TreeSuggestionRow = {
   father_id: string | null;
   /** The whole content for `kind: 'note'`; unused for the other two kinds. */
   message: string | null;
+  /**
+   * A guest's optional photo, already uploaded browser-side into the
+   * private `suggestions` bucket before this row ever synced — see
+   * suggestion-photo.ts's own doc comment for the full path shape and
+   * trust model. `null` once consumed (copied into `photos` and set as a
+   * portrait) or discarded (rejected, or a `kind: 'note'` that had one).
+   */
+  photo_key: string | null;
+  photo_bytes: number | null;
+  photo_mime: string | null;
   status: TreeSuggestionStatus;
   created_at: string;
   decided_at: string | null;
