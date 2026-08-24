@@ -35,7 +35,6 @@ import {
   isPhotoBackupRunComplete,
   isPhotoDueForCleanup,
   nextMediumBackfillId,
-  nextPhotoBackupId,
   shouldResignUrl,
   startMediumBackfillRun,
   startPhotoBackupRun,
@@ -792,40 +791,63 @@ export function cancelPhotoBackupRun(): void {
 }
 
 /**
- * Copies one photo's original into the device's own gallery album
- * (identity.ts#PHOTO_BACKUP_ALBUM_NAME) — creating the album on the first
- * photo, adding to it after that. `copy: false` on both calls:
- * `createAssetAsync` already places the file in the library's default
- * location, so adding it to the album with a COPY (the API's own default)
- * would leave two entries for the same picture (see
- * createAlbumAsync/addAssetsToAlbumAsync's own docs) — moving instead
- * keeps exactly one.
+ * How many local files go into ONE `addAssetsToAlbumAsync` call.
+ *
+ * Bug found 24.08.2026: the previous code called `addAssetsToAlbumAsync`
+ * once PER PHOTO — 203 photos, 203 separate Android
+ * `MediaStore.createWriteRequest` consent dialogs ("Darf LifeBook dieses
+ * Foto ändern?"), one after another. The API takes an ARRAY specifically so
+ * one call can cover many assets with a SINGLE consent dialog (see the
+ * `assets: AssetRef[] | AssetRef` signature in
+ * expo-media-library/build/legacy/MediaLibrary.d.ts) — the fix batches
+ * calls instead of making one per photo. A single call for the whole run
+ * (hundreds of URIs) was deliberately avoided in favour of blocks of a few
+ * dozen: a handful of dialogs (four for 203 photos at this size) is a safer
+ * middle ground than betting an entire run on one native call with an
+ * arbitrarily long URI list never exercised on a real device from this
+ * sandbox.
  */
-async function saveOriginalToDeviceAlbum(localUri: string): Promise<void> {
-  const asset = await MediaLibrary.createAssetAsync(localUri);
-  const existingAlbum = await MediaLibrary.getAlbumAsync(PHOTO_BACKUP_ALBUM_NAME);
-  if (existingAlbum) {
-    await MediaLibrary.addAssetsToAlbumAsync([asset], existingAlbum, false);
-  } else {
-    await MediaLibrary.createAlbumAsync(PHOTO_BACKUP_ALBUM_NAME, asset, false);
-  }
-}
+const BACKUP_ALBUM_BATCH_SIZE = 50;
 
 /**
- * Resolves ONE photo's original — local copy if still staged, otherwise
- * downloaded — via `resolveOriginalForSharing`, the SAME resolution the OS
- * share sheet already uses (task requirement: reuse it rather than a
- * second download path; it already prefers `local_uri` over a fresh
- * download, exactly what "Fotos, deren Original noch lokal vorliegt,
- * direkt von dort speichern" asked for) — then saves it into the device
- * album, then cleans up the temporary file either way.
+ * Creates a MediaStore asset for each already-resolved local file, then adds
+ * the WHOLE block to the backup album (identity.ts#PHOTO_BACKUP_ALBUM_NAME)
+ * in ONE `addAssetsToAlbumAsync` call — see `BACKUP_ALBUM_BATCH_SIZE`'s own
+ * comment for why. `createAssetAsync` itself is still called once per file:
+ * it INSERTS a brand-new MediaStore row this app owns, which is not the
+ * operation Android asks consent for — only the move below is.
+ *
+ * `copy: false` (move, not copy) on both calls, kept deliberately rather
+ * than switched to dodge the dialog: `createAssetAsync` already placed
+ * every file in its default MediaStore location, so adding it to the album
+ * with `copy: true` (the API's own default) would leave a SECOND file on
+ * disk per photo — roughly 203 × 5.5 MB doubled, just to avoid a consent
+ * dialog that batching already fixes without that cost. The dialog is the
+ * price of moving media Android doesn't yet consider "ours" into our own
+ * album; asking once per block is the correct amount of asking, not zero.
  */
-async function backUpOnePhoto(photo: PhotoBackupCandidatePhoto): Promise<void> {
-  const resolved = await resolveOriginalForSharing(photo);
-  try {
-    await saveOriginalToDeviceAlbum(resolved.uri);
-  } finally {
-    cleanupSharedFiles([resolved]);
+async function saveOriginalsToDeviceAlbum(localUris: readonly string[]): Promise<void> {
+  if (localUris.length === 0) {
+    return;
+  }
+  const assets = [];
+  for (const uri of localUris) {
+    assets.push(await MediaLibrary.createAssetAsync(uri));
+  }
+
+  const existingAlbum = await MediaLibrary.getAlbumAsync(PHOTO_BACKUP_ALBUM_NAME);
+  if (existingAlbum) {
+    await MediaLibrary.addAssetsToAlbumAsync(assets, existingAlbum, false);
+    return;
+  }
+
+  // createAlbumAsync only seeds a new album with ONE asset — the rest of
+  // this block still needs its own addAssetsToAlbumAsync call, right into
+  // the album this just created.
+  const [first, ...rest] = assets;
+  const createdAlbum = await MediaLibrary.createAlbumAsync(PHOTO_BACKUP_ALBUM_NAME, first, false);
+  if (rest.length > 0) {
+    await MediaLibrary.addAssetsToAlbumAsync(rest, createdAlbum, false);
   }
 }
 
@@ -862,11 +884,23 @@ export class PhotoBackupPermissionError extends Error {
  * the SAME check the ordinary upload queue and the medium backfill
  * already gate on, rechecked before every item so losing WLAN mid-run
  * ends the run cleanly instead of grinding through the rest as silent
- * failures), cancellable between items, and never letting one bad photo
- * stop the rest — mirrors `runMediumBackfill` closely, both being thin
- * async loops around the SAME shared `SequentialRunState` engine
+ * failures), cancellable between individual downloads and never letting one
+ * bad photo stop the rest — mirrors `runMediumBackfill` closely, both being
+ * thin async loops around the SAME shared `SequentialRunState` engine
  * (identity.ts) rather than two separate implementations of the same
  * Ablaufsteuerung.
+ *
+ * DOWNLOADS ONE AT A TIME, BUT SAVES INTO THE ALBUM IN BLOCKS
+ * -------------------------------------------------------------
+ * Each photo's original is still resolved individually (network/staging
+ * download, one at a time — a single slow or missing photo only fails
+ * itself). What changed 24.08.2026 is the LAST step: instead of calling
+ * `addAssetsToAlbumAsync` once per photo — which made Android show its
+ * MediaStore write-consent dialog once per photo, 203 dialogs for 203
+ * photos — the resolved files of up to `BACKUP_ALBUM_BATCH_SIZE` photos are
+ * now handed to `saveOriginalsToDeviceAlbum` together, in ONE call, so ONE
+ * dialog covers the whole block. See that function's own comment for why
+ * blocks and not one call for everything.
  *
  * The write-to-gallery permission is requested HERE, the very first thing
  * once a run actually begins — never at app start (task requirement).
@@ -903,23 +937,82 @@ export async function runPhotoBackup(
         return { saved: state.succeeded, failed: state.failed, stoppedEarly: true };
       }
 
-      const id = nextPhotoBackupId(state);
-      const photo = id ? byId.get(id) : undefined;
-      let outcome: 'saved' | 'failed' = 'failed';
-      if (photo) {
+      // Ein Block wird als Ganzes verarbeitet: jedes Foto einzeln
+      // heruntergeladen (kann einzeln fehlschlagen, ohne den Block
+      // abzubrechen), aber am Ende EIN gemeinsamer Schreibaufruf ins
+      // Gerätealbum — siehe BACKUP_ALBUM_BATCH_SIZE. Der Fortschritt
+      // (onProgress) wird deshalb erst NACH dem ganzen Block gemeldet, nicht
+      // nach jedem einzelnen Foto (Aufgabe: "pro Block fortschreiben, nicht
+      // pro Datei").
+      const blockIds = state.queue.slice(0, BACKUP_ALBUM_BATCH_SIZE);
+      const attemptedIds: string[] = [];
+      const failedIds = new Set<string>();
+      const resolved: { id: string; file: ResolvedShareFile }[] = [];
+
+      for (const id of blockIds) {
+        if (controller.signal.aborted || !(await isOnWifi())) {
+          // Nicht mehr weiter in diesem Block — der Rest (inklusive dieses
+          // Fotos) bleibt in der Warteschlange für den nächsten Lauf.
+          break;
+        }
+        attemptedIds.push(id);
+        const photo = byId.get(id);
+        if (!photo) {
+          failedIds.add(id);
+          continue;
+        }
         try {
-          await backUpOnePhoto(photo);
-          await markPhotoBackedUp(db, photo.id);
-          outcome = 'saved';
+          resolved.push({ id, file: await resolveOriginalForSharing(photo) });
         } catch (error) {
-          console.error('[LifeBook] Foto konnte nicht gesichert werden', {
-            photoId: photo.id,
+          console.error('[LifeBook] Original für die Sicherung konnte nicht geladen werden', {
+            photoId: id,
             message: error instanceof Error ? error.message : String(error),
           });
+          failedIds.add(id);
         }
       }
-      state = advancePhotoBackupRun(state, outcome);
+
+      let albumWriteFailed = false;
+      if (resolved.length > 0) {
+        try {
+          await saveOriginalsToDeviceAlbum(resolved.map(({ file }) => file.uri));
+          for (const { id } of resolved) {
+            await markPhotoBackedUp(db, id);
+          }
+        } catch (error) {
+          console.error('[LifeBook] Fotos konnten nicht ins Gerätealbum gespeichert werden', {
+            count: resolved.length,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          albumWriteFailed = true;
+          for (const { id } of resolved) {
+            failedIds.add(id);
+          }
+        } finally {
+          cleanupSharedFiles(resolved.map(({ file }) => file));
+        }
+      }
+
+      for (const id of attemptedIds) {
+        state = advancePhotoBackupRun(state, failedIds.has(id) ? 'failed' : 'saved');
+      }
       onProgress?.(state);
+
+      if (albumWriteFailed) {
+        // Vermutlich hat der Nutzer die Systemabfrage abgelehnt (oder ein
+        // anderer Schreibfehler trat auf) — für den nächsten Block erneut zu
+        // fragen würde genau das wiederholen, was diese Aufgabe beheben
+        // soll. Der Lauf endet hier sauber, mit einer verständlichen
+        // Meldung statt eines weiteren Dialogs.
+        throw new Error(
+          'photos: Speichern im Gerätealbum wurde abgebrochen — vermutlich wurde die Systemabfrage abgelehnt. Bitte erneut versuchen.',
+        );
+      }
+
+      if (attemptedIds.length < blockIds.length) {
+        // Mitten im Block abgebrochen (WLAN weg oder Abbrechen gedrückt).
+        return { saved: state.succeeded, failed: state.failed, stoppedEarly: true };
+      }
     }
     return { saved: state.succeeded, failed: state.failed, stoppedEarly: false };
   } finally {
