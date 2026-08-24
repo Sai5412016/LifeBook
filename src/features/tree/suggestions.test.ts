@@ -6,6 +6,7 @@ import {
   changedFields,
   describeSuggestion,
   describeSuggestionKind,
+  formatSuggestionPhotoSizeMb,
   isSuggestionFieldSet,
   truncateGuestText,
 } from './suggestions';
@@ -32,6 +33,9 @@ function suggestion(overrides: Partial<TreeSuggestionRow> = {}): TreeSuggestionR
     mother_id: null,
     father_id: null,
     message: null,
+    photo_key: null,
+    photo_bytes: null,
+    photo_mime: null,
     status: 'open',
     created_at: '2026-08-24T10:00:00.000Z',
     decided_at: null,
@@ -70,6 +74,20 @@ function relative(overrides: Partial<RelativeRow> = {}): RelativeRow {
     ...overrides,
   };
 }
+
+describe('formatSuggestionPhotoSizeMb', () => {
+  it('formatiert auf eine Nachkommastelle', () => {
+    expect(formatSuggestionPhotoSizeMb(279 * 1024)).toBe('0.3 MB');
+    expect(formatSuggestionPhotoSizeMb(2.5 * 1024 * 1024)).toBe('2.5 MB');
+  });
+
+  it('zeigt "< 0.1 MB" für sehr kleine, fehlende oder ungültige Werte', () => {
+    expect(formatSuggestionPhotoSizeMb(1000)).toBe('< 0.1 MB');
+    expect(formatSuggestionPhotoSizeMb(0)).toBe('< 0.1 MB');
+    expect(formatSuggestionPhotoSizeMb(-5)).toBe('< 0.1 MB');
+    expect(formatSuggestionPhotoSizeMb(NaN)).toBe('< 0.1 MB');
+  });
+});
 
 describe('truncateGuestText', () => {
   it('lässt kurzen Text unverändert', () => {

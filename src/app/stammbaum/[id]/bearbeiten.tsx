@@ -40,7 +40,7 @@ import {
 import { isSuggestionFieldSet, SUGGESTIBLE_RELATIVE_FIELDS } from '@/features/tree/suggestions';
 import type { TreeSuggestionRow } from '@/features/tree/types';
 import { useAuth } from '@/core/auth/session-store';
-import { removeStoredObjects } from '@/features/photos/storage';
+import { removeStoredObjects } from '@/core/storage/objects';
 
 /**
  * Legt die vom Vorschlag GESETZTEN Felder über `values` — nicht gesetzte

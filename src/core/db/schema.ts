@@ -508,6 +508,15 @@ function buildAppSchema() {
       mother_id: column.text, // NOT a foreign key
       father_id: column.text, // NOT a foreign key
       message: column.text, // the whole content for kind 'note', unused otherwise
+      // A guest's photo, uploaded browser-side straight into the private
+      // `suggestions` bucket (2026-08-24) — path {share_id}/{share_device_id}/
+      // {uuid}.{ext}, never through this client (see
+      // features/tree/suggestion-photo.ts's own doc comment). NULL once the
+      // app has consumed or discarded it (accept/reject both clear these
+      // three columns together with the bucket object itself).
+      photo_key: column.text,
+      photo_bytes: column.integer,
+      photo_mime: column.text,
       status: column.text, // open | accepted | rejected
       created_at: column.text,
       decided_at: column.text,

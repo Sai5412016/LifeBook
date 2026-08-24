@@ -326,6 +326,57 @@ friert ein. Am 23.08.2026 im Portrait-Zuschnitt passiert. Die Direktive ist
 außerhalb von Reanimated ein wirkungsloser String, die Funktionen bleiben
 also mit Vitest testbar.
 
+### 14. Ein Paar entsteht aus dem gemeinsamen Kind, nicht aus einem Eintrag
+
+Am 23.08.2026 gemessen: 11 Kinder hatten Vater UND Mutter eingetragen, aber
+keine Zeile in relative_unions. Vier Paare (Rudolf+Ingrid, Joseph+Josefa,
+Ernest+Barbara, Herbert+Jutta) wurden deshalb unverbunden gezeichnet. Zwei
+Menschen mit gemeinsamem Kind SIND ein Paar — das steht bereits in den
+Daten. Trigger relatives_ensure_parent_union legt die Zeile selbst an, auch
+wenn ein Elternteil erst Wochen später nachgetragen wird; der Viewer leitet
+Paare zusätzlich zur Laufzeit ab (pairsOf). Der Umkehrschluss gilt NICHT:
+Wer nachträglich als Partner ergänzt wird, ist damit kein Elternteil der
+vorhandenen Kinder (Stiefeltern). Das darf nur der Mensch entscheiden.
+
+### 15. Der Weg eines Gästefotos: an Vercel vorbei, in einen eigenen Bucket, ohne EXIF
+
+Ein Vorschlag aus dem geteilten Stammbaum darf ein Foto tragen
+(tree_suggestions.photo_key/photo_bytes/photo_mime). Drei Entscheidungen
+dabei sind nicht offensichtlich, wenn man nur die App-Seite sieht:
+
+1. **Der Upload geht an Vercel vorbei.** Die Teilen-Seite läuft bei
+   Vercel (siehe „Edge Functions" oben), und Vercel-Functions haben eine
+   Anfragegrenze von rund 4,5 MB — der Bucket erlaubt aber bis zu 8 MB pro
+   Foto. Ein Umweg über eine eigene Server-Funktion hätte diese Grenze
+   geerbt. Deshalb gibt die Edge Function `album` (Version 12) nur eine
+   SIGNIERTE UPLOAD-ADRESSE aus; der Gast lädt sein Foto direkt beim
+   Supabase-Speicher hoch, ohne dass die Bytes je durch Vercel laufen.
+2. **Eigener Bucket `suggestions`, nicht `photos`.** Ein Gästefoto ist bis
+   zur Freigabe ungeprüftes Fremdmaterial — andere Größenbegrenzung (8 MB
+   statt der Fotochronik-Regeln), andere Zugriffsregeln
+   (suggestions_read/suggestions_delete plus die SECURITY-DEFINER-Funktion
+   public.auth_share_ids(), nicht die Haushalts-Mitgliedschaft), und ein
+   abgelehntes oder nie geprüftes Foto darf die echte Fotochronik nie
+   berühren. Pfadaufbau `{share_id}/{share_device_id}/{uuid}.{ext}` —
+   genau wie beim `photos`-Bucket der erste Abschnitt (dort die
+   Haushalts-ID) das ist, worauf die Zugriffsregeln zugreifen.
+3. **Das Canvas wirft den EXIF-Block weg.** Vor dem Hochladen zeichnet der
+   Browser des Gastes das Foto durch ein `<canvas>` neu (längste Kante
+   max. 2400 px, JPEG). Ein Canvas arbeitet mit bereits entschlüsselten
+   Bildpunkten, nicht mit der Originaldatei — beim Neu-Export als JPEG
+   bleibt kein EXIF-Block übrig, GPS-Koordinaten eines Fremden also nie im
+   Bucket, dieselbe Regel wie bei eigenen Fotos, nur schon vor dem Upload
+   durchgesetzt. Nebeneffekt: aus einem iPhone-HEIC wird dabei ein
+   anzeigbares JPEG, weil das Canvas das Format ohnehin neu erzeugt.
+   **Schlägt dieser Schritt fehl** (ein Browser, der das Ausgangsformat
+   selbst nicht entschlüsseln kann), **geht die Originaldatei unverändert
+   raus** — HEIC/HEIF kann also durchrutschen, weiterhin mit EXIF. Die
+   App muss ein Gästefoto deshalb IMMER als möglicherweise unverkleinert,
+   unnormalisiert und nicht sicher entschlüsselbar behandeln (siehe
+   features/tree/suggestion-photo.ts#downloadSuggestionPhotoForCropping:
+   scheitert das Dekodieren, wird das dem Menschen gemeldet, nicht
+   stillschweigend übergangen).
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste

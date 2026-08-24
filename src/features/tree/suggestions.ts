@@ -22,6 +22,15 @@ import type { RelativeGender, RelativeRow, TreeSuggestionRow } from './types';
 /** Longest a single guest-typed value is shown as, before "…" — a review card must stay a review card, not a place to paste an essay. */
 export const MAX_SUGGESTION_TEXT_LENGTH = 200;
 
+/** "0.3 MB" / "< 0.1 MB" — a guest's attached photo size, task requirement ("Größe in MB"). Never negative/NaN-looking: a non-positive or missing byte count reads as "< 0.1 MB" rather than "0.0 MB" or "-1 MB". */
+export function formatSuggestionPhotoSizeMb(bytes: number): string {
+  const megabytes = bytes / (1024 * 1024);
+  if (!Number.isFinite(megabytes) || megabytes < 0.1) {
+    return '< 0.1 MB';
+  }
+  return `${megabytes.toFixed(1)} MB`;
+}
+
 /** Trims, then caps at `maxLength`, appending "…" only when something was actually cut. Guest text ONLY ever reaches the screen through this. */
 export function truncateGuestText(text: string, maxLength: number = MAX_SUGGESTION_TEXT_LENGTH): string {
   const trimmed = text.trim();
