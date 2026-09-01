@@ -51,6 +51,18 @@ export default function AppTabs() {
         <NativeTabs.Trigger.Label>Stammbaum</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf="figure.2.and.child.holdinghands" md="family_restroom" />
       </NativeTabs.Trigger>
+
+      {/*
+        2026-08-25: Abpumpen, siehe features/pumping. Ans Ende gehängt, nach
+        demselben Grundsatz wie Stammbaum darüber — keine bestehende
+        Reihenfolge anfassen. Systemsymbol statt PNG: vier der fünf Trigger
+        oben verwenden bereits sf/md, damit gibt es kein Platzhalterbild,
+        das später jemand austauschen müsste.
+      */}
+      <NativeTabs.Trigger name="abpumpen">
+        <NativeTabs.Trigger.Label>Abpumpen</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="drop.fill" md="water_drop" />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

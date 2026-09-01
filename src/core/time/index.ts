@@ -243,6 +243,33 @@ export const ageInDays = (
  * source is `pickerDateToLocalDate` below, or an already-valid stored
  * local date).
  */
+/**
+ * Steps a stored local calendar date (YYYY-MM-DD) by whole days — "the 14
+ * days ending today", "the day before this one". Pure calendar arithmetic
+ * on the civil date, deliberately NOT a shift of any instant: the maths
+ * runs in UTC (`Date.UTC`), which has no DST, so stepping across a
+ * clock-change boundary can never lose or duplicate a day the way adding
+ * 86 400 s to a local timestamp would.
+ *
+ * Lives here rather than in the feature that needed it first
+ * (features/pumping) so `new Date(...)` stays confined to this module, per
+ * the rule at the top of this file. A malformed input is returned
+ * unchanged — same defensive convention as `formatDayLabel`.
+ */
+export const addDaysToLocalDate = (localDate: string, days: number): string => {
+  const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return localDate;
+  }
+  const [, year, month, day] = match;
+  const shifted = new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day)) + days * 24 * 60 * 60 * 1000,
+  );
+  const shiftedMonth = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const shiftedDay = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${shifted.getUTCFullYear()}-${shiftedMonth}-${shiftedDay}`;
+};
+
 export const localDateToPickerDate = (localDate: string): Date => {
   const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {
