@@ -146,6 +146,10 @@ function buildAppSchema() {
       duration_s: column.integer,
       is_running: column.integer,
       needs_review: column.integer,
+      // 2026-08-25: freier Text (Medela | Momcozy in der App). Ohne diese
+      // Zeile repliziert PowerSync die Spalte nicht auf das Gerät — die
+      // Postgres-Spalte allein genügt nicht.
+      pump: column.text,
     },
     { indexes: { child_time: ['child_id', 'occurred_at'], running: ['child_id', 'is_running'] } },
   );
