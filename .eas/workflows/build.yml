@@ -1,0 +1,29 @@
+# Anlass (2026-09-01): Das Funkupdate für Runtime 3744d79 hatte null
+# Downloads und null Launches, im Dashboard stand unter Updates
+# "There are no deployments for this runtime" — der native Fingerprint
+# hatte sich geändert, die installierte APK konnte das Update deshalb gar
+# nicht erst annehmen (siehe app.json, runtimeVersion: fingerprint). Ein
+# Funkupdate liefert nur JavaScript/Texte/Layout/Bilder aus (siehe
+# funkupdate.yml) und kann einen geänderten nativen Fingerprint niemals
+# reparieren — nur ein neuer Build tut das.
+#
+# Auslöser NUR manuell (workflow_dispatch), ausdrücklich NICHT bei push wie
+# funkupdate.yml: ein Build dauert eine Viertelstunde und kostet Kontingent,
+# er soll deshalb nur laufen, wenn ein Mensch das bewusst entscheidet.
+
+name: Neuen Build erzeugen
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Android-Build erzeugen
+    type: build
+    params:
+      platform: android
+      profile: preview
+      # Gleicher Grund wie in funkupdate.yml: ohne diese Zeile baut der Lauf
+      # still mit leeren EXPO_PUBLIC_*-Werten, statt mit einer echten
+      # Backend-Adresse.
+      environment: preview

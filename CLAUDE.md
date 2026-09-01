@@ -148,6 +148,12 @@ ist. Ohne diesen Schritt zeigen Datenbankeinträge irgendwann ins Leere.
 Updates nicht mehr an alte Installationen. Nach jedem neuen nativen Modul ist ein
 neuer Build zwingend.
 
+**Prüfung, ob genau das gerade passiert ist:** Im Expo-Dashboard unter
+Updates zeigt die Zeile „Platform-specific updates" Downloads und Known
+launches. Stehen beide auf None und meldet der Bereich Deployments „There
+are no deployments for this runtime", passt der Fingerprint nicht — kein
+Geräteneustart hilft, nur ein neuer Build (`.eas/workflows/build.yml`).
+
 ### 6. Neue synchronisierte Tabellen brauchen REPLICA IDENTITY FULL
 
 Am 12.08.2026 gegen die Live-Datenbank festgestellt: Die Tabelle `people`
