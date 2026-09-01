@@ -377,6 +377,42 @@ dabei sind nicht offensichtlich, wenn man nur die App-Seite sieht:
    scheitert das Dekodieren, wird das dem Menschen gemeldet, nicht
    stillschweigend übergangen).
 
+### 16. Der Viewer gehört ins Repo, nicht nur nach Vercel
+
+Der Gäste-Viewer unter `viewer/` wurde monatelang direkt zu Vercel deployed
+und war nie vollständig im Repo: im Repo lagen ~245 Zeilen, in Betrieb
+1247. Solange manuell deployed wurde, fiel das nicht auf. In dem Moment,
+wo das Vercel-Projekt an GitHub gehängt wurde, baute Vercel den letzten
+eingecheckten Stand — Stammbaum, Vorschlagsformular, Gäste-Fotoupload und
+Musikspieler waren damit von einer Minute auf die andere weg, obwohl der
+Build als „Ready" gemeldet wurde. Zusätzlich baute Vercel aus dem
+Repo-Wurzelverzeichnis statt aus `viewer/`, wodurch gar keine
+Serverless-Funktion entstand und jeder Pfad 404 lieferte.
+
+→ **Was in Betrieb ist, muss eingecheckt sein.** Ein manuelles Deployment
+ist kein Backup: Der Code lebt dann nur in genau diesem einen Deployment,
+und Vercels Deployment Retention löscht ältere Deployments irgendwann —
+ein Rückfall auf „notfalls nehmen wir den alten Vercel-Stand" ist keine
+Sicherheit, die man sich aufheben kann.
+
+→ **Ein grüner Build beweist nicht, dass das Richtige gebaut wurde.**
+Hier war jeder Build „Ready", und die ausgelieferte Seite trotzdem leer.
+„Ready" heißt nur, dass irgendetwas erfolgreich gebaut hat — nicht, dass
+es der vollständige, aktuelle Stand ist.
+
+→ **Vercel-Projekteinstellung „Root Directory" muss auf `viewer` stehen.**
+Ohne das findet der Build weder `vercel.json` noch `api/` — der Build
+läuft trotzdem durch (auf dem Repo-Wurzelverzeichnis), meldet „Ready", und
+liefert für jeden Pfad 404.
+
+→ **Prüfzeichen nach jedem Viewer-Deployment:** Die Startseite muss mit
+200 antworten und „Diese Seite zeigt private Fotoalben" enthalten, und im
+ausgelieferten CSS müssen `.canvas`, `.person`, `.form` und `.music`
+vorkommen. Fehlt eines davon, ist ein unvollständiger Stand live — auch
+wenn Vercel „Ready" meldet.
+
+(2026-09-01)
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste
