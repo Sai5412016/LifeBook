@@ -35,6 +35,9 @@ yarn-error.*
 .env*.local
 !.env.example
 
+# Claude Code (kann lokale Zugangsdaten enthalten)
+.claude/
+
 # typescript
 *.tsbuildinfo
 
