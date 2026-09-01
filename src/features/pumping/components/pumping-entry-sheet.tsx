@@ -27,6 +27,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { KeyboardSafeScreen } from '@/ui';
 
+import { isBackdatedToYesterday } from '../entry-time';
 import type { PumpingPalette } from '../night-mode';
 import { PUMP_OPTIONS, type PumpingSide } from '../types';
 
@@ -87,6 +88,12 @@ export function PumpingEntrySheet({
   const [showMore, setShowMore] = useState(false);
   const [durationMinutes, setDurationMinutes] = useState('');
   const [note, setNote] = useState('');
+
+  // Live neu bewertet bei jeder Eingabe — sonst würde die Anzeige "jetzt"
+  // hinterherhinken, sobald die getippte Zeit über Mitternacht zurückfällt.
+  // Nur relevant, sobald tatsächlich editiert wird: "jetzt" selbst lief nie
+  // durch diese Heuristik, siehe entry-time.ts's eigener Kommentar.
+  const backdatedToYesterday = timeChanged && isBackdatedToYesterday(time, nowHhMm);
 
   const amountMl = digits === '' ? 0 : Math.min(Number(digits), MAX_AMOUNT_ML);
   const canSave = amountMl > 0;
@@ -229,20 +236,38 @@ export function PumpingEntrySheet({
           {/* Zeit ist "jetzt" und bleibt es, bis jemand sie antippt. */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Uhrzeit ${time}, zum Ändern antippen`}
+            accessibilityLabel={
+              backdatedToYesterday
+                ? `Uhrzeit gestern, ${time}, zum Ändern antippen`
+                : `Uhrzeit ${time}, zum Ändern antippen`
+            }
             onPress={() => setTimeChanged(true)}
             style={[styles.timeRow, { borderColor: palette.border }]}>
             <ThemedText style={{ color: palette.textSecondary }}>Zeit</ThemedText>
             {timeChanged ? (
-              <TextInput
-                value={time}
-                onChangeText={setTime}
-                placeholder="HH:MM"
-                placeholderTextColor={palette.textSecondary}
-                keyboardType="numbers-and-punctuation"
-                maxLength={5}
-                style={[styles.timeInput, { color: palette.text, borderColor: palette.border }]}
-              />
+              <View style={styles.timeEditGroup}>
+                {/*
+                  Nicht optional, siehe Modulkommentar: eine später als
+                  "jetzt" liegende Uhrzeit kann nur gestern gemeint sein
+                  (Nachtrag, keine Zukunftsplanung) — wer das Sheet danach
+                  bedient, muss VOR dem Speichern sehen, auf welchen Tag er
+                  gerade bucht, nicht erst danach in der Liste.
+                */}
+                {backdatedToYesterday ? (
+                  <ThemedText style={[styles.yesterdayBadge, { color: palette.textSecondary }]}>
+                    gestern,
+                  </ThemedText>
+                ) : null}
+                <TextInput
+                  value={time}
+                  onChangeText={setTime}
+                  placeholder="HH:MM"
+                  placeholderTextColor={palette.textSecondary}
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                  style={[styles.timeInput, { color: palette.text, borderColor: palette.border }]}
+                />
+              </View>
             ) : (
               <ThemedText style={{ color: palette.text }}>{time} · jetzt</ThemedText>
             )}
@@ -382,6 +407,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     marginTop: Spacing.two,
   },
+  timeEditGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  yesterdayBadge: { fontSize: 14 },
   timeInput: {
     minWidth: 90,
     minHeight: 44,

@@ -26,8 +26,9 @@ import { useQuery } from '@powersync/react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
 import { newId } from '@/core/db/ids';
-import { combineLocalDateAndTime, nowUtcIso, toLocalDate } from '@/core/time';
+import { addDaysToLocalDate, combineLocalDateAndTime, formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 
+import { isBackdatedToYesterday } from './entry-time';
 import type {
   AddPumpingSessionInput,
   EditPumpingSessionInput,
@@ -61,8 +62,14 @@ async function loadSessionById(
  * database to ask.
  *
  * `input.time` ("HH:mm") lets the parent correct the clock time before
- * saving; it is interpreted on the CURRENT local day in `input.tz`. Left
- * out — the normal case — the session happened "now".
+ * saving. Left out — the normal case — the session happened "now". Given,
+ * it is interpreted on the CURRENT local day UNLESS it is LATER than the
+ * current wall-clock time, in which case it can only mean yesterday — see
+ * ./entry-time#isBackdatedToYesterday's own doc comment for why a
+ * heuristic and not a date picker. Either way `local_date` is still
+ * derived exactly once, from whichever `occurredAt` this resolves to —
+ * the exception only feeds the right DAY into that one derivation, it
+ * does not add a second one.
  */
 export async function addPumpingSession(
   db: AbstractPowerSyncDatabase,
@@ -73,9 +80,14 @@ export async function addPumpingSession(
   // A malformed time can never silently become "now" in the OTHER
   // direction either: combineLocalDateAndTime returns null, and we fall
   // back to the actual current instant rather than storing a guess.
-  const occurredAt = input.time
-    ? (combineLocalDateAndTime(todayLocalDate, input.time, input.tz) ?? now)
-    : now;
+  let occurredAt = now;
+  if (input.time) {
+    const nowHhMm = formatTimeLabel(now, input.tz);
+    const targetLocalDate = isBackdatedToYesterday(input.time, nowHhMm)
+      ? addDaysToLocalDate(todayLocalDate, -1)
+      : todayLocalDate;
+    occurredAt = combineLocalDateAndTime(targetLocalDate, input.time, input.tz) ?? now;
+  }
   const sessionId = newId();
 
   await db.execute(
