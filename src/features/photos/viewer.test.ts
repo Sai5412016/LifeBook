@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   clampIndex,
+  formatFullscreenHeaderSubtitle,
   formatPositionLabel,
   indexAfterDeletion,
   indexOfPhoto,
@@ -108,6 +109,34 @@ describe('formatPositionLabel', () => {
 
   it('formats a single-photo album', () => {
     expect(formatPositionLabel(1, 1)).toBe('1 von 1');
+  });
+});
+
+describe('formatFullscreenHeaderSubtitle', () => {
+  // Geburtsdatum 05.08.2026, Datum 10.09.2026 (Tag 36) — dieselben Werte
+  // wie im Chronik-Auftrag, plus die vom Auftrag vorgegebene Beispiel-
+  // Position "12 von 340".
+  it('fügt Altersangabe und Position mit "—" zusammen, wörtlich', () => {
+    expect(formatFullscreenHeaderSubtitle('Tag 36 · Woche 5', '12 von 340')).toBe(
+      'Tag 36 · Woche 5 — 12 von 340',
+    );
+  });
+
+  it('zeigt nur die Position, wenn noch kein Alter vorliegt — kein führendes "—"', () => {
+    expect(formatFullscreenHeaderSubtitle(null, '12 von 340')).toBe('12 von 340');
+  });
+
+  it('zeigt nur das Alter, wenn keine Position vorliegt — kein anhängendes "—"', () => {
+    expect(formatFullscreenHeaderSubtitle('Tag 36 · Woche 5', null)).toBe('Tag 36 · Woche 5');
+  });
+
+  it('ist leer, wenn beides fehlt', () => {
+    expect(formatFullscreenHeaderSubtitle(null, null)).toBe('');
+  });
+
+  it('der Geviertstrich kommt nur zwischen den beiden Angaben vor, nie innerhalb', () => {
+    const result = formatFullscreenHeaderSubtitle('Tag 36 · Woche 5', '12 von 340');
+    expect(result.split(' — ')).toEqual(['Tag 36 · Woche 5', '12 von 340']);
   });
 });
 

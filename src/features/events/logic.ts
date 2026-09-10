@@ -7,7 +7,7 @@
  */
 
 import { ageInDays } from '@/core/time';
-import { formatAgeLabel } from '@/features/photos/identity';
+import { formatDayAndWeekLabel } from '@/features/photos/identity';
 
 export const EVENT_TITLE_MAX_LENGTH = 80;
 export const EVENT_NOTE_MAX_LENGTH = 2000;
@@ -38,14 +38,39 @@ export function sortEventsByOccurredAtDesc<T extends { occurred_at: string; id: 
 }
 
 /**
- * "Tag 41" etc. for one event, relative to the child's birth — thin wrapper
- * around the existing, separately-tested `ageInDays`/`formatAgeLabel`
- * (task requirement: reuse the age label from the existing stock, not
- * reimplement it). Kept here only so callers have one call instead of
- * threading both through every screen.
+ * "Tag 41 · Woche 5" etc. for one event, relative to the child's birth —
+ * thin wrapper around the existing, separately-tested
+ * `ageInDays`/`formatDayAndWeekLabel` (task requirement: reuse the age
+ * label from the existing stock, not reimplement it). Kept here only so
+ * callers have one call instead of threading both through every screen.
+ *
+ * Uses `formatDayAndWeekLabel`, not `formatAgeLabel` (switched 2026-09-10,
+ * fourth pass): the result is embedded after a date by
+ * `formatEventRowSubtitle` below, with "—" as the separator between the
+ * two — the app-wide rule since this same task is that "·" only ever
+ * separates pieces WITHIN one age label, never two different pieces of
+ * information, so a result like "Tag 34 · Woche 4" reads unambiguously
+ * next to the date it's embedded after.
  */
 export function formatEventAgeLabel(eventUtcIso: string, birthUtcIso: string, tz: string): string {
-  return formatAgeLabel(ageInDays(eventUtcIso, birthUtcIso, tz));
+  return formatDayAndWeekLabel(ageInDays(eventUtcIso, birthUtcIso, tz));
+}
+
+/**
+ * The list row's and the detail screen's subtitle line: the date, and —
+ * where an age label is available — the age after it. Extracted as its
+ * OWN pure function (2026-09-10, fourth pass) so both screens
+ * (app/(tabs)/ereignisse.tsx, app/ereignisse/[id]/index.tsx) build this
+ * from one tested place instead of duplicating the composition inline;
+ * previously that inline duplication is exactly what let the two copies
+ * exist with the separator that needed changing in two places at once.
+ *
+ * "—" joins date and age — "·" stays reserved for what's INSIDE the age
+ * label itself ("Tag N · Woche M", see formatEventAgeLabel above).
+ */
+export function formatEventRowSubtitle(localDate: string, ageLabel: string): string {
+  const dateLabel = formatShortGermanDate(localDate);
+  return ageLabel ? `${dateLabel} — ${ageLabel}` : dateLabel;
 }
 
 /** "DD.MM.YYYY" — compact enough for a list row, unlike `core/time#formatDayLabel`'s full weekday form used for whole-day chronicle headers. */

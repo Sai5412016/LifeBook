@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { formatEventAgeLabel, formatShortGermanDate } from '@/features/events/logic';
+import { formatEventAgeLabel, formatEventRowSubtitle } from '@/features/events/logic';
 import { useEventById, useEventPhotos } from '@/features/events/repository';
 import { useActiveChild } from '@/features/household/repository';
 import { useSignedUrls } from '@/features/photos/hooks';
@@ -76,8 +76,7 @@ export default function EreignisDetailScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <ThemedText type="subtitle">{event.title}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {formatShortGermanDate(event.local_date)}
-            {ageLabel ? ` · ${ageLabel}` : ''}
+            {formatEventRowSubtitle(event.local_date, ageLabel)}
           </ThemedText>
 
           {event.note ? (

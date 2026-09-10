@@ -16,7 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useActiveChild } from '@/features/household/repository';
-import { formatEventAgeLabel, formatEventTextPreview, formatShortGermanDate } from '@/features/events/logic';
+import { formatEventAgeLabel, formatEventRowSubtitle, formatEventTextPreview } from '@/features/events/logic';
 import { useEventsOfChild } from '@/features/events/repository';
 import type { EventSummaryRow } from '@/features/events/types';
 import { useSignedUrls } from '@/features/photos/hooks';
@@ -99,8 +99,7 @@ function EventRow({
             {event.title}
           </ThemedText>
           <ThemedText type="small" themeColor="textSecondary">
-            {formatShortGermanDate(event.local_date)}
-            {ageLabel ? ` · ${ageLabel}` : ''}
+            {formatEventRowSubtitle(event.local_date, ageLabel)}
           </ThemedText>
           {preview ? (
             <ThemedText type="small" numberOfLines={1}>
