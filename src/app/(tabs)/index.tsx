@@ -29,7 +29,7 @@ import { PersonAvatar } from '@/features/people/components/person-avatar';
 import { describeRole } from '@/features/people/logic';
 import { usePeopleOfChild } from '@/features/people/repository';
 import type { PersonRow } from '@/features/people/types';
-import { formatAgeLabel, resolveFullscreenUri } from '@/features/photos/identity';
+import { formatDayAndWeekLabel, resolveFullscreenUri } from '@/features/photos/identity';
 import { useSignedUrls } from '@/features/photos/hooks';
 import { usePhotosOfChild } from '@/features/photos/repository';
 import type { PhotoRow } from '@/features/photos/types';
@@ -113,8 +113,13 @@ export default function StartScreen() {
             {child?.firstName ?? ''}
           </ThemedText>
           {todayAgeDays !== null ? (
-            <ThemedText type="title" themeColor="accent" style={styles.age}>
-              {formatAgeLabel(todayAgeDays)}
+            // numberOfLines: "Tag N · Woche M" ist länger als das frühere
+            // "Woche M"/"Tag N" allein — bei 48px (type="title") reicht ein
+            // hoher Tag+Woche-Wert auf einem schmalen Gerät für zwei Zeilen.
+            // Kein Nachbarelement zum flexShrinken wie in chronik.tsx: Der
+            // Text steht allein, zentriert, unter Avatar und Namen.
+            <ThemedText type="title" themeColor="accent" style={styles.age} numberOfLines={1}>
+              {formatDayAndWeekLabel(todayAgeDays)}
             </ThemedText>
           ) : null}
 

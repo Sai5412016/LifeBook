@@ -183,10 +183,22 @@ describe('formatDayAndWeekLabel', () => {
     }
   });
 
-  it('"Woche 0" kommt bei keinem ageDays von 0 bis 400 vor', () => {
-    for (let ageDays = 0; ageDays <= 400; ageDays += 1) {
+  it('"Woche 0" kommt bei keinem ageDays von 0 bis 1000 vor', () => {
+    for (let ageDays = 0; ageDays <= 1000; ageDays += 1) {
       expect(formatDayAndWeekLabel(ageDays)).not.toContain('Woche 0');
     }
+  });
+
+  // Jahresgrenze (Task 2026-09-10, dritter Durchgang): letzter Tag mit
+  // Tag+Woche ist Tag 364 (formatAgeLabel wechselt ebenfalls bei 365), erst
+  // ab Tag 365 greift die Jahresformulierung, ohne Tag und ohne Woche.
+  it.each([
+    ['2027-08-03', 'Tag 363 · Woche 51'],
+    ['2027-08-04', 'Tag 364 · Woche 52'],
+    ['2027-08-05', '1 Jahr'],
+    ['2027-08-06', '1 Jahr'],
+  ])('Jahresgrenze: %s -> "%s"', (localDate, expected) => {
+    expect(formatDayAndWeekLabel(diffFor(localDate))).toBe(expected);
   });
 
   it('Tag 1 bis 6 zeigen nie eine Woche — erst ab Tag 7 gibt es eine erste volle Woche', () => {

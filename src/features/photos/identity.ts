@@ -208,6 +208,10 @@ export function formatDayAndWeekLabel(ageDays: number | null | undefined): strin
   if (ageDays < 365) {
     return `Tag ${ageDays} · Woche ${Math.floor(ageDays / 7)}`;
   }
+  // Ab einem Jahr weder Tag noch Woche — wörtlich dieselbe Formulierung wie
+  // formatAgeLabel's eigener Jahres-Zweig oben (Task 2026-09-10, dritter
+  // Durchgang), damit beide Funktionen an dieser Grenze exakt dasselbe
+  // sagen, sobald sie an denselben Stellen nebeneinander sichtbar werden.
   const years = Math.floor(ageDays / 365);
   return years === 1 ? '1 Jahr' : `${years} Jahre`;
 }
