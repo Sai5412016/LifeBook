@@ -34,7 +34,7 @@ import { useAuth } from '@/core/auth/session-store';
 import { ageInDays, formatDayLabel, nowUtcIso } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
-import { chunkPhotos, formatAgeLabel, locatePhotoInSections } from '@/features/photos/identity';
+import { chunkPhotos, formatDayAndWeekLabel, locatePhotoInSections } from '@/features/photos/identity';
 import { PickCancelledError, describeImport, importPhotos } from '@/features/photos/import';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { takeLastViewedPhotoId } from '@/features/photos/lastViewed';
@@ -250,7 +250,7 @@ export default function ChronikScreen() {
   }
 
   const todayAge = child
-    ? formatAgeLabel(ageInDays(nowUtcIso(), child.birthAtUtcIso, child.birthTz))
+    ? formatDayAndWeekLabel(ageInDays(nowUtcIso(), child.birthAtUtcIso, child.birthTz))
     : '';
 
   return (
@@ -360,10 +360,21 @@ export default function ChronikScreen() {
           }
           renderSectionHeader={({ section }) => (
             <ThemedView style={styles.sectionHeader}>
-              <ThemedText type="smallBold">{formatDayLabel(section.title)}</ThemedText>
+              {/*
+                flexShrink auf dem Datum, numberOfLines auf beiden: das
+                rechte Label ("Tag N · Woche M") ist jetzt länger als das
+                frühere "Woche M" allein und darf nicht umbrechen — das
+                Datum links weicht stattdessen zurück (Task 2026-09-10).
+              */}
+              <ThemedText type="smallBold" style={styles.sectionDate} numberOfLines={1}>
+                {formatDayLabel(section.title)}
+              </ThemedText>
               {section.ageDays !== null ? (
-                <ThemedText type="small" themeColor="textSecondary">
-                  {formatAgeLabel(section.ageDays)}
+                <ThemedText
+                  type="small"
+                  themeColor="textSecondary"
+                  numberOfLines={1}>
+                  {formatDayAndWeekLabel(section.ageDays)}
                 </ThemedText>
               ) : null}
             </ThemedView>
@@ -501,6 +512,9 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     paddingBottom: Spacing.two,
   },
+  // Weicht zurück, damit das rechte "Tag N · Woche M" nie umbricht — siehe
+  // renderSectionHeader's eigener Kommentar.
+  sectionDate: { flexShrink: 1 },
   gridRow: { flexDirection: 'row', gap: GRID_GAP, marginBottom: GRID_GAP },
   tile: { borderRadius: Spacing.two, overflow: 'hidden' },
   tileImage: { width: '100%', height: '100%' },

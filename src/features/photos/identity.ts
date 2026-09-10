@@ -167,6 +167,45 @@ export function formatAgeLabel(ageDays: number | null | undefined): string {
 }
 
 /**
+ * Chronik-only variant of `formatAgeLabel` (task 2026-09-10: "neben der
+ * Woche zusätzlich der Tag"): shows the day count NEXT TO the week number
+ * instead of switching between a day-only and a week-only display. `tag`
+ * is simply `ageDays` itself — the exact same value `formatAgeLabel`'s week
+ * branch already divides by 7 — so the two numbers can never disagree; no
+ * separate "day formula" exists to drift out of sync with the week one.
+ *
+ * Every OTHER branch matches `formatAgeLabel` exactly (same threshold at
+ * one year, same "Geburtstag"/"vor der Geburt" wording) — only the
+ * (0, 365) range changes shape, from "Woche M" alone to "Tag N · Woche M"
+ * together, for every day in that range (not just from day 28 onward as
+ * `formatAgeLabel` does): a newborn's first week otherwise never showed a
+ * week number at all, which would make the very first week-boundary (day
+ * 6 → day 7, Woche 0 → Woche 1) invisible in the one place — the Chronik
+ * — this task asked to show it.
+ *
+ * Deliberately a SEPARATE function, not a change to `formatAgeLabel`
+ * itself: that one is also read by the fullscreen photo viewer
+ * (app/foto/[id].tsx), the home tab (app/(tabs)/index.tsx) and the event
+ * timeline (features/events/logic.ts) — none of which this task touches.
+ */
+export function formatDayAndWeekLabel(ageDays: number | null | undefined): string {
+  if (ageDays === null || ageDays === undefined) {
+    return '';
+  }
+  if (ageDays < 0) {
+    return 'vor der Geburt';
+  }
+  if (ageDays === 0) {
+    return 'Geburtstag';
+  }
+  if (ageDays < 365) {
+    return `Tag ${ageDays} · Woche ${Math.floor(ageDays / 7)}`;
+  }
+  const years = Math.floor(ageDays / 365);
+  return years === 1 ? '1 Jahr' : `${years} Jahre`;
+}
+
+/**
  * Whether a photo's `occurred_at` was actually measured rather than guessed
  * — drives the "Datum geschätzt" hint in the fullscreen viewer (deliberately
  * NOT shown in the grid, where it would only clutter a tile). Only EXIF and
