@@ -14,7 +14,7 @@
 name: Neuen Build erzeugen
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 jobs:
   build:
