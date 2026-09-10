@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { ageInDays } from '@/core/time';
+
 import {
   PHOTO_BACKUP_ALBUM_NAME,
   PHOTO_NOTE_MAX_LENGTH,
@@ -19,6 +21,7 @@ import {
   estimateBatchBytes,
   extensionForMime,
   formatAgeLabel,
+  formatDayAndWeekLabel,
   formatEmptyTrashConfirmation,
   formatEstimatedDownloadSize,
   formatMediumBackfillConfirmation,
@@ -131,6 +134,76 @@ describe('formatAgeLabel', () => {
     [800, '2 Jahre'],
   ])('formats %s as "%s"', (days, expected) => {
     expect(formatAgeLabel(days)).toBe(expected);
+  });
+});
+
+describe('formatDayAndWeekLabel', () => {
+  // Geburtsdatum aus dem Auftrag (2026-09-10, zweiter Durchgang): 05.08.2026.
+  // local_date-Strings, keine Uhrzeit, keine UTC-Umrechnung — dieselbe
+  // Quelle, aus der formatAgeLabel/Woche schon liest.
+  const BIRTH = '2026-08-05';
+  const diffFor = (groupLocalDate: string): number =>
+    ageInDays(`${groupLocalDate}T12:00:00.000Z`, `${BIRTH}T12:00:00.000Z`, 'UTC');
+
+  // Die neun wörtlich vorgegebenen Fälle. "Tag N" ohne Woche für Tag 1–6
+  // (Woche 0 wäre keine sinnvolle Angabe), "Tag N · Woche M" ab Tag 7 (erste
+  // volle Woche), kein Text vor der Geburt.
+  it.each([
+    ['2026-08-05', 'Geburtstag'],
+    ['2026-08-06', 'Tag 1'],
+    ['2026-08-11', 'Tag 6'],
+    ['2026-08-12', 'Tag 7 · Woche 1'],
+    ['2026-09-01', 'Tag 27 · Woche 3'],
+    ['2026-09-08', 'Tag 34 · Woche 4'],
+    ['2026-09-09', 'Tag 35 · Woche 5'],
+    ['2026-09-10', 'Tag 36 · Woche 5'],
+  ])('%s -> "%s"', (localDate, expected) => {
+    expect(formatDayAndWeekLabel(diffFor(localDate))).toBe(expected);
+  });
+
+  it('04.08.2026 (vor der Geburt): kein Tag, kein Woche-Text', () => {
+    const diff = diffFor('2026-08-04');
+    expect(diff).toBeLessThan(0);
+    const label = formatDayAndWeekLabel(diff);
+    expect(label).toBe('vor der Geburt');
+    expect(label).not.toMatch(/Tag \d/);
+    expect(label).not.toMatch(/Woche \d/);
+  });
+
+  it('Konsistenzprüfung: wo eine Woche sichtbar ist, passt Math.floor(tag / 7) exakt dazu', () => {
+    const casesWithWeek = ['2026-08-12', '2026-09-01', '2026-09-08', '2026-09-09', '2026-09-10'];
+    for (const localDate of casesWithWeek) {
+      const diff = diffFor(localDate);
+      const label = formatDayAndWeekLabel(diff);
+      const match = label.match(/^Tag (\d+) · Woche (\d+)$/);
+      expect(match, `"${label}" enthält keine Woche`).not.toBeNull();
+      const [, tag, week] = match!;
+      expect(Number(tag)).toBe(diff);
+      expect(Math.floor(Number(tag) / 7)).toBe(Number(week));
+    }
+  });
+
+  it('"Woche 0" kommt bei keinem ageDays von 0 bis 400 vor', () => {
+    for (let ageDays = 0; ageDays <= 400; ageDays += 1) {
+      expect(formatDayAndWeekLabel(ageDays)).not.toContain('Woche 0');
+    }
+  });
+
+  it('Tag 1 bis 6 zeigen nie eine Woche — erst ab Tag 7 gibt es eine erste volle Woche', () => {
+    for (let ageDays = 1; ageDays <= 6; ageDays += 1) {
+      expect(formatDayAndWeekLabel(ageDays)).toBe(`Tag ${ageDays}`);
+    }
+    expect(formatDayAndWeekLabel(7)).toBe('Tag 7 · Woche 1');
+  });
+
+  it('bleibt bei "X Jahre" jenseits eines Jahres, unverändert wie formatAgeLabel', () => {
+    expect(formatDayAndWeekLabel(365)).toBe('1 Jahr');
+    expect(formatDayAndWeekLabel(800)).toBe('2 Jahre');
+  });
+
+  it('null/undefined bleiben leer', () => {
+    expect(formatDayAndWeekLabel(null)).toBe('');
+    expect(formatDayAndWeekLabel(undefined)).toBe('');
   });
 });
 
