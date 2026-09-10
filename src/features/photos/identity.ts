@@ -173,15 +173,19 @@ export function formatAgeLabel(ageDays: number | null | undefined): string {
  * is simply `ageDays` itself — the exact same value `formatAgeLabel`'s week
  * branch already divides by 7 — so the two numbers can never disagree; no
  * separate "day formula" exists to drift out of sync with the week one.
+ * The week FORMULA itself is untouched: still `Math.floor(ageDays / 7)`.
+ *
+ * Refined 2026-09-10, second pass: showing a week from day 1 onward would
+ * have meant "Woche 0" for a whole week — reads as a bug, not an age. The
+ * first week only actually completes on day 7 (`Math.floor(7 / 7) === 1`),
+ * so days 1–6 show the day alone and the week joins in starting day 7 —
+ * still earlier than `formatAgeLabel`'s old day-28 threshold (so the first
+ * real week boundary, day 6 → day 7, stays visible), but never a week
+ * number that reads as zero.
  *
  * Every OTHER branch matches `formatAgeLabel` exactly (same threshold at
  * one year, same "Geburtstag"/"vor der Geburt" wording) — only the
- * (0, 365) range changes shape, from "Woche M" alone to "Tag N · Woche M"
- * together, for every day in that range (not just from day 28 onward as
- * `formatAgeLabel` does): a newborn's first week otherwise never showed a
- * week number at all, which would make the very first week-boundary (day
- * 6 → day 7, Woche 0 → Woche 1) invisible in the one place — the Chronik
- * — this task asked to show it.
+ * (0, 365) range changes shape.
  *
  * Deliberately a SEPARATE function, not a change to `formatAgeLabel`
  * itself: that one is also read by the fullscreen photo viewer
@@ -197,6 +201,9 @@ export function formatDayAndWeekLabel(ageDays: number | null | undefined): strin
   }
   if (ageDays === 0) {
     return 'Geburtstag';
+  }
+  if (ageDays < 7) {
+    return `Tag ${ageDays}`;
   }
   if (ageDays < 365) {
     return `Tag ${ageDays} · Woche ${Math.floor(ageDays / 7)}`;
