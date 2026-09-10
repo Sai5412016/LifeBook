@@ -45,7 +45,7 @@ import { useActiveChild } from '@/features/household/repository';
 import {
   PHOTO_NOTE_MAX_LENGTH,
   chronologicalRank,
-  formatAgeLabel,
+  formatDayAndWeekLabel,
   isOccurredAtEstimated,
   normalizePhotoNote,
   resolveFullscreenUri,
@@ -65,6 +65,7 @@ import { healMissingMedium } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
 import {
   clampIndex,
+  formatFullscreenHeaderSubtitle,
   formatPositionLabel,
   indexAfterDeletion,
   indexOfPhoto,
@@ -398,12 +399,10 @@ export default function FotoVollbildScreen() {
   const currentPhotoRank = currentPhoto ? chronologicalRank(photos, currentPhoto.id) : null;
 
   const headerSubtitle = currentPhoto
-    ? [
-        currentPhotoAgeDays !== null ? formatAgeLabel(currentPhotoAgeDays) : null,
+    ? formatFullscreenHeaderSubtitle(
+        currentPhotoAgeDays !== null ? formatDayAndWeekLabel(currentPhotoAgeDays) : null,
         currentPhotoRank ? formatPositionLabel(currentPhotoRank.rank, currentPhotoRank.total) : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
+      )
     : '';
 
   // Nur in der Vollbildansicht, nie in der Kachelansicht — dort würde es

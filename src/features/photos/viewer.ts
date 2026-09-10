@@ -66,6 +66,26 @@ export function formatPositionLabel(rank: number, total: number): string {
 }
 
 /**
+ * The fullscreen header's subtitle line: the age label and the position
+ * readout, joined together. Extracted as its OWN pure function (2026-09-10,
+ * fourth pass on the age display) so the exact composition — which used to
+ * live inline in app/foto/[id].tsx and therefore couldn't be unit-tested at
+ * all — is verifiable directly.
+ *
+ * "—" (Geviertstrich), not "·", joins the two: app-wide rule since this
+ * same task — "·" is reserved for separating pieces WITHIN one age label
+ * (`identity.ts#formatDayAndWeekLabel`'s own "Tag N · Woche M"), so a
+ * result like "Tag 34 · Woche 4 — 12 von 340" stays unambiguous about
+ * which numbers belong together. Either piece may be absent (no age yet
+ * resolved, or no rank because the photo isn't in the loaded chronology);
+ * present pieces join with the separator, missing ones are simply omitted
+ * rather than leaving a stray "—" or empty segment.
+ */
+export function formatFullscreenHeaderSubtitle(ageLabel: string | null, positionLabel: string | null): string {
+  return [ageLabel, positionLabel].filter((part): part is string => !!part).join(' — ');
+}
+
+/**
  * Which index the viewer should land on after deleting the photo at
  * `deletedIndex`, given the list held `totalBefore` photos before the
  * delete:

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { addSecondsToUtcIso } from '@/core/time';
+
 import {
   formatEventAgeLabel,
+  formatEventRowSubtitle,
   formatEventTextPreview,
   formatShortGermanDate,
   normalizeEventNote,
@@ -42,8 +45,13 @@ describe('sortEventsByOccurredAtDesc', () => {
 });
 
 describe('formatEventAgeLabel', () => {
-  it('reuses the existing age label for a normal day', () => {
-    expect(formatEventAgeLabel('2026-01-13T10:00:00.000Z', '2026-01-01T00:00:00.000Z', BERLIN)).toBe('Tag 12');
+  // 2026-09-10, vierter Durchgang: formatEventAgeLabel nutzt jetzt
+  // formatDayAndWeekLabel (Tag+Woche zusammen), nicht mehr formatAgeLabel
+  // (Woche allein) — 12 Tage sind bereits eine volle Woche (>= 7).
+  it('reuses the existing day+week label for a normal day', () => {
+    expect(formatEventAgeLabel('2026-01-13T10:00:00.000Z', '2026-01-01T00:00:00.000Z', BERLIN)).toBe(
+      'Tag 12 · Woche 1',
+    );
   });
 
   it('reuses the existing age label for the birth day itself', () => {
@@ -54,6 +62,35 @@ describe('formatEventAgeLabel', () => {
 describe('formatShortGermanDate', () => {
   it('renders DD.MM.YYYY', () => {
     expect(formatShortGermanDate('2026-08-05')).toBe('05.08.2026');
+  });
+});
+
+describe('formatEventRowSubtitle', () => {
+  // Geburtsdatum 05.08.2026, Datum 10.09.2026 (Tag 36) — dasselbe
+  // Beispiel wie in der Chronik.
+  it('fügt Datum und Altersangabe mit "—" zusammen, wörtlich', () => {
+    expect(formatEventRowSubtitle('2026-09-10', 'Tag 36 · Woche 5')).toBe(
+      '10.09.2026 — Tag 36 · Woche 5',
+    );
+  });
+
+  it('zeigt nur das Datum, wenn kein Alter vorliegt (kein Kind aktiv) — kein anhängendes "—"', () => {
+    expect(formatEventRowSubtitle('2026-09-10', '')).toBe('10.09.2026');
+  });
+
+  it('der Geviertstrich kommt nur zwischen Datum und Alter vor, nie innerhalb der Altersangabe', () => {
+    const result = formatEventRowSubtitle('2026-09-10', 'Tag 36 · Woche 5');
+    expect(result.split(' — ')).toEqual(['10.09.2026', 'Tag 36 · Woche 5']);
+  });
+});
+
+describe('Trenner-Regel: "—" kommt in keiner Altersangabe selbst vor', () => {
+  it('formatEventAgeLabel enthält nie einen Geviertstrich, für ein ganzes Jahr an Tagen', () => {
+    const birthUtcIso = '2026-01-01T00:00:00.000Z';
+    for (let dayOffset = 0; dayOffset <= 400; dayOffset += 1) {
+      const eventUtcIso = addSecondsToUtcIso(birthUtcIso, dayOffset * 24 * 60 * 60);
+      expect(formatEventAgeLabel(eventUtcIso, birthUtcIso, BERLIN)).not.toContain('—');
+    }
   });
 });
 

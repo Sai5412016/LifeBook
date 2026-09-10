@@ -113,12 +113,23 @@ export default function StartScreen() {
             {child?.firstName ?? ''}
           </ThemedText>
           {todayAgeDays !== null ? (
-            // numberOfLines: "Tag N · Woche M" ist länger als das frühere
-            // "Woche M"/"Tag N" allein — bei 48px (type="title") reicht ein
-            // hoher Tag+Woche-Wert auf einem schmalen Gerät für zwei Zeilen.
-            // Kein Nachbarelement zum flexShrinken wie in chronik.tsx: Der
-            // Text steht allein, zentriert, unter Avatar und Namen.
-            <ThemedText type="title" themeColor="accent" style={styles.age} numberOfLines={1}>
+            // numberOfLines allein SCHNEIDET NUR AB ("Tag 363 · Woche 51"
+            // würde zu "Tag 363 · Woc…" verstümmelt) — bei 48px (type="title")
+            // ist "Tag N · Woche M" oft zu lang für eine Telefonzeile, ganz
+            // ohne "Heute ·"-Vorspann (der steht nur im Chronik-Kopf, nicht
+            // hier). adjustsFontSizeToFit lässt die Zeile stattdessen
+            // schrumpfen; minimumFontScale=0.6 (≈29px im Extremfall) hält
+            // die Untergrenze lesbar, numberOfLines={1} bleibt zusätzlich als
+            // harte Grenze, falls selbst 0.6 nicht reicht. Kein
+            // Nachbarelement zum flexShrinken wie in chronik.tsx: Der Text
+            // steht allein, zentriert, unter Avatar und Namen.
+            <ThemedText
+              type="title"
+              themeColor="accent"
+              style={styles.age}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}>
               {formatDayAndWeekLabel(todayAgeDays)}
             </ThemedText>
           ) : null}
