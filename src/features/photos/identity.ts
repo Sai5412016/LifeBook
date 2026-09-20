@@ -703,6 +703,53 @@ export function locatePhotoInSections<T extends { id: string }>(
   return null;
 }
 
+/** A Chronik grid section shaped like SectionList's own `sections` prop — just the part these guards need. */
+export type ScrollGridSection = { data: readonly unknown[] };
+
+/**
+ * 2026-09-20 (Absturz beim Springen in der Liste): whether it is safe to hand
+ * `target` to SectionList#scrollToLocation at all — checked against the SAME
+ * chunked array passed as the list's own `sections` prop (chronik.tsx's
+ * `gridSections`), not the raw per-day photo list locatePhotoInSections
+ * works from. A stale target (the photo was deleted, or the day's last row
+ * shrank, in the moment between computing the target and actually scrolling)
+ * would otherwise reach the native list unchecked.
+ */
+export function canScrollToGridRow(
+  sections: readonly ScrollGridSection[],
+  target: PhotoGridPosition | null,
+): target is PhotoGridPosition {
+  if (!target || sections.length === 0 || target.sectionIndex < 0 || target.itemIndex < 0) {
+    return false;
+  }
+  const section = sections[target.sectionIndex];
+  return !!section && target.itemIndex < section.data.length;
+}
+
+export type ScrollRetryOutcome = { attempt: true } | { attempt: false };
+
+/**
+ * Chronik's onScrollToIndexFailed decision, factored out as pure logic
+ * because chronik.tsx itself has RN/Expo imports and can't run under Vitest
+ * (Architekturregel 3). RN's SectionList throws the "scrollToIndex should be
+ * used in conjunction with getItemLayout or onScrollToIndexFailed" invariant
+ * for ANY scroll to an off-screen, not-yet-measured row — even a perfectly
+ * in-bounds one — unless one of those two props exists; this is that prop's
+ * decision half. `alreadyRetried` is the caller's own ref: exactly one retry
+ * per scroll attempt, then give up silently, no matter how many times RN
+ * calls this again for the same still-failing target.
+ */
+export function decideScrollRetry(
+  target: PhotoGridPosition | null,
+  sections: readonly ScrollGridSection[],
+  alreadyRetried: boolean,
+): ScrollRetryOutcome {
+  if (alreadyRetried || !canScrollToGridRow(sections, target)) {
+    return { attempt: false };
+  }
+  return { attempt: true };
+}
+
 /* ────────────────────────────── Papierkorb (2026-08-15) ────────────────────────────── */
 
 /**
