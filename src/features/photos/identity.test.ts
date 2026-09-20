@@ -12,11 +12,13 @@ import {
   buildMediumKey,
   buildOriginalKey,
   buildThumbKey,
+  canScrollToGridRow,
   chronologicalRank,
   chunkPhotos,
   classifyPhotoBackupPermission,
   composeContentHash,
   countMediumBackfillProgress,
+  decideScrollRetry,
   dedupeByHash,
   estimateBatchBytes,
   extensionForMime,
@@ -577,6 +579,64 @@ describe('locatePhotoInSections', () => {
 
   it('returns null for an empty list of sections', () => {
     expect(locatePhotoInSections([], 'a', 3)).toBeNull();
+  });
+});
+
+describe('canScrollToGridRow', () => {
+  // Two sections, shaped exactly like SectionList's own `sections` prop
+  // (chronik.tsx's gridSections): row 0 has 2 rows, row 1 has 1 row.
+  const gridSections = [{ data: [['a'], ['b']] }, { data: [['c']] }];
+
+  it('accepts an in-bounds target', () => {
+    expect(canScrollToGridRow(gridSections, { sectionIndex: 0, itemIndex: 1 })).toBe(true);
+  });
+
+  it('rejects a null target (Absturz beim Springen in der Liste, 2026-09-20)', () => {
+    expect(canScrollToGridRow(gridSections, null)).toBe(false);
+  });
+
+  it('rejects an empty list of sections', () => {
+    expect(canScrollToGridRow([], { sectionIndex: 0, itemIndex: 0 })).toBe(false);
+  });
+
+  it('rejects an out-of-bounds sectionIndex', () => {
+    expect(canScrollToGridRow(gridSections, { sectionIndex: 2, itemIndex: 0 })).toBe(false);
+  });
+
+  it('rejects a negative sectionIndex', () => {
+    expect(canScrollToGridRow(gridSections, { sectionIndex: -1, itemIndex: 0 })).toBe(false);
+  });
+
+  it('rejects an out-of-bounds itemIndex within a valid section', () => {
+    expect(canScrollToGridRow(gridSections, { sectionIndex: 1, itemIndex: 1 })).toBe(false);
+  });
+
+  it('rejects a negative itemIndex', () => {
+    expect(canScrollToGridRow(gridSections, { sectionIndex: 0, itemIndex: -1 })).toBe(false);
+  });
+});
+
+describe('decideScrollRetry', () => {
+  const gridSections = [{ data: [['a'], ['b']] }];
+  const target = { sectionIndex: 0, itemIndex: 1 };
+
+  it('attempts a retry the first time a scroll fails', () => {
+    expect(decideScrollRetry(target, gridSections, false)).toEqual({ attempt: true });
+  });
+
+  it('does not throw, and refuses a second retry for the same attempt', () => {
+    expect(() => decideScrollRetry(target, gridSections, true)).not.toThrow();
+    expect(decideScrollRetry(target, gridSections, true)).toEqual({ attempt: false });
+  });
+
+  it('refuses to retry an out-of-bounds target even on the first failure', () => {
+    expect(decideScrollRetry({ sectionIndex: 5, itemIndex: 0 }, gridSections, false)).toEqual({
+      attempt: false,
+    });
+  });
+
+  it('refuses to retry against an empty list of sections', () => {
+    expect(decideScrollRetry(target, [], false)).toEqual({ attempt: false });
   });
 });
 

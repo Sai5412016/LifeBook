@@ -34,7 +34,14 @@ import { useAuth } from '@/core/auth/session-store';
 import { ageInDays, formatDayLabel, nowUtcIso } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
 import { useActiveChild } from '@/features/household/repository';
-import { chunkPhotos, formatDayAndWeekLabel, locatePhotoInSections } from '@/features/photos/identity';
+import {
+  canScrollToGridRow,
+  chunkPhotos,
+  decideScrollRetry,
+  formatDayAndWeekLabel,
+  locatePhotoInSections,
+  type PhotoGridPosition,
+} from '@/features/photos/identity';
 import { PickCancelledError, describeImport, importPhotos } from '@/features/photos/import';
 import { useSharePhotos, useSignedUrls } from '@/features/photos/hooks';
 import { takeLastViewedPhotoId } from '@/features/photos/lastViewed';
@@ -62,6 +69,17 @@ export default function ChronikScreen() {
   const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
   const { accent, dangerText } = useUiColors();
   const sectionListRef = useRef<SectionList<PhotoRow[]>>(null);
+  // Guards onScrollToIndexFailed's single retry (see decideScrollRetry) —
+  // reset at the start of every fresh scroll attempt below, so a later,
+  // unrelated return to Chronik gets its own retry budget again.
+  const scrollRetriedRef = useRef(false);
+  // What the LAST scrollToLocation call actually targeted. SectionList's own
+  // onScrollToIndexFailed only reports a flat VirtualizedList `index` (headers
+  // and rows counted together across every section) — not the sectionIndex /
+  // itemIndex pair scrollToLocation takes, so there is no way to recover the
+  // intended target from the failure callback's own argument. Remembering it
+  // here instead is what handleScrollToIndexFailed retries.
+  const lastScrollTargetRef = useRef<PhotoGridPosition | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -84,11 +102,39 @@ export default function ChronikScreen() {
     [allPhotos, selectedIds],
   );
 
+  // The exact shape handed to <SectionList sections={...}>, below — computed
+  // once here so the scroll guards (canScrollToGridRow, decideScrollRetry)
+  // check bounds against precisely what the list itself renders, not a
+  // second, possibly-diverging chunkPhotos call.
+  const gridSections = useMemo(
+    () =>
+      sections.map((section) => ({
+        title: section.localDate,
+        // Computed live from the child's current birth_at/birth_tz, not
+        // trusted from any photo's stored age_days — see
+        // features/photos/identity.ts#groupPhotosByDay's doc comment.
+        ageDays: child ? ageInDays(section.photos[0].occurred_at, child.birthAtUtcIso, child.birthTz) : null,
+        data: chunkPhotos(section.photos, COLUMNS),
+      })),
+    [sections, child],
+  );
+
   // Fehler 1, 2026-08-14: on returning from the fullscreen viewer, scroll to
   // whichever photo was actually last shown there — which, after swiping,
   // can differ from the one originally tapped (photos/lastViewed.ts). A
   // no-op whenever the viewer was never opened (nothing recorded) or the
   // photo since got deleted (locatePhotoInSections returns null).
+  //
+  // Fehler 2, 2026-09-20: SectionList#scrollToLocation throws the RN
+  // invariant "scrollToIndex should be used in conjunction with
+  // getItemLayout or onScrollToIndexFailed" for ANY off-screen target when
+  // neither prop is set — even a perfectly in-bounds one, since RN simply
+  // has no way to know an unmeasured row's offset. Section headers here
+  // scale with the device's accessibility text size (no allowFontScaling
+  // override anywhere in this app) and grid rows sit under headers of that
+  // variable height, so getItemLayout's cumulative per-section offsets
+  // aren't reliably precomputable — onScrollToIndexFailed below, plus
+  // pre-call guards here, is the safe choice instead.
   useFocusEffect(
     useCallback(() => {
       const photoId = takeLastViewedPhotoId();
@@ -96,19 +142,50 @@ export default function ChronikScreen() {
         return;
       }
       const position = locatePhotoInSections(sections, photoId, COLUMNS);
-      if (!position) {
+      scrollRetriedRef.current = false;
+      if (!canScrollToGridRow(gridSections, position)) {
         return;
       }
+      lastScrollTargetRef.current = position;
       requestAnimationFrame(() => {
-        sectionListRef.current?.scrollToLocation({
+        if (!sectionListRef.current || !canScrollToGridRow(gridSections, position)) {
+          return;
+        }
+        sectionListRef.current.scrollToLocation({
           sectionIndex: position.sectionIndex,
           itemIndex: position.itemIndex,
           animated: false,
           viewPosition: 0.3,
         });
       });
-    }, [sections]),
+    }, [sections, gridSections]),
   );
+
+  // Companion to the effect above: if RN still can't measure the target row
+  // in time (e.g. a very long day's grid, or a slow device), retry exactly
+  // once after a short delay, then give up silently — never throws, never
+  // shows anything to the user either way (identity.ts#decideScrollRetry).
+  // Retries against lastScrollTargetRef, not `info` — see that ref's own
+  // comment for why SectionList's failure callback can't supply the target.
+  const handleScrollToIndexFailed = useCallback(() => {
+    const target = lastScrollTargetRef.current;
+    const decision = decideScrollRetry(target, gridSections, scrollRetriedRef.current);
+    if (!decision.attempt) {
+      return;
+    }
+    scrollRetriedRef.current = true;
+    setTimeout(() => {
+      if (!sectionListRef.current || !canScrollToGridRow(gridSections, target)) {
+        return;
+      }
+      sectionListRef.current.scrollToLocation({
+        sectionIndex: target.sectionIndex,
+        itemIndex: target.itemIndex,
+        animated: false,
+        viewPosition: 0.3,
+      });
+    }, 300);
+  }, [gridSections]);
 
   const handleExitSelection = useCallback(() => {
     setSelectionMode(false);
@@ -334,20 +411,11 @@ export default function ChronikScreen() {
 
         <SectionList
           ref={sectionListRef}
-          sections={sections.map((section) => ({
-            title: section.localDate,
-            // Computed live from the child's current birth_at/birth_tz, not
-            // trusted from any photo's stored age_days — see
-            // features/photos/identity.ts#groupPhotosByDay's doc comment.
-            ageDays: child ? ageInDays(section.photos[0].occurred_at, child.birthAtUtcIso, child.birthTz) : null,
-            // Same chunking the focus-scroll above locates against
-            // (identity.ts#locatePhotoInSections) — both MUST agree on row
-            // boundaries, hence the shared helper instead of two copies.
-            data: chunkPhotos(section.photos, COLUMNS),
-          }))}
+          sections={gridSections}
           keyExtractor={(row, index) => row[0]?.id ?? String(index)}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.listContent}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
           ListEmptyComponent={
             <ThemedView style={styles.empty}>
               <ThemedText type="subtitle">Noch keine Fotos</ThemedText>
