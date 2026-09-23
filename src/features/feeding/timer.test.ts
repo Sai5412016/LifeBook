@@ -9,7 +9,6 @@ import {
   formatDuration,
   formatSinceLastFeed,
   hasUnresolvedRunningConflict,
-  isRunaway,
   resolveBreastFeedType,
   resolveRunningConflicts,
   type FeedConflictCandidate,
@@ -176,32 +175,6 @@ describe('hasUnresolvedRunningConflict — the reactive write gate', () => {
   });
 });
 
-describe('isRunaway', () => {
-  it('is false when nothing is running', () => {
-    expect(isRunaway({ running_since: null }, '2026-08-08T12:00:00Z')).toBe(false);
-  });
-
-  it('is false just under the default 3-hour threshold', () => {
-    const feed = { running_since: '2026-08-08T09:00:01Z' };
-    expect(isRunaway(feed, '2026-08-08T12:00:00Z')).toBe(false);
-  });
-
-  it('is true exactly at the threshold (inclusive)', () => {
-    const feed = { running_since: '2026-08-08T09:00:00Z' };
-    expect(isRunaway(feed, '2026-08-08T12:00:00Z')).toBe(true);
-  });
-
-  it('is true well past the threshold', () => {
-    const feed = { running_since: '2026-08-08T06:00:00Z' };
-    expect(isRunaway(feed, '2026-08-08T12:00:00Z')).toBe(true);
-  });
-
-  it('honours a custom threshold', () => {
-    const feed = { running_since: '2026-08-08T11:00:00Z' };
-    expect(isRunaway(feed, '2026-08-08T12:00:00Z', 0.5)).toBe(true);
-    expect(isRunaway(feed, '2026-08-08T12:00:00Z', 2)).toBe(false);
-  });
-});
 
 describe('formatDuration', () => {
   it.each([

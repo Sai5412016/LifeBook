@@ -15,15 +15,15 @@ import { formatTimeLabel, nowUtcIso } from '@/core/time';
 import { defaultLogTime } from '@/core/tracking/day-selection';
 import type { DiaperKind } from '@/features/diaper/types';
 import { logDiaper } from '@/features/diaper/repository';
-import { logBottle, logInstantBreastFeed } from '@/features/feeding/repository';
+import { logBottle } from '@/features/feeding/repository';
 import type { BottleKind, FeedType } from '@/features/feeding/types';
 import type { MedicationFavorite } from '@/features/medication/logic';
 import { resolveGabeOccurredAt } from '@/features/medication/logic';
 import { gabeEintragen } from '@/features/medication/repository';
 import type { MedicationDoseUnit, MedicationRoute } from '@/features/medication/types';
 
-import { letzterBrusttyp, letzterFlaschentyp, SCHNELL_BACKFILL_TIME } from './logic';
-import type { BottleFeedLike, BreastFeedLike } from './logic';
+import { letzterFlaschentyp, SCHNELL_BACKFILL_TIME } from './logic';
+import type { BottleFeedLike } from './logic';
 
 export type SchnellContext = {
   householdId: string;
@@ -75,29 +75,6 @@ export async function schnellFlasche(
   });
 
   return { id, occurredAtUtcIso, feedType, amountMl };
-}
-
-export type SchnellBrustResult = { id: string; occurredAtUtcIso: string; feedType: FeedType };
-
-/** "Brust"-Tipp: der zuletzt benutzte Brust-Typ dieses Kindes (sonst der Standardwert), needs_review = 1, keine laufende Uhr. */
-export async function schnellBrust(
-  db: AbstractPowerSyncDatabase,
-  ctx: SchnellContext,
-  recentFeeds: readonly BreastFeedLike[],
-): Promise<SchnellBrustResult> {
-  const feedType = letzterBrusttyp(recentFeeds);
-
-  const { id, occurredAtUtcIso } = await logInstantBreastFeed(db, {
-    householdId: ctx.householdId,
-    childId: ctx.childId,
-    userId: ctx.userId,
-    tz: ctx.tz,
-    feedType,
-    needsReview: 1,
-    ...(backdateFor(ctx) ?? {}),
-  });
-
-  return { id, occurredAtUtcIso, feedType };
 }
 
 export type SchnellWindelResult = { id: string; occurredAtUtcIso: string; kind: DiaperKind };

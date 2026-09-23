@@ -448,7 +448,7 @@ export type LogInstantBreastFeedInput = {
   childId: string;
   userId: string;
   tz: string;
-  /** breast_left | breast_right | breast_both — the caller (schnelleingabe) already resolved which one, see ../schnelleingabe/logic.ts#letzterBrusttyp. */
+  /** breast_left | breast_right | breast_both — the caller resolves which one. */
   feedType: FeedType;
   /** 0 | 1 — "menge noch nicht geprüft", same convention as LogBottleInput#needsReview. Defaults to 0. */
   needsReview?: number;
@@ -457,13 +457,18 @@ export type LogInstantBreastFeedInput = {
 };
 
 /**
- * Logs a COMPLETED breastfeed with no duration — the quick-entry bar's
- * "Brust" button (task 2026-09-23). Unlike `startBreastFeed`, this never
- * becomes a running timer: `ended_at` is stamped to the same instant as
- * `occurred_at` right away, so it can never show up as an open session
- * (`useOpenFeed`) or a running-timer conflict candidate — the two write
- * paths are deliberately independent, not a zero-duration case of
+ * Logs a COMPLETED breastfeed with no duration. Unlike `startBreastFeed`,
+ * this never becomes a running timer: `ended_at` is stamped to the same
+ * instant as `occurred_at` right away, so it can never show up as an open
+ * session (`useOpenFeed`) or a running-timer conflict candidate — the two
+ * write paths are deliberately independent, not a zero-duration case of
  * `startBreastFeed`/`endFeed`.
+ *
+ * 2026-09-26: no longer called anywhere in this app (Marina is fed
+ * exclusively by bottle, the quick-entry bar's "Brust" button that used to
+ * call this was removed — see schnelleingabe/components/schnell-leiste.tsx).
+ * Left in place deliberately: it's a database-layer primitive, not UI, and
+ * a later reuse (a sibling who IS breastfed) needs it unchanged.
  */
 export async function logInstantBreastFeed(
   db: AbstractPowerSyncDatabase,
@@ -614,10 +619,10 @@ export function useFeedsNeedingReview(childId: string | undefined): FeedRow[] {
 /**
  * Reactive: a child's most recent feeds (any day), newest first — the
  * quick-entry bar's own source of "last used" defaults
- * (features/schnelleingabe/logic.ts#letzterFlaschentyp/letzterBrusttyp).
- * `limit` keeps this cheap: the last-used bottle/breast type is always among
- * the very newest rows in practice, and this feeds a live UI default, not a
- * report that must see every feed ever.
+ * (features/schnelleingabe/logic.ts#letzterFlaschentyp). `limit` keeps this
+ * cheap: the last-used bottle type is always among the very newest rows in
+ * practice, and this feeds a live UI default, not a report that must see
+ * every feed ever.
  */
 export function useRecentFeedsForChild(childId: string | undefined, limit = 20): FeedRow[] {
   const { data } = useQuery<FeedRow>(

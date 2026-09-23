@@ -11,6 +11,22 @@
  * contrast, no small tap targets. All timer math is the pure logic in
  * features/feeding/timer.ts; this file only renders it and calls the
  * repository — no time construction happens here.
+ *
+ * STILLEN-BEDIENUNG ENTFERNT (2026-09-26): Marina wird ausschließlich mit
+ * der Flasche ernährt (0 Stilleinträge in der Datenbank). "Stillen
+ * links"/"Stillen rechts" (neue Timer starten) und die Live-Steuerung eines
+ * laufenden Timers (Seite wechseln, Pause/Weiter, die Läuft-schon-lange-
+ * Warnung) sind komplett entfernt — das war ausschließlich Stillen-
+ * Bedienung. EIN Sicherheitsnetz bleibt: Existiert dennoch ein offener
+ * (`ended_at IS NULL`) Feed — und sei es durch ein älteres Gerät oder eine
+ * spätere Wiederaufnahme —, zeigt dieser Bildschirm weiterhin einen
+ * einzelnen "Beenden"-Knopf dafür; `endFeed()` selbst bankt die gespeicherte
+ * Dauer unabhängig davon, ob der Timer gerade lief oder pausiert war (siehe
+ * repository.ts#endFeed), ein "Beenden" reicht also in jedem Fall. Fläschchen,
+ * Tagesliste, Korrekturen (inklusive `FeedEditPanel`s Stillen-Zweig für
+ * bereits vorhandene Stilleinträge) und die Timer-Konflikt-Prüfung
+ * (`useRunningFeed`) bleiben unverändert — Datenbank, Schema und Typen sind
+ * von dieser Aufräumaktion ausdrücklich nicht betroffen.
  */
 
 import { usePowerSync } from '@powersync/react-native';
@@ -22,7 +38,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { formatDayMonthLabel, formatTimeLabel, toLocalDate } from '@/core/time';
-import { canStartRunningEntry } from '@/core/tracking/day-selection';
 import type { ActiveChild } from '@/features/household/repository';
 import {
   acknowledgeReviewFlag,
@@ -30,11 +45,7 @@ import {
   editFeed,
   endFeed,
   logBottle,
-  pauseFeed,
-  resumeFeed,
   softDeleteFeed,
-  startBreastFeed,
-  switchSide,
   useFeedsNeedingReview,
   useFeedsOfDay,
   useLastCompletedFeed,
@@ -47,12 +58,10 @@ import {
   describeFeedQuantity,
   describeFeedType,
   elapsedSeconds,
-  formatClock,
   formatDuration,
   formatSinceLastFeed,
-  isRunaway,
 } from '@/features/feeding/timer';
-import type { BottleKind, FeedRow, FeedSide } from '@/features/feeding/types';
+import type { BottleKind, FeedRow } from '@/features/feeding/types';
 import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
 /** Default wall-clock time a backdated (Nachtragen) Fläschchen gets — task requirement, changeable afterwards via the edit panel. */
@@ -66,11 +75,14 @@ export type FeedingSectionProps = {
   /** The Alltag day selector's currently viewed day — task 2026-09-24. */
   selectedLocalDate: string;
   /**
-   * "Ändern" tapped on a schnelleingabe snackbar for a Flasche/Brust entry —
-   * opens this section's own edit panel for that id, bottle or breast alike
-   * (`FeedEditPanel` already branches on `feed.feed_type`). `token` changes
-   * on every request so the SAME entry can be requested again after closing
-   * the panel (task 2026-09-23, schnelleingabe/components/schnell-leiste.tsx).
+   * A tap on a Flasche entry (schnelleingabe's "Ändern", or a Tagesverlauf
+   * row) — opens this section's own edit panel for that id.
+   * `FeedEditPanel` still branches on `feed.feed_type`, so it also renders
+   * correctly for any pre-existing breast feed row (task 2026-09-26: no NEW
+   * one can be created anymore, but an old one is still fully editable).
+   * `token` changes on every request so the SAME entry can be requested
+   * again after closing the panel (task 2026-09-23,
+   * schnelleingabe/components/schnell-leiste.tsx).
    */
   requestedEdit?: { id: string; token: number } | null;
 };
@@ -84,7 +96,7 @@ export function FeedingSection({
   requestedEdit,
 }: FeedingSectionProps) {
   const db = usePowerSync();
-  const { accent, amber, green } = useUiColors();
+  const { accent, green } = useUiColors();
 
   // Reactive conflict resolution: a second concurrently running timer that
   // arrived via sync is resolved here, not only when a timer is started.
@@ -101,7 +113,6 @@ export function FeedingSection({
   const [bottleFormOpen, setBottleFormOpen] = useState(false);
   const [reviewFeedIdOpen, setReviewFeedIdOpen] = useState<string | null>(null);
   const [editFeedId, setEditFeedId] = useState<string | null>(null);
-  const [runawayDismissedFeedId, setRunawayDismissedFeedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (requestedEdit) {
@@ -111,60 +122,11 @@ export function FeedingSection({
     }
   }, [requestedEdit?.id, requestedEdit?.token]);
 
-  const handleStart = useCallback(
-    async (side: FeedSide) => {
-      // Laufende Einträge dürfen nur heute gestartet werden (task
-      // requirement) — der Knopf ist dafür schon ausgegraut, diese Prüfung
-      // ist das zusätzliche Netz.
-      if (!child || !session?.user.id || !canStartRunningEntry(selectedLocalDate, todayLocalDate)) return;
-      setBusy(true);
-      try {
-        await startBreastFeed(db, {
-          householdId: child.householdId,
-          childId: child.childId,
-          userId: session.user.id,
-          tz,
-          side,
-        });
-      } catch (error) {
-        console.error('[LifeBook] Stillen konnte nicht gestartet werden', error);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [child, session?.user.id, db, tz, selectedLocalDate, todayLocalDate],
-  );
-
-  const handleSwitchSide = useCallback(async () => {
-    if (!openFeed) return;
-    setBusy(true);
-    try {
-      await switchSide(db, openFeed.id);
-    } finally {
-      setBusy(false);
-    }
-  }, [db, openFeed]);
-
-  const handlePauseResume = useCallback(async () => {
-    if (!openFeed) return;
-    setBusy(true);
-    try {
-      if (openFeed.is_running) {
-        await pauseFeed(db, openFeed.id);
-      } else {
-        await resumeFeed(db, openFeed.id);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [db, openFeed]);
-
   const handleEndFeed = useCallback(async () => {
     if (!openFeed) return;
     setBusy(true);
     try {
       await endFeed(db, openFeed.id);
-      setRunawayDismissedFeedId(null);
     } finally {
       setBusy(false);
     }
@@ -259,20 +221,13 @@ export function FeedingSection({
     );
   }
 
-  const isRunning = openFeed?.is_running === 1;
-  const runawayVisible =
-    isRunning && !!openFeed && runawayDismissedFeedId !== openFeed.id && isRunaway(openFeed, tickingNow);
-
   let statusText: string;
   if (openFeed) {
-    const elapsed = elapsedSeconds(openFeed, tickingNow);
-    const sideLabel = openFeed.running_side === 'right' ? 'rechts' : 'links';
-    if (isRunning) {
-      const activeSeconds = openFeed.running_side === 'right' ? elapsed.right : elapsed.left;
-      statusText = `Stillen ${sideLabel} · ${formatClock(activeSeconds)}`;
-    } else {
-      statusText = `Pausiert · ${sideLabel}, ${formatDuration(elapsed.left + elapsed.right)}`;
-    }
+    // Sicherheitsnetz (task 2026-09-26): normalerweise kann kein offener
+    // Feed mehr entstehen (kein Stillen-Start mehr), aber falls doch einer
+    // vorliegt — ältere Geräte, spätere Wiederaufnahme —, muss er
+    // beendbar bleiben, siehe die Aktion weiter unten.
+    statusText = 'Ein offener Stilleintrag wartet auf "Beenden"';
   } else if (lastCompletedFeed) {
     const since = formatSinceLastFeed(lastCompletedFeed.occurred_at, tickingNow);
     // Gerätetest 2026-09-25: eine Mahlzeit von vor Tagen/Wochen darf nicht
@@ -311,10 +266,6 @@ export function FeedingSection({
         />
       ) : null}
 
-      {runawayVisible && openFeed ? (
-        <RunawayBanner onEnd={handleEndFeed} onDismiss={() => setRunawayDismissedFeedId(openFeed.id)} />
-      ) : null}
-
       <ThemedText type="title" style={styles.status}>
         {statusText}
       </ThemedText>
@@ -322,39 +273,16 @@ export function FeedingSection({
       {bottleFormOpen ? (
         <BottleForm busy={busy} onCancel={() => setBottleFormOpen(false)} onSave={handleSaveBottle} />
       ) : openFeed ? (
+        // Sicherheitsnetz, siehe Datei-Kommentar oben — nur noch "Beenden",
+        // kein Seite-wechseln/Pause mehr (das war Stillen-Sitzungssteuerung).
         <View style={styles.actions}>
-          <BigButton
-            label="Seite wechseln"
-            color={accent}
-            onPress={handleSwitchSide}
-            disabled={busy || !isRunning}
-          />
-          <BigButton
-            label={isRunning ? 'Pause' : 'Weiter'}
-            color={amber}
-            onPress={handlePauseResume}
-            disabled={busy}
-          />
           <BigButton label="Beenden" color={green} onPress={handleEndFeed} disabled={busy} />
         </View>
       ) : (
         <View style={styles.actions}>
           <BigButton
-            label="Stillen links"
-            color={accent}
-            onPress={() => handleStart('left')}
-            disabled={busy || !child || !canStartRunningEntry(selectedLocalDate, todayLocalDate)}
-          />
-          <BigButton
-            label="Stillen rechts"
-            color={accent}
-            onPress={() => handleStart('right')}
-            disabled={busy || !child || !canStartRunningEntry(selectedLocalDate, todayLocalDate)}
-          />
-          <BigButton
             label="Fläschchen"
             color={accent}
-            variant="secondary"
             onPress={() => {
               setBottleFormOpen(true);
               setEditFeedId(null);
@@ -484,28 +412,6 @@ function ReviewCorrectionPanel({
         </Pressable>
         <Pressable onPress={handleSave} hitSlop={8}>
           <ThemedText type="linkPrimary">Speichern &amp; bestätigen</ThemedText>
-        </Pressable>
-      </View>
-    </ThemedView>
-  );
-}
-
-function RunawayBanner({ onEnd, onDismiss }: { onEnd: () => void; onDismiss: () => void }) {
-  const { dangerBg, dangerText } = useUiColors();
-
-  return (
-    <ThemedView style={[styles.banner, { backgroundColor: dangerBg }]}>
-      <ThemedText type="smallBold" style={{ color: dangerText }}>
-        Läuft schon länger als 3 Stunden — läuft der Timer noch?
-      </ThemedText>
-      <View style={styles.bannerActions}>
-        <Pressable onPress={onEnd} hitSlop={8}>
-          <ThemedText type="linkPrimary">Jetzt beenden</ThemedText>
-        </Pressable>
-        <Pressable onPress={onDismiss} hitSlop={8}>
-          <ThemedText type="link" themeColor="textSecondary">
-            Läuft weiter
-          </ThemedText>
         </Pressable>
       </View>
     </ThemedView>

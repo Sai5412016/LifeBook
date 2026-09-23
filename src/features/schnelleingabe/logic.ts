@@ -1,11 +1,16 @@
 /**
  * schnelleingabe/logic — pure logic for the quick-entry bar (task
  * 2026-09-23): which defaults a tap should carry forward (last-used bottle
- * type/amount, last-used breast side), which day it writes to given the
- * Alltag day selector, the double-tap guard, and the snackbar's label text.
- * Free of any Expo / React Native / PowerSync import so it runs in plain
- * Node under Vitest (Architekturregel 3) — the device- and database-touching
- * side lives in ./repository.
+ * type/amount), which day it writes to given the Alltag day selector, the
+ * double-tap guard, and the snackbar's label text. Free of any Expo / React
+ * Native / PowerSync import so it runs in plain Node under Vitest
+ * (Architekturregel 3) — the device- and database-touching side lives in
+ * ./repository.
+ *
+ * 2026-09-26: the breastfeeding defaults (`letzterBrusttyp`,
+ * `BreastFeedLike`, `DEFAULT_BREAST_FEED_TYPE`) were removed here — Marina
+ * is fed exclusively by bottle, the "Brust" quick-entry button is gone, and
+ * nothing else called these (they existed solely to serve that button).
  */
 
 import { resolveLogOccurredAt, secondsBetween } from '@/core/time';
@@ -13,8 +18,6 @@ import type { FeedType } from '@/features/feeding/types';
 
 /** Written when this child has no earlier bottle feed at all — "Muttermilch" is the Fläschchen-Formular's own first chip. */
 export const DEFAULT_BOTTLE_FEED_TYPE: FeedType = 'bottle_breastmilk';
-/** Written when this child has no earlier breastfeed at all — "links" is the existing timer buttons' first option. */
-export const DEFAULT_BREAST_FEED_TYPE: FeedType = 'breast_left';
 
 /** Two taps on the SAME button within this many seconds count as one (task requirement: "nachts passiert das"). */
 const DOUBLE_TAP_WINDOW_SECONDS = 2;
@@ -54,22 +57,6 @@ export function letzterFlaschentyp(feeds: readonly BottleFeedLike[]): SchnellFla
   return latest
     ? { feedType: latest.feed_type, amountMl: latest.amount_ml }
     : { feedType: DEFAULT_BOTTLE_FEED_TYPE, amountMl: null };
-}
-
-export type BreastFeedLike = { feed_type: FeedType; occurred_at: string; deleted_at: string | null };
-
-/** Last-used breast type ('breast_left' | 'breast_right' | 'breast_both'), same filter-then-latest convention as `letzterFlaschentyp`. */
-export function letzterBrusttyp(feeds: readonly BreastFeedLike[]): FeedType {
-  let latest: BreastFeedLike | null = null;
-  for (const feed of feeds) {
-    if (feed.deleted_at || !feed.feed_type.startsWith('breast_')) {
-      continue;
-    }
-    if (!latest || feed.occurred_at > latest.occurred_at) {
-      latest = feed;
-    }
-  }
-  return latest ? latest.feed_type : DEFAULT_BREAST_FEED_TYPE;
 }
 
 export type ResolvedSchnellOccurredAt = { occurredAtUtcIso: string; localDate: string };

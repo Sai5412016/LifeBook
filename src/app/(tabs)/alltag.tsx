@@ -4,11 +4,14 @@
  * Timer-Zeile darunter, EIN gemeinsamer Tagesverlauf über alle Arten in der
  * Mitte — als einziger Bereich scrollend —, Schnelleingabe fest unten.
  *
- * Die vier ausführlichen Formulare (Füttern, Schlafen, Wickeln, Medikamente
- * & Vitamine), vorher hier direkt eingebettet, ziehen in eigene
- * Root-Stack-Routen um (app/alltag/fuettern.tsx, schlafen.tsx, mehr.tsx) —
- * erreichbar über die Timer-Zeile bzw. "Mehr …", oder per Tipp auf eine
- * Tagesverlauf-Zeile. Kein Bedienweg geht verloren, siehe Bericht.
+ * Die ausführlichen Formulare, vorher hier direkt eingebettet, ziehen in
+ * eigene Root-Stack-Routen um: Schlafen nach app/alltag/schlafen.tsx
+ * (erreichbar über die Timer-Zeile "⏱ Schlaf"), Füttern/Wickeln/
+ * Medikamente & Vitamine gemeinsam nach app/alltag/mehr.tsx ("Mehr …") —
+ * seit 2026-09-26 hat Füttern selbst keinen Timer mehr (Stillen entfernt,
+ * nur noch Fläschchen), gehört deshalb konzeptionell zu "Mehr", nicht mehr
+ * in die Timer-Zeile. Erreichbar auch per Tipp auf eine Tagesverlauf-Zeile.
+ * Kein Bedienweg geht verloren, siehe Bericht.
  *
  * Die Tageswahl (b: Wochenstreifen) und die Kopfzeile (a) bauen auf der
  * bestehenden core/tracking/day-selection.ts auf, unverändert seit
@@ -98,8 +101,8 @@ export default function AlltagScreen() {
 
   const openEdit = (kind: TimelineKind | SchnellEditKind, id: string) => {
     const editToken = String(Date.now());
-    if (kind === 'bottle' || kind === 'breast' || kind === 'feed') {
-      router.push({ pathname: '/alltag/fuettern', params: { selectedLocalDate, editId: id, editToken } });
+    if (kind === 'bottle' || kind === 'feed') {
+      router.push({ pathname: '/alltag/mehr', params: { selectedLocalDate, editKind: 'feed', editId: id, editToken } });
     } else if (kind === 'diaper') {
       router.push({ pathname: '/alltag/mehr', params: { selectedLocalDate, editKind: 'diaper', editId: id, editToken } });
     } else if (kind === 'medication') {
@@ -109,11 +112,11 @@ export default function AlltagScreen() {
       });
     } else if (kind === 'sleep') {
       router.push({ pathname: '/alltag/schlafen', params: { selectedLocalDate, editId: id, editToken } });
-    } else if (kind === 'pumping') {
-      router.push('/abpumpen');
     }
-    // growth/temperature/note: kein Bearbeiten-Formular vorhanden — siehe
-    // Bericht ("was in diesem Auftrag falsch oder unvollständig war").
+    // pumping: keine Eingabe mehr (task 2026-09-26, Abpumpen entfernt) — ein
+    // Tipp auf eine Abpump-Zeile im Tagesverlauf bleibt ohne Wirkung, genau
+    // wie growth/temperature/note, für die es ohnehin nie ein Formular gab
+    // (siehe Bericht).
   };
 
   if (childLoading) {
