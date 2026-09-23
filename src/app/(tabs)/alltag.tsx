@@ -14,12 +14,14 @@
  */
 
 import DateTimePicker from '@expo/ui/community/datetime-picker';
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import {
   addDaysToLocalDate,
@@ -39,8 +41,13 @@ import { DiaperSection } from '@/features/diaper/components/diaper-section';
 import { FeedingSection } from '@/features/feeding/components/feeding-section';
 import { useActiveChild } from '@/features/household/repository';
 import { MedicationSection } from '@/features/medication/components/medication-section';
+import type { SchnellEditKind } from '@/features/schnelleingabe/components/schnell-leiste';
+import { SchnellLeiste } from '@/features/schnelleingabe/components/schnell-leiste';
 import { SleepSection } from '@/features/sleep/components/sleep-section';
 import { KeyboardSafeScreen } from '@/ui';
+
+/** Welche Sektion ein von der Schnelleingabe-Leiste angeforderter "Ändern"-Tipp öffnet. */
+type QuickEditRequest = { kind: SchnellEditKind; id: string; token: number };
 
 /** Ticks every second so Füttern's running timer and "vor …" labels stay live. */
 function useTickingNow(): string {
@@ -59,6 +66,7 @@ export default function AlltagScreen() {
   const { child, isLoading: childLoading } = useActiveChild();
   const tz = deviceTimeZone();
   const tickingNow = useTickingNow();
+  const insets = useSafeAreaInsets();
   // Live, not frozen at mount: if the app stays open across midnight, the
   // right arrow un-grays itself the moment "heute" genuinely advances,
   // without needing any special-cased reset of `selectedLocalDate` itself.
@@ -73,6 +81,17 @@ export default function AlltagScreen() {
     }
   };
 
+  // "Ändern" auf der Schnelleingabe-Snackbar: innerhalb dieses Tabs direkt
+  // gesetzt, vom ersten Tab aus über Navigationsparameter angefordert (die
+  // Karte dort hat keinen Zugriff auf diesen lokalen State) — task 2026-09-23.
+  const [quickEdit, setQuickEdit] = useState<QuickEditRequest | null>(null);
+  const params = useLocalSearchParams<{ editKind?: string; editId?: string; editToken?: string }>();
+  useEffect(() => {
+    if (params.editKind && params.editId && params.editToken) {
+      setQuickEdit({ kind: params.editKind as SchnellEditKind, id: params.editId, token: Number(params.editToken) });
+    }
+  }, [params.editKind, params.editId, params.editToken]);
+
   if (childLoading) {
     return (
       <ThemedView style={styles.centered}>
@@ -83,9 +102,19 @@ export default function AlltagScreen() {
 
   const isViewingToday = selectedLocalDate === todayLocalDate;
 
+  const feedingEdit =
+    quickEdit && (quickEdit.kind === 'bottle' || quickEdit.kind === 'breast') ? quickEdit : null;
+  const diaperEdit = quickEdit && quickEdit.kind === 'diaper' ? quickEdit : null;
+  const medicationEdit = quickEdit && quickEdit.kind === 'medication' ? quickEdit : null;
+
   return (
     <ThemedView style={styles.container}>
-      <KeyboardSafeScreen style={styles.safeArea} contentContainerStyle={styles.content} hasTabBar>
+      {/* Die Schnelleingabe-Leiste sitzt AUSSERHALB des scrollenden
+          KeyboardSafeScreen, als eigener Fuß darunter — deshalb hier kein
+          `hasTabBar` mehr auf KeyboardSafeScreen: der Reiterleisten-Abstand
+          wird jetzt einmal, vom Fuß selbst, reserviert (Spacing.safeFooter
+          unten), nicht mehr zusätzlich vom Scroll-Inhalt. */}
+      <KeyboardSafeScreen style={styles.safeArea} contentContainerStyle={styles.content}>
         <ThemedText type="small" themeColor="textSecondary">
           {child ? child.firstName : 'Heute'}
         </ThemedText>
@@ -110,13 +139,26 @@ export default function AlltagScreen() {
           tz={tz}
           tickingNow={tickingNow}
           selectedLocalDate={selectedLocalDate}
+          requestedEdit={feedingEdit}
         />
 
         <ThemedText type="subtitle">Wickeln</ThemedText>
-        <DiaperSection child={child} session={session} tz={tz} selectedLocalDate={selectedLocalDate} />
+        <DiaperSection
+          child={child}
+          session={session}
+          tz={tz}
+          selectedLocalDate={selectedLocalDate}
+          requestedEdit={diaperEdit}
+        />
 
         <ThemedText type="subtitle">Medikamente & Vitamine</ThemedText>
-        <MedicationSection child={child} session={session} tz={tz} selectedLocalDate={selectedLocalDate} />
+        <MedicationSection
+          child={child}
+          session={session}
+          tz={tz}
+          selectedLocalDate={selectedLocalDate}
+          requestedEdit={medicationEdit}
+        />
 
         <ThemedText type="subtitle">Schlafen</ThemedText>
         <SleepSection
@@ -127,6 +169,17 @@ export default function AlltagScreen() {
           selectedLocalDate={selectedLocalDate}
         />
       </KeyboardSafeScreen>
+
+      <View style={[styles.schnellFooter, { paddingBottom: insets.bottom + BottomTabInset }]}>
+        <SchnellLeiste
+          child={child}
+          session={session}
+          tz={tz}
+          selectedLocalDate={selectedLocalDate}
+          todayLocalDate={todayLocalDate}
+          onRequestEdit={(kind, id) => setQuickEdit({ kind, id, token: Date.now() })}
+        />
+      </View>
     </ThemedView>
   );
 }
@@ -223,6 +276,11 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   safeArea: { flex: 1, paddingHorizontal: Spacing.three },
+  // Fuß unter dem scrollenden Bereich, direkt über der Reiterleiste (task
+  // 2026-09-23) — `paddingBottom` reserviert Safe-Area + Reiterleiste EINMAL
+  // hier, nicht mehr zusätzlich im Scroll-Inhalt (siehe KeyboardSafeScreen
+  // oben, jetzt ohne `hasTabBar`).
+  schnellFooter: { paddingTop: Spacing.one },
   content: {
     gap: Spacing.three,
     paddingTop: Spacing.three,

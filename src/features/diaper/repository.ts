@@ -53,16 +53,19 @@ export type LogDiaperInput = {
   time?: string;
 };
 
+export type LoggedDiaper = { id: string; occurredAtUtcIso: string; localDate: string };
+
 /**
  * Logs a diaper change immediately, with no details — the common case that
  * must work one-handed without a follow-up question. Returns the new row's
- * id so the caller can offer to add details right after, without a second
- * query.
+ * id (plus the resolved occurred_at/local_date, for schnelleingabe's
+ * snackbar — task 2026-09-23) so the caller can offer to add details right
+ * after, without a second query.
  */
 export async function logDiaper(
   db: AbstractPowerSyncDatabase,
   input: LogDiaperInput,
-): Promise<string> {
+): Promise<LoggedDiaper> {
   const { occurredAtUtcIso, localDate } = resolveLogOccurredAt(
     input.tz,
     input.localDate && input.time ? { localDate: input.localDate, time: input.time } : undefined,
@@ -96,7 +99,7 @@ export async function logDiaper(
     ],
   );
 
-  return diaperId;
+  return { id: diaperId, occurredAtUtcIso, localDate };
 }
 
 export type DiaperEditInput = {

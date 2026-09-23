@@ -10,7 +10,7 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -43,9 +43,16 @@ export type DiaperSectionProps = {
   tz: string;
   /** The Alltag day selector's currently viewed day — task 2026-09-24. */
   selectedLocalDate: string;
+  /**
+   * "Ändern" tapped on a schnelleingabe snackbar for a diaper entry — opens
+   * this section's own edit panel for that id. `token` changes on every
+   * request so the SAME entry can be requested again after closing the
+   * panel (task 2026-09-23, schnelleingabe/components/schnell-leiste.tsx).
+   */
+  requestedEdit?: { id: string; token: number } | null;
 };
 
-export function DiaperSection({ child, session, tz, selectedLocalDate }: DiaperSectionProps) {
+export function DiaperSection({ child, session, tz, selectedLocalDate, requestedEdit }: DiaperSectionProps) {
   const db = usePowerSync();
   const { accent, amber, green } = useUiColors();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
@@ -56,6 +63,13 @@ export function DiaperSection({ child, session, tz, selectedLocalDate }: DiaperS
   const [detailsPromptId, setDetailsPromptId] = useState<string | null>(null);
   const [editDiaperId, setEditDiaperId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (requestedEdit) {
+      setEditDiaperId(requestedEdit.id);
+      setDetailsPromptId(null);
+    }
+  }, [requestedEdit?.id, requestedEdit?.token]);
+
   const handleLog = useCallback(
     async (kind: DiaperKind) => {
       if (!child || !session?.user.id) return;
@@ -64,7 +78,7 @@ export function DiaperSection({ child, session, tz, selectedLocalDate }: DiaperS
         // gewählter Tag = heute -> aktuelle Uhrzeit, wie bisher (kein
         // explizites localDate/time, logDiaper fällt auf nowUtcIso()
         // zurück); ein vergangener Tag trägt bei 12:00 mittags nach.
-        const diaperId = await logDiaper(db, {
+        const { id: diaperId } = await logDiaper(db, {
           householdId: child.householdId,
           childId: child.childId,
           userId: session.user.id,
