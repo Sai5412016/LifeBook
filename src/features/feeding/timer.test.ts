@@ -239,6 +239,10 @@ describe('formatSinceLastFeed', () => {
   it('never shows negative time for a last-feed timestamp in the future', () => {
     expect(formatSinceLastFeed('2026-08-08T12:05:00Z', '2026-08-08T12:00:00Z')).toBe('vor 0 min');
   });
+
+  it('returns null once the last feed is more than 24 hours in the past — Gerätetest 2026-09-25 ("vor 993 h")', () => {
+    expect(formatSinceLastFeed('2026-08-11T00:00:00Z', '2026-09-25T17:53:00Z')).toBeNull();
+  });
 });
 
 describe('resolveBreastFeedType', () => {

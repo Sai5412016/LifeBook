@@ -1,22 +1,25 @@
 /**
- * Alltag — one screen, one section per tracking feature: Füttern (needed ten
- * times a day), Wickeln, Medikamente & Vitamine, Schlafen. Each section owns
- * its own data and state; this file supplies the shared shell (child,
- * session, device timezone, the live clock) AND, since 2026-09-24, the day
- * selector: which single calendar day every section currently shows and
- * backfills to. That selected day is held ONCE here (`useState`, no
- * context/store — task requirement) and passed down as a prop, the same way
- * `tickingNow` already was.
+ * Alltag — die einzige Versorgungsseite für Marina (task 2026-09-26):
+ * Kalender (Wochenstreifen, aufklappbar zum Monat) oben, Tagessummen und
+ * Timer-Zeile darunter, EIN gemeinsamer Tagesverlauf über alle Arten in der
+ * Mitte — als einziger Bereich scrollend —, Schnelleingabe fest unten.
  *
- * Formerly the app's launch screen at route "index" — moved to tab 3 (still
- * functionally identical) when tab 1 became the child profile ("Marina",
- * `index.tsx`). See components/app-tabs.tsx.
+ * Die vier ausführlichen Formulare (Füttern, Schlafen, Wickeln, Medikamente
+ * & Vitamine), vorher hier direkt eingebettet, ziehen in eigene
+ * Root-Stack-Routen um (app/alltag/fuettern.tsx, schlafen.tsx, mehr.tsx) —
+ * erreichbar über die Timer-Zeile bzw. "Mehr …", oder per Tipp auf eine
+ * Tagesverlauf-Zeile. Kein Bedienweg geht verloren, siehe Bericht.
+ *
+ * Die Tageswahl (b: Wochenstreifen) und die Kopfzeile (a) bauen auf der
+ * bestehenden core/tracking/day-selection.ts auf, unverändert seit
+ * 2026-09-24/25.
  */
 
 import DateTimePicker from '@expo/ui/community/datetime-picker';
-import { useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -24,39 +27,36 @@ import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import {
   addDaysToLocalDate,
+  ageInDays,
+  combineLocalDateAndTime,
   localDateToPickerDate,
   nowUtcIso,
   pickerDateToLocalDate,
   toLocalDate,
 } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
-import {
-  canGoToNextDay,
-  formatBackfillHint,
-  formatDayNavigationLabel,
-  isSelectableDay,
-} from '@/core/tracking/day-selection';
-import { DiaperSection } from '@/features/diaper/components/diaper-section';
-import { FeedingSection } from '@/features/feeding/components/feeding-section';
+import { canGoToNextDay, formatDayNavigationLabel, isSelectableDay } from '@/core/tracking/day-selection';
+import { zeitraumTage } from '@/features/berichte/logic';
 import { useActiveChild } from '@/features/household/repository';
-import { MedicationSection } from '@/features/medication/components/medication-section';
+import { formatDayAndWeekLabel } from '@/features/photos/identity';
 import type { SchnellEditKind } from '@/features/schnelleingabe/components/schnell-leiste';
 import { SchnellLeiste } from '@/features/schnelleingabe/components/schnell-leiste';
-import { SleepSection } from '@/features/sleep/components/sleep-section';
-import { KeyboardSafeScreen } from '@/ui';
+import { DayChips } from '@/features/timeline/components/day-chips';
+import { DayTimeline } from '@/features/timeline/components/day-timeline';
+import { MonthGrid } from '@/features/timeline/components/month-grid';
+import { TimerRow } from '@/features/timeline/components/timer-row';
+import { WeekStrip } from '@/features/timeline/components/week-strip';
+import { useCalendarViewMode } from '@/features/timeline/hooks/use-calendar-view-mode';
+import { useDayData, useDayMarkersForRange } from '@/features/timeline/repository';
+import type { TimelineKind } from '@/features/timeline/types';
 
-/** Welche Sektion ein von der Schnelleingabe-Leiste angeforderter "Ändern"-Tipp öffnet. */
-type QuickEditRequest = { kind: SchnellEditKind; id: string; token: number };
-
-/** Ticks every second so Füttern's running timer and "vor …" labels stay live. */
+/** Ticks every second so the timer row's live clock stays current. */
 function useTickingNow(): string {
   const [now, setNow] = useState(() => nowUtcIso());
-
   useEffect(() => {
     const id = setInterval(() => setNow(nowUtcIso()), 1000);
     return () => clearInterval(id);
   }, []);
-
   return now;
 }
 
@@ -65,13 +65,12 @@ export default function AlltagScreen() {
   const { child, isLoading: childLoading } = useActiveChild();
   const tz = deviceTimeZone();
   const tickingNow = useTickingNow();
-  // Live, not frozen at mount: if the app stays open across midnight, the
-  // right arrow un-grays itself the moment "heute" genuinely advances,
-  // without needing any special-cased reset of `selectedLocalDate` itself.
   const todayLocalDate = toLocalDate(tickingNow, tz);
   const earliestLocalDate = child ? toLocalDate(child.birthAtUtcIso, child.birthTz) : todayLocalDate;
 
   const [selectedLocalDate, setSelectedLocalDate] = useState(() => toLocalDate(nowUtcIso(), tz));
+  const [monthAnchor, setMonthAnchor] = useState(selectedLocalDate);
+  const [viewMode, setViewMode] = useCalendarViewMode();
 
   const changeDay = (localDate: string) => {
     if (isSelectableDay(localDate, earliestLocalDate, todayLocalDate)) {
@@ -79,16 +78,43 @@ export default function AlltagScreen() {
     }
   };
 
-  // "Ändern" auf der Schnelleingabe-Snackbar: innerhalb dieses Tabs direkt
-  // gesetzt, vom ersten Tab aus über Navigationsparameter angefordert (die
-  // Karte dort hat keinen Zugriff auf diesen lokalen State) — task 2026-09-23.
-  const [quickEdit, setQuickEdit] = useState<QuickEditRequest | null>(null);
-  const params = useLocalSearchParams<{ editKind?: string; editId?: string; editToken?: string }>();
-  useEffect(() => {
-    if (params.editKind && params.editId && params.editToken) {
-      setQuickEdit({ kind: params.editKind as SchnellEditKind, id: params.editId, token: Number(params.editToken) });
+  const weekDays = zeitraumTage('woche', selectedLocalDate);
+  const monthDays = zeitraumTage('monat', monthAnchor);
+  const displayedDays = viewMode === 'week' ? weekDays : monthDays;
+  const markersByDate = useDayMarkersForRange(
+    child?.childId,
+    displayedDays[0],
+    displayedDays[displayedDays.length - 1],
+    displayedDays,
+  );
+
+  const { timeline, berichtDaten } = useDayData(child?.childId, selectedLocalDate, tickingNow);
+
+  const selectedDayNoonUtcIso = combineLocalDateAndTime(selectedLocalDate, '12:00', tz);
+  const ageLabel =
+    child && selectedDayNoonUtcIso
+      ? formatDayAndWeekLabel(ageInDays(selectedDayNoonUtcIso, child.birthAtUtcIso, child.birthTz))
+      : null;
+
+  const openEdit = (kind: TimelineKind | SchnellEditKind, id: string) => {
+    const editToken = String(Date.now());
+    if (kind === 'bottle' || kind === 'breast' || kind === 'feed') {
+      router.push({ pathname: '/alltag/fuettern', params: { selectedLocalDate, editId: id, editToken } });
+    } else if (kind === 'diaper') {
+      router.push({ pathname: '/alltag/mehr', params: { selectedLocalDate, editKind: 'diaper', editId: id, editToken } });
+    } else if (kind === 'medication') {
+      router.push({
+        pathname: '/alltag/mehr',
+        params: { selectedLocalDate, editKind: 'medication', editId: id, editToken },
+      });
+    } else if (kind === 'sleep') {
+      router.push({ pathname: '/alltag/schlafen', params: { selectedLocalDate, editId: id, editToken } });
+    } else if (kind === 'pumping') {
+      router.push('/abpumpen');
     }
-  }, [params.editKind, params.editId, params.editToken]);
+    // growth/temperature/note: kein Bearbeiten-Formular vorhanden — siehe
+    // Bericht ("was in diesem Auftrag falsch oder unvollständig war").
+  };
 
   if (childLoading) {
     return (
@@ -98,111 +124,92 @@ export default function AlltagScreen() {
     );
   }
 
-  const isViewingToday = selectedLocalDate === todayLocalDate;
-
-  const feedingEdit =
-    quickEdit && (quickEdit.kind === 'bottle' || quickEdit.kind === 'breast') ? quickEdit : null;
-  const diaperEdit = quickEdit && quickEdit.kind === 'diaper' ? quickEdit : null;
-  const medicationEdit = quickEdit && quickEdit.kind === 'medication' ? quickEdit : null;
+  const isBeforeBirth = selectedLocalDate < earliestLocalDate;
 
   return (
     <ThemedView style={styles.container}>
-      {/*
-        Die Schnelleingabe-Leiste ist ein GEWÖHNLICHES Flex-Geschwister
-        unter dem scrollenden Bereich, kein Overlay — Gerätetest 2026-09-24
-        fand sie ~130dp über der nativen Reiterleiste schwebend, mit
-        antippbaren Inhalten (u. a. "Stillen rechts") halb dahinter versteckt.
-        Ursache war eine von Hand aufaddierte Polsterung
-        (`insets.bottom + BottomTabInset`) auf diesem Fuß: `BottomTabInset`
-        ist für SCROLLENDEN Inhalt gedacht, dessen letztes Element sich sonst
-        hinter der Reiterleiste verstecken könnte (siehe constants/theme.ts) —
-        bei einem bereits als Flex-Kind positionierten, NICHT scrollenden Fuß
-        addierte sie sich zusätzlich zur echten Sicherheitsabstand-Angabe des
-        Geräts und drückte ihn zu weit nach oben, wobei der so verkleinerte
-        Platz für die ScrollView den Inhalt zusammenquetschte. Ein normales
-        Flex-Kind braucht dafür keine Konstante: Flexbox reicht dem Fuß genau
-        seine eigene Höhe zu und reserviert den Rest für die ScrollView
-        darüber — beide teilen sich denselben Bildschirmbereich, nichts
-        überlappt. Kein `hasTabBar` mehr auf KeyboardSafeScreen, aus
-        demselben Grund. */}
-      <KeyboardSafeScreen style={styles.safeArea} contentContainerStyle={styles.content}>
-        <ThemedText type="small" themeColor="textSecondary">
-          {child ? child.firstName : 'Heute'}
-        </ThemedText>
-
-        <DayNavigationHeader
-          selectedLocalDate={selectedLocalDate}
-          todayLocalDate={todayLocalDate}
-          earliestLocalDate={earliestLocalDate}
-          onChange={changeDay}
-        />
-
-        {!isViewingToday ? (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        {/* (a)-(e): feste Höhe, kein Scrollen. */}
+        <View style={styles.fixed}>
           <ThemedText type="small" themeColor="textSecondary">
-            {formatBackfillHint(selectedLocalDate)}
+            {child ? child.firstName : 'Heute'}
           </ThemedText>
-        ) : null}
 
-        <ThemedText type="subtitle">Füttern</ThemedText>
-        <FeedingSection
-          child={child}
-          session={session}
-          tz={tz}
-          tickingNow={tickingNow}
-          selectedLocalDate={selectedLocalDate}
-          requestedEdit={feedingEdit}
-        />
+          <DayNavigationHeader
+            selectedLocalDate={selectedLocalDate}
+            todayLocalDate={todayLocalDate}
+            earliestLocalDate={earliestLocalDate}
+            onChange={changeDay}
+          />
+          {ageLabel ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              {ageLabel}
+            </ThemedText>
+          ) : null}
 
-        <ThemedText type="subtitle">Wickeln</ThemedText>
-        <DiaperSection
-          child={child}
-          session={session}
-          tz={tz}
-          selectedLocalDate={selectedLocalDate}
-          requestedEdit={diaperEdit}
-        />
+          {viewMode === 'week' ? (
+            <WeekStrip
+              days={weekDays}
+              markersByDate={markersByDate}
+              selectedLocalDate={selectedLocalDate}
+              todayLocalDate={todayLocalDate}
+              earliestLocalDate={earliestLocalDate}
+              onSelectDay={changeDay}
+            />
+          ) : (
+            <MonthGrid
+              monthAnchor={monthAnchor}
+              markersByDate={markersByDate}
+              selectedLocalDate={selectedLocalDate}
+              todayLocalDate={todayLocalDate}
+              earliestLocalDate={earliestLocalDate}
+              onSelectDay={changeDay}
+              onChangeMonthAnchor={setMonthAnchor}
+            />
+          )}
 
-        <ThemedText type="subtitle">Medikamente & Vitamine</ThemedText>
-        <MedicationSection
-          child={child}
-          session={session}
-          tz={tz}
-          selectedLocalDate={selectedLocalDate}
-          requestedEdit={medicationEdit}
-        />
+          <Pressable
+            onPress={() => {
+              const next = viewMode === 'week' ? 'month' : 'week';
+              if (next === 'month') {
+                setMonthAnchor(selectedLocalDate);
+              }
+              setViewMode(next);
+            }}
+            hitSlop={8}>
+            <ThemedText type="linkPrimary">{viewMode === 'week' ? '▾ Monat anzeigen' : '▴ Monat zuklappen'}</ThemedText>
+          </Pressable>
 
-        <ThemedText type="subtitle">Schlafen</ThemedText>
-        <SleepSection
-          child={child}
-          session={session}
-          tz={tz}
-          tickingNow={tickingNow}
-          selectedLocalDate={selectedLocalDate}
-        />
-      </KeyboardSafeScreen>
+          <DayChips selectedLocalDate={selectedLocalDate} daten={berichtDaten} />
 
+          <TimerRow childId={child?.childId} tickingNow={tickingNow} />
+        </View>
+
+        {/* (f): einziger scrollender Bereich. */}
+        <ScrollView contentContainerStyle={styles.timelineContent}>
+          <DayTimeline entries={timeline} tz={tz} isBeforeBirth={isBeforeBirth} onPressEntry={openEdit} />
+        </ScrollView>
+      </SafeAreaView>
+
+      {/* (g): fest unten, gewöhnliches Flex-Geschwister — Gerätetest
+          2026-09-25: keine Konstante, kein Overlay (siehe frühere Korrektur
+          in dieser Datei-Historie). */}
       <SchnellLeiste
         child={child}
         session={session}
         tz={tz}
         selectedLocalDate={selectedLocalDate}
         todayLocalDate={todayLocalDate}
-        onRequestEdit={(kind, id) => setQuickEdit({ kind, id, token: Date.now() })}
+        onRequestEdit={openEdit}
       />
     </ThemedView>
   );
 }
 
 /**
- * "‹  Heute · Dienstag, 23. September 2026  ›  [Heute]" — day-navigation
- * header (task 2026-09-24). Tapping the label opens the same
- * `@expo/ui` `DateTimePicker` every other date field in this app already
- * uses (features/events/components/event-form.tsx,
- * features/people/components/person-form.tsx), bounded to
- * [earliestLocalDate, todayLocalDate] via `minimumDate`/`maximumDate` — and
- * re-checked with `isSelectableDay` before actually applying the pick, the
- * same belt-and-braces guard `changeDay` above already applies to the
- * arrows, in case a platform's native bounds enforcement ever disagrees.
+ * "‹  Heute · Mi., 23. Sep.  ›  [Heute]" — day-navigation header, unverändert
+ * seit 2026-09-24/25 (core/tracking/day-selection.ts#formatDayNavigationLabel
+ * trägt seit dem Gerätetest bereits die kurze Form).
  */
 function DayNavigationHeader({
   selectedLocalDate,
@@ -216,11 +223,7 @@ function DayNavigationHeader({
   onChange: (localDate: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const canGoBack = isSelectableDay(
-    addDaysToLocalDate(selectedLocalDate, -1),
-    earliestLocalDate,
-    todayLocalDate,
-  );
+  const canGoBack = isSelectableDay(addDaysToLocalDate(selectedLocalDate, -1), earliestLocalDate, todayLocalDate);
   const canGoNext = canGoToNextDay(selectedLocalDate, todayLocalDate);
   const isToday = selectedLocalDate === todayLocalDate;
 
@@ -284,22 +287,11 @@ function DayNavigationHeader({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  safeArea: { flex: 1, paddingHorizontal: Spacing.three },
-  content: {
-    gap: Spacing.three,
-    paddingTop: Spacing.three,
-  },
-  dayNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-  },
-  dayNavArrow: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  safeArea: { flex: 1 },
+  fixed: { gap: Spacing.two, paddingHorizontal: Spacing.three, paddingTop: Spacing.three },
+  timelineContent: { paddingHorizontal: Spacing.three, paddingTop: Spacing.two, paddingBottom: Spacing.three },
+  dayNav: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  dayNavArrow: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   dayNavArrowText: { fontSize: 24, fontWeight: '700' },
   dayNavLabel: { flex: 1, alignItems: 'center', paddingVertical: Spacing.one },
   dayNavToday: { paddingHorizontal: Spacing.one, paddingVertical: Spacing.one },

@@ -10,7 +10,7 @@
  * `secondsBetween` from core/time, the single allowed place for time math.
  */
 
-import { formatDuration, secondsBetween } from '@/core/time';
+import { formatDuration, recentDurationSeconds, secondsBetween } from '@/core/time';
 import {
   hasUnresolvedRunningConflict,
   isRunaway as isRunawayGeneric,
@@ -121,9 +121,16 @@ export function isRunaway(
   return isRunawayGeneric(feed.running_since, jetzt, thresholdHours);
 }
 
-/** "vor 2 h 15 min" — time since the last feed, in the same format as `formatDuration`. */
-export function formatSinceLastFeed(letzteMahlzeitUtcIso: string, jetzt: string): string {
-  return `vor ${formatDuration(secondsBetween(letzteMahlzeitUtcIso, jetzt))}`;
+/**
+ * "vor 2 h 15 min" — time since the last feed, in the same format as
+ * `formatDuration`. `null` once that feed is more than a day in the past
+ * (Gerätetest 2026-09-25, see core/time#recentDurationSeconds) — the
+ * caller falls back to a no-data label ("keine Mahlzeit erfasst") instead
+ * of showing a multi-day figure as if it were a live duration.
+ */
+export function formatSinceLastFeed(letzteMahlzeitUtcIso: string, jetzt: string): string | null {
+  const seconds = recentDurationSeconds(letzteMahlzeitUtcIso, jetzt);
+  return seconds === null ? null : `vor ${formatDuration(seconds)}`;
 }
 
 /**

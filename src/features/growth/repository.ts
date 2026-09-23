@@ -41,6 +41,20 @@ export function useGrowthInRange(
   return data ?? [];
 }
 
+/** Reactive: every growth measurement of one local calendar day (`local_date`, YYYY-MM-DD), oldest first — features/timeline (task 2026-09-26). */
+export function useGrowthOfDay(
+  childId: string | undefined,
+  localDate: string | undefined,
+): GrowthMeasurementRow[] {
+  const { data } = useQuery<GrowthMeasurementRow>(
+    `SELECT ${GROWTH_COLUMNS} FROM growth_measurements
+      WHERE child_id = ? AND local_date = ? AND deleted_at IS NULL
+      ORDER BY occurred_at ASC`,
+    [childId ?? '', localDate ?? ''],
+  );
+  return data ?? [];
+}
+
 /** One-shot: every non-deleted growth measurement since `sinceLocalDate` — CSV-Export (task requirement: die gesamte Historie seit Geburt). */
 export async function getGrowthForExport(
   db: AbstractPowerSyncDatabase,

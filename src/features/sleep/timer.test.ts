@@ -92,4 +92,8 @@ describe('formatAwakeSince', () => {
   it('formats elapsed time since the last sleep ended', () => {
     expect(formatAwakeSince('2026-08-08T09:00:00Z', '2026-08-08T10:10:00Z')).toBe('Wach seit 1 h 10 min');
   });
+
+  it('returns null once the last sleep is more than 24 hours in the past — Gerätetest 2026-09-25 ("Wach seit 993 h 53 min")', () => {
+    expect(formatAwakeSince('2026-08-11T00:00:00Z', '2026-09-25T17:53:00Z')).toBeNull();
+  });
 });

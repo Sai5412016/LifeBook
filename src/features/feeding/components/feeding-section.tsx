@@ -274,7 +274,12 @@ export function FeedingSection({
       statusText = `Pausiert · ${sideLabel}, ${formatDuration(elapsed.left + elapsed.right)}`;
     }
   } else if (lastCompletedFeed) {
-    statusText = `Letzte Mahlzeit ${formatSinceLastFeed(lastCompletedFeed.occurred_at, tickingNow)} · ${describeFeedAmount(lastCompletedFeed)}`;
+    const since = formatSinceLastFeed(lastCompletedFeed.occurred_at, tickingNow);
+    // Gerätetest 2026-09-25: eine Mahlzeit von vor Tagen/Wochen darf nicht
+    // als "vor 993 h" neben ihrer eigenen (dann ebenso veralteten) Menge
+    // erscheinen — in dem Fall lieber der Klartext allein, siehe
+    // feeding/timer.ts#formatSinceLastFeed.
+    statusText = since ? `Letzte Mahlzeit ${since} · ${describeFeedAmount(lastCompletedFeed)}` : 'keine Mahlzeit erfasst';
   } else {
     statusText = 'Noch keine Fütterung erfasst';
   }

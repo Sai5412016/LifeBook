@@ -13,7 +13,7 @@
  * feeding does, since there is no duration banking to add on top).
  */
 
-import { formatDuration, secondsBetween } from '@/core/time';
+import { formatDuration, recentDurationSeconds, secondsBetween } from '@/core/time';
 
 import type { SleepLocation } from './types';
 
@@ -76,7 +76,14 @@ export function formatSleepingSince(occurredAtUtcIso: string, jetzt: string): st
   return `Schläft seit ${formatDuration(secondsBetween(occurredAtUtcIso, jetzt))}`;
 }
 
-/** "Wach seit 1 h 10 min" — time since the last sleep ended. */
-export function formatAwakeSince(lastSleepEndedAtUtcIso: string, jetzt: string): string {
-  return `Wach seit ${formatDuration(secondsBetween(lastSleepEndedAtUtcIso, jetzt))}`;
+/**
+ * "Wach seit 1 h 10 min" — time since the last sleep ended. `null` once
+ * that sleep ended more than a day in the past (Gerätetest 2026-09-25:
+ * the app's only sleep entry, from 11.08.2026, was shown as "Wach seit
+ * 993 h 53 min" — see core/time#recentDurationSeconds). The caller falls
+ * back to a no-data label ("kein Schlaf erfasst") instead.
+ */
+export function formatAwakeSince(lastSleepEndedAtUtcIso: string, jetzt: string): string | null {
+  const seconds = recentDurationSeconds(lastSleepEndedAtUtcIso, jetzt);
+  return seconds === null ? null : `Wach seit ${formatDuration(seconds)}`;
 }

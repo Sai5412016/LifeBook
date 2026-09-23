@@ -18,6 +18,7 @@ import {
   localTimeToPickerDate,
   pickerDateToLocalDate,
   pickerDateToLocalTime,
+  recentDurationSeconds,
   resolveLogOccurredAt,
   secondsBetween,
 } from './index';
@@ -63,6 +64,24 @@ describe('formatShortDayLabel', () => {
 
   it('passes malformed input through untouched instead of inventing a date', () => {
     expect(formatShortDayLabel('nope')).toBe('nope');
+  });
+});
+
+describe('recentDurationSeconds', () => {
+  it('returns the elapsed seconds for a reference within the last 24 hours', () => {
+    expect(recentDurationSeconds('2026-09-25T10:00:00.000Z', '2026-09-25T12:00:00.000Z')).toBe(7200);
+  });
+
+  it('returns exactly 24 hours as still recent (boundary is exclusive on the OTHER side)', () => {
+    expect(recentDurationSeconds('2026-09-24T12:00:00.000Z', '2026-09-25T12:00:00.000Z')).toBe(24 * 3600);
+  });
+
+  it('returns null once the reference is more than 24 hours in the past', () => {
+    expect(recentDurationSeconds('2026-09-24T11:59:59.000Z', '2026-09-25T12:00:00.000Z')).toBeNull();
+  });
+
+  it('returns null for a reference 41 days in the past — the exact bug report (993 h)', () => {
+    expect(recentDurationSeconds('2026-08-11T00:00:00.000Z', '2026-09-25T17:53:00.000Z')).toBeNull();
   });
 });
 

@@ -207,3 +207,17 @@ export function usePumpingSessionsSince(
   );
   return { sessions: data ?? [], isLoading };
 }
+
+/** Reactive: every pumping session of one local calendar day (`local_date`, YYYY-MM-DD), oldest first — features/timeline (task 2026-09-26). */
+export function usePumpingOfDay(
+  childId: string | undefined,
+  localDate: string | undefined,
+): PumpingSessionRow[] {
+  const { data } = useQuery<PumpingSessionRow>(
+    `SELECT ${PUMPING_COLUMNS} FROM pumping_sessions
+      WHERE child_id = ? AND local_date = ? AND deleted_at IS NULL
+      ORDER BY occurred_at ASC`,
+    [childId ?? '', localDate ?? ''],
+  );
+  return data ?? [];
+}

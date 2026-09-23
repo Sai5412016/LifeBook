@@ -20,7 +20,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Spacing } from '@/constants/theme';
+import { Colors, Spacing } from '@/constants/theme';
 import { formatTimeLabel, nowUtcIso } from '@/core/time';
 import { formatBackfillHint } from '@/core/tracking/day-selection';
 import { softDeleteDiaper } from '@/features/diaper/repository';
@@ -30,7 +30,7 @@ import type { ActiveChild } from '@/features/household/repository';
 import { favoritenAusVerlauf } from '@/features/medication/logic';
 import type { MedicationFavorite } from '@/features/medication/logic';
 import { gabeLoeschen, useGabenHistorie } from '@/features/medication/repository';
-import { useUiColors, withAlpha } from '@/ui';
+import { lighten, useUiColors } from '@/ui';
 
 import { formatSnackbarLabel, isDoubleTap } from '../logic';
 import { schnellBrust, schnellFlasche, schnellMedikament, schnellWindel } from '../repository';
@@ -69,13 +69,19 @@ export function SchnellLeiste({
   // derselben). Mahlzeiten = accent (kräftig: Flasche, gedämpft: Brust),
   // Windeln = amber (kräftig: nass, gedämpft: Stuhl), Medizin = green als
   // eigene dritte Farbe — alle drei bereits Teil der Palette
-  // (constants/themes/oktopus.ts), keine neue erfunden. `withAlpha` blendet
-  // denselben Farbton nur ab, statt einen zweiten zu erfinden. Symbol und
-  // Beschriftung bleiben das zweite, farbunabhängige Unterscheidungsmerkmal.
+  // (constants/themes/oktopus.ts), keine neue erfunden.
+  //
+  // KORREKTUR Gerätetest 2026-09-25 (Befund 3b): `withAlpha(…, 0.6)` für die
+  // gedämpfte Stufe mischte auf dem dunklen Grund zu Schlammbraun — "Brust"
+  // und "Windel Stuhl" waren kaum zu unterscheiden. `lighten` mischt
+  // stattdessen bei VOLLER Deckkraft Richtung Weiß, unabhängig vom
+  // Hintergrund — dafür bekommen die beiden gedämpften Knöpfe eine dunkle
+  // Schriftfarbe statt der weißen der kräftigen Knöpfe (siehe SchnellButton
+  // unten), sonst wäre der Text auf der jetzt hellen Fläche kaum lesbar.
   const mealColor = accent;
-  const mealColorMuted = withAlpha(accent, 0.6);
+  const mealColorMuted = lighten(accent, 0.55);
   const diaperColor = amber;
-  const diaperColorMuted = withAlpha(amber, 0.6);
+  const diaperColorMuted = lighten(amber, 0.55);
   const medicationColor = green;
   const recentFeeds = useRecentFeedsForChild(child?.childId);
   const gabenHistorie = useGabenHistorie(child?.childId);
@@ -241,7 +247,14 @@ export function SchnellLeiste({
 
       <View style={styles.row}>
         <SchnellButton icon="🍼" label="Flasche" color={mealColor} onPress={handleFlasche} disabled={disabled} />
-        <SchnellButton icon="🤱" label="Brust" color={mealColorMuted} onPress={handleBrust} disabled={disabled} />
+        <SchnellButton
+          icon="🤱"
+          label="Brust"
+          color={mealColorMuted}
+          textColor={DARK_TEXT_ON_LIGHT}
+          onPress={handleBrust}
+          disabled={disabled}
+        />
         <SchnellButton
           icon="💧"
           label="Windel nass"
@@ -253,6 +266,7 @@ export function SchnellLeiste({
           icon="💩"
           label="Windel Stuhl"
           color={diaperColorMuted}
+          textColor={DARK_TEXT_ON_LIGHT}
           onPress={() => handleWindel('dirty')}
           disabled={disabled}
         />
@@ -268,16 +282,27 @@ export function SchnellLeiste({
   );
 }
 
+/**
+ * Feste dunkle Schrift für die gedämpften (aufgehellten) Knöpfe — nicht vom
+ * aktuellen Farbschema abhängig, weil die Fläche selbst durch `lighten`
+ * IMMER hell ist, unabhängig vom Dunkelmodus. `Colors.light.text` ist der
+ * bereits in der Palette definierte dunkle Ton für genau diesen Fall (helle
+ * Fläche, dunkle Schrift) — keine neue Farbe erfunden.
+ */
+const DARK_TEXT_ON_LIGHT = Colors.light.text;
+
 function SchnellButton({
   icon,
   label,
   color,
+  textColor = '#ffffff',
   onPress,
   disabled,
 }: {
   icon: string;
   label: string;
   color: string;
+  textColor?: string;
   onPress: () => void;
   disabled: boolean;
 }) {
@@ -300,7 +325,7 @@ function SchnellButton({
           (kein Leerzeichen zum Umbrechen). adjustsFontSizeToFit schrumpft die
           Schrift stattdessen so weit, bis das ganze Wort passt. */}
       <ThemedText
-        style={styles.buttonLabel}
+        style={[styles.buttonLabel, { color: textColor }]}
         numberOfLines={2}
         adjustsFontSizeToFit
         minimumFontScale={0.7}>
@@ -398,7 +423,9 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.4 },
   buttonPressed: { opacity: 0.85 },
   buttonIcon: { fontSize: 22, lineHeight: 26 },
-  buttonLabel: { fontSize: 11, fontWeight: '700', color: '#ffffff', textAlign: 'center' },
+  // Keine Farbe hier — die setzt jeder Knopf selbst (weiß bei kräftig, dunkel
+  // bei gedämpft/aufgehellt), siehe SchnellButton#textColor.
+  buttonLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
   sheet: {
     marginHorizontal: Spacing.three,
     marginTop: Spacing.two,
