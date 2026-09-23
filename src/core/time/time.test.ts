@@ -11,6 +11,7 @@ import {
   formatDayLabel,
   formatDayMonthLabel,
   formatDuration,
+  formatShortDayLabel,
   formatTimeLabel,
   isoWeekdayOfLocalDate,
   localDateToPickerDate,
@@ -48,6 +49,20 @@ describe('formatDayMonthLabel', () => {
 
   it('passes malformed input through untouched instead of inventing a date', () => {
     expect(formatDayMonthLabel('nope')).toBe('nope');
+  });
+});
+
+describe('formatShortDayLabel', () => {
+  it('renders an abbreviated German weekday and month, no year', () => {
+    expect(formatShortDayLabel('2026-09-23')).toBe('Mi., 23. Sep.');
+  });
+
+  it('does not shift the day at the start of the month', () => {
+    expect(formatShortDayLabel('2026-05-01')).toBe('Fr., 1. Mai');
+  });
+
+  it('passes malformed input through untouched instead of inventing a date', () => {
+    expect(formatShortDayLabel('nope')).toBe('nope');
   });
 });
 

@@ -52,6 +52,8 @@ import {
   usePushDiagnostics,
   type PushPermissionStatus,
 } from '@/core/notifications';
+import { readUpdateStatusInfo } from '@/core/app-info/device';
+import { formatUpdateStatusLabel } from '@/core/app-info/logic';
 import { supabase } from '@/core/supabase';
 import { formatTimeLabel } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
@@ -566,6 +568,23 @@ function AccountRow() {
   );
 }
 
+/**
+ * "Version 1.0.0 · Update a1b2c3d · 23.09.2026 14:12" — unaufdringliche
+ * Zeile ganz unten (task 2026-09-24): lässt den Nutzer selbst sehen, ob ein
+ * Funkupdate angekommen ist, ohne nach einem neuen Feature suchen zu
+ * müssen. `Updates.updateId`/`createdAt` sind pro App-Start feste Werte
+ * (siehe core/app-info/device.ts), deshalb hier einmalig gelesen statt über
+ * einen Hook/State.
+ */
+function UpdateStatusLine() {
+  const info = readUpdateStatusInfo();
+  return (
+    <ThemedText type="small" themeColor="textSecondary" style={styles.updateLine}>
+      {formatUpdateStatusLabel(info, deviceTimeZone())}
+    </ThemedText>
+  );
+}
+
 export default function EinstellungenScreen() {
   const { child } = useActiveChild();
 
@@ -598,6 +617,8 @@ export default function EinstellungenScreen() {
           </Pressable>
 
           <AccountRow />
+
+          <UpdateStatusLine />
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
@@ -624,4 +645,5 @@ const styles = StyleSheet.create({
   // No numberOfLines / ellipsizeMode anywhere here on purpose — this is the
   // full, unabridged error text, not a preview of it.
   errorText: { marginTop: Spacing.one },
+  updateLine: { textAlign: 'center', marginTop: Spacing.three },
 });
