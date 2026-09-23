@@ -180,3 +180,40 @@ export function useDiapersOfDay(
   );
   return { diapers: data ?? [], isLoading };
 }
+
+/**
+ * Reactive: every diaper entry with `local_date` in [fromLocalDate,
+ * toLocalDate] (inclusive) — feeds features/berichte/logic.ts#berichtBerechnen.
+ * Deliberately includes soft-deleted rows: berichtBerechnen does its OWN
+ * deleted_at filtering (same convention as
+ * features/medication/repository.ts#useGabenHistorie), so this is what
+ * actually exercises that rule at runtime instead of leaving it dead code
+ * behind a redundant SQL filter.
+ */
+export function useDiapersInRange(
+  childId: string | undefined,
+  fromLocalDate: string | undefined,
+  toLocalDate: string | undefined,
+): DiaperRow[] {
+  const { data } = useQuery<DiaperRow>(
+    `SELECT ${DIAPER_COLUMNS} FROM diapers
+      WHERE child_id = ? AND local_date >= ? AND local_date <= ?
+      ORDER BY occurred_at ASC`,
+    [childId ?? '', fromLocalDate ?? '', toLocalDate ?? ''],
+  );
+  return data ?? [];
+}
+
+/** One-shot: every non-deleted diaper entry since `sinceLocalDate` — CSV-Export (task requirement: die gesamte Historie seit Geburt, nicht nur der angezeigte Zeitraum). */
+export async function getDiapersForExport(
+  db: AbstractPowerSyncDatabase,
+  childId: string,
+  sinceLocalDate: string,
+): Promise<DiaperRow[]> {
+  return db.getAll<DiaperRow>(
+    `SELECT ${DIAPER_COLUMNS} FROM diapers
+      WHERE child_id = ? AND local_date >= ? AND deleted_at IS NULL
+      ORDER BY occurred_at ASC`,
+    [childId, sinceLocalDate],
+  );
+}

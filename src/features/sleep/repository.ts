@@ -314,3 +314,38 @@ export function useSleepsNeedingReview(childId: string | undefined): SleepRow[] 
   );
   return data ?? [];
 }
+
+/**
+ * Reactive: every sleep with `local_date` in [fromLocalDate, toLocalDate]
+ * (inclusive) — feeds features/berichte/logic.ts#berichtBerechnen.
+ * Deliberately includes soft-deleted rows, same convention as
+ * features/medication/repository.ts#useGabenHistorie — berichtBerechnen
+ * does its OWN deleted_at filtering.
+ */
+export function useSleepsInRange(
+  childId: string | undefined,
+  fromLocalDate: string | undefined,
+  toLocalDate: string | undefined,
+): SleepRow[] {
+  const { data } = useQuery<SleepRow>(
+    `SELECT ${SLEEP_COLUMNS} FROM sleeps
+      WHERE child_id = ? AND local_date >= ? AND local_date <= ?
+      ORDER BY occurred_at ASC`,
+    [childId ?? '', fromLocalDate ?? '', toLocalDate ?? ''],
+  );
+  return data ?? [];
+}
+
+/** One-shot: every non-deleted sleep since `sinceLocalDate` — CSV-Export (task requirement: die gesamte Historie seit Geburt). */
+export async function getSleepsForExport(
+  db: AbstractPowerSyncDatabase,
+  childId: string,
+  sinceLocalDate: string,
+): Promise<SleepRow[]> {
+  return db.getAll<SleepRow>(
+    `SELECT ${SLEEP_COLUMNS} FROM sleeps
+      WHERE child_id = ? AND local_date >= ? AND deleted_at IS NULL
+      ORDER BY occurred_at ASC`,
+    [childId, sinceLocalDate],
+  );
+}

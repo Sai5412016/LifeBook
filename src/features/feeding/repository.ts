@@ -531,3 +531,38 @@ export function useFeedsNeedingReview(childId: string | undefined): FeedRow[] {
   );
   return data ?? [];
 }
+
+/**
+ * Reactive: every feed with `local_date` in [fromLocalDate, toLocalDate]
+ * (inclusive) — feeds features/berichte/logic.ts#berichtBerechnen.
+ * Deliberately includes soft-deleted rows, same convention as
+ * features/medication/repository.ts#useGabenHistorie — berichtBerechnen
+ * does its OWN deleted_at filtering.
+ */
+export function useFeedsInRange(
+  childId: string | undefined,
+  fromLocalDate: string | undefined,
+  toLocalDate: string | undefined,
+): FeedRow[] {
+  const { data } = useQuery<FeedRow>(
+    `SELECT ${FEED_COLUMNS} FROM feeds
+      WHERE child_id = ? AND local_date >= ? AND local_date <= ?
+      ORDER BY occurred_at ASC`,
+    [childId ?? '', fromLocalDate ?? '', toLocalDate ?? ''],
+  );
+  return data ?? [];
+}
+
+/** One-shot: every non-deleted feed since `sinceLocalDate` — CSV-Export (task requirement: die gesamte Historie seit Geburt). */
+export async function getFeedsForExport(
+  db: AbstractPowerSyncDatabase,
+  childId: string,
+  sinceLocalDate: string,
+): Promise<FeedRow[]> {
+  return db.getAll<FeedRow>(
+    `SELECT ${FEED_COLUMNS} FROM feeds
+      WHERE child_id = ? AND local_date >= ? AND deleted_at IS NULL
+      ORDER BY occurred_at ASC`,
+    [childId, sinceLocalDate],
+  );
+}

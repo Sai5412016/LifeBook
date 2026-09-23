@@ -74,7 +74,19 @@ export function summarizeDiapersOfDay(diapers: readonly { kind: DiaperKind }[]):
   return { wet, dirty };
 }
 
-/** "Heute: 6 nass, 3 Stuhl" — the exact line a midwife asks for, no scrolling needed. */
-export function formatDiaperSummaryLabel(summary: DiaperDaySummary): string {
-  return `Heute: ${summary.wet} nass, ${summary.dirty} Stuhl`;
+/** "21.9." — compact day.month, no zero-padding, no year, for a past-day tally header. Pure string parsing, no `new Date()` — nothing here needs a timezone. */
+function formatCompactDayMonth(localDate: string): string {
+  const [, month, day] = localDate.split('-');
+  return `${Number(day)}.${Number(month)}.`;
+}
+
+/**
+ * "Heute: 6 nass, 3 Stuhl" (heute gewählt) / "21.9.: 6 nass, 3 Stuhl" (ein
+ * anderer Tag) — the exact line a midwife asks for, no scrolling needed.
+ * Korrektur 2026-09-25: war zuvor fest auf "Heute:", auch auf vergangenen
+ * Tagen im Alltag-Tab-Tageswähler falsch.
+ */
+export function formatDiaperSummaryLabel(summary: DiaperDaySummary, isToday: boolean, localDate: string): string {
+  const dayPrefix = isToday ? 'Heute' : formatCompactDayMonth(localDate);
+  return `${dayPrefix}: ${summary.wet} nass, ${summary.dirty} Stuhl`;
 }

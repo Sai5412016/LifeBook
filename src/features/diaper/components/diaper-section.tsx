@@ -158,7 +158,9 @@ export function DiaperSection({ child, session, tz, selectedLocalDate }: DiaperS
       {/* The tally a midwife asks for — kept right after the buttons, before
           the (potentially long) list below, so it never needs scrolling to
           find within this section. */}
-      <ThemedText type="smallBold">{formatDiaperSummaryLabel(summary)}</ThemedText>
+      <ThemedText type="smallBold">
+        {formatDiaperSummaryLabel(summary, isViewingToday, selectedLocalDate)}
+      </ThemedText>
 
       {editTarget ? (
         <DiaperEditPanel

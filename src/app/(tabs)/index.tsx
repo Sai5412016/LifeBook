@@ -150,6 +150,17 @@ export default function StartScreen() {
             </Pressable>
           ) : null}
 
+          {child ? (
+            <Pressable onPress={() => router.push('/berichte')}>
+              <ThemedView type="backgroundElement" style={styles.card}>
+                <ThemedText type="smallBold">Berichte & Export</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Wochen- und Monatsübersicht, CSV-Export
+                </ThemedText>
+              </ThemedView>
+            </Pressable>
+          ) : null}
+
           <ThemedText type="smallBold" style={styles.stripTitle}>
             Neueste Fotos
           </ThemedText>

@@ -68,11 +68,19 @@ describe('summarizeDiapersOfDay', () => {
 });
 
 describe('formatDiaperSummaryLabel', () => {
-  it('matches the exact wording a midwife asks for', () => {
-    expect(formatDiaperSummaryLabel({ wet: 6, dirty: 3 })).toBe('Heute: 6 nass, 3 Stuhl');
+  it('matches the exact wording a midwife asks for, when the selected day is today', () => {
+    expect(formatDiaperSummaryLabel({ wet: 6, dirty: 3 }, true, '2026-09-23')).toBe('Heute: 6 nass, 3 Stuhl');
   });
 
   it('handles zero counts without special-casing', () => {
-    expect(formatDiaperSummaryLabel({ wet: 0, dirty: 0 })).toBe('Heute: 0 nass, 0 Stuhl');
+    expect(formatDiaperSummaryLabel({ wet: 0, dirty: 0 }, true, '2026-09-23')).toBe('Heute: 0 nass, 0 Stuhl');
+  });
+
+  it('shows the compact date instead of "Heute" for a past selected day (Korrektur 2026-09-25)', () => {
+    expect(formatDiaperSummaryLabel({ wet: 6, dirty: 3 }, false, '2026-09-21')).toBe('21.9.: 6 nass, 3 Stuhl');
+  });
+
+  it('does not zero-pad the compact date', () => {
+    expect(formatDiaperSummaryLabel({ wet: 1, dirty: 0 }, false, '2026-01-05')).toBe('5.1.: 1 nass, 0 Stuhl');
   });
 });

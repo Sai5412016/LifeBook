@@ -190,14 +190,42 @@ export function letzteGabeHeute<T extends MedicationTodayEntry>(
   return latest;
 }
 
-/** "Heute 09:12 · Tamara" — the button's third line once a favorite has already been given today. */
-export function formatGivenTodayLabel(givenAtUtcIso: string, tz: string, firstName: string): string {
-  return `Heute ${formatTimeLabel(givenAtUtcIso, tz)} · ${firstName}`;
+/**
+ * "Heute 09:12 · Tamara" (heute gewählt) / "21. September 09:12 · Tamara"
+ * (ein anderer Tag) — the button's third line once a favorite has already
+ * been given on the currently selected day. Generalized 2026-09-25 for
+ * consistency with the day-aware doppelgabe-Schutz (formatDuplicateDoseWarning) —
+ * the underlying check now considers any selected day, so this label
+ * follows the same rule rather than staying silently wrong on a past day.
+ */
+export function formatGivenTodayLabel(
+  givenAtUtcIso: string,
+  tz: string,
+  firstName: string,
+  isToday: boolean,
+  dayMonthLabel: string,
+): string {
+  const dayPrefix = isToday ? 'Heute' : dayMonthLabel;
+  return `${dayPrefix} ${formatTimeLabel(givenAtUtcIso, tz)} · ${firstName}`;
 }
 
-/** "Heute um 09:12 bereits gegeben. Wirklich noch einmal?" — the doppelgabe confirmation's exact wording. */
-export function formatDuplicateDoseWarning(givenAtUtcIso: string, tz: string): string {
-  return `Heute um ${formatTimeLabel(givenAtUtcIso, tz)} bereits gegeben. Wirklich noch einmal?`;
+/**
+ * "Heute um 09:12 bereits gegeben. Wirklich noch einmal?" (gewählter Tag ist
+ * heute) / "Am 21. September um 09:12 bereits gegeben. Wirklich noch
+ * einmal?" (ein anderer Tag) — the doppelgabe confirmation's exact wording.
+ * 2026-09-25: der Schutz prüft jetzt den GEWÄHLTEN Tag, nicht mehr nur
+ * heute (Korrektur aus der letzten Runde) — `isToday`/`dayMonthLabel` are
+ * the caller's own day-selector state
+ * (core/tracking/day-selection.ts/core/time#formatDayMonthLabel).
+ */
+export function formatDuplicateDoseWarning(
+  givenAtUtcIso: string,
+  tz: string,
+  isToday: boolean,
+  dayMonthLabel: string,
+): string {
+  const dayPrefix = isToday ? 'Heute' : `Am ${dayMonthLabel}`;
+  return `${dayPrefix} um ${formatTimeLabel(givenAtUtcIso, tz)} bereits gegeben. Wirklich noch einmal?`;
 }
 
 export type ResolvedGabeOccurredAt = { occurredAtUtcIso: string; localDate: string };
