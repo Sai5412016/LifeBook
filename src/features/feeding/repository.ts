@@ -375,8 +375,15 @@ export type LogBottleInput = {
   childId: string;
   userId: string;
   tz: string;
-  amountMl: number;
+  /** `null` when no amount is known yet — schnelleingabe/repository.ts#schnellFlasche, corrected later via the full form. */
+  amountMl: number | null;
   kind: BottleKind;
+  /**
+   * 0 | 1 — "menge noch nicht geprüft" (task 2026-09-23: schnelleingabe).
+   * Defaults to 0 — the full Fläschchen-Formular already collects a
+   * confirmed amount, so its own calls need not pass this at all.
+   */
+  needsReview?: number;
   /**
    * Explicit local date + time to log at instead of "jetzt" — Alltag's day
    * selector, for backdating (Nachtragen) to a past day. Omitted (or a
@@ -389,8 +396,10 @@ export type LogBottleInput = {
   time?: string;
 };
 
+export type LoggedFeed = { id: string; occurredAtUtcIso: string; localDate: string };
+
 /** Logs a completed bottle feed — no timer involved. */
-export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleInput): Promise<void> {
+export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleInput): Promise<LoggedFeed> {
   const { occurredAtUtcIso, localDate } = resolveLogOccurredAt(
     input.tz,
     input.localDate && input.time ? { localDate: input.localDate, time: input.time } : undefined,
@@ -425,11 +434,81 @@ export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleI
       null,
       occurredAtUtcIso,
       0,
-      0,
+      input.needsReview ?? 0,
       null,
       null,
     ],
   );
+
+  return { id: feedId, occurredAtUtcIso, localDate };
+}
+
+export type LogInstantBreastFeedInput = {
+  householdId: string;
+  childId: string;
+  userId: string;
+  tz: string;
+  /** breast_left | breast_right | breast_both — the caller (schnelleingabe) already resolved which one, see ../schnelleingabe/logic.ts#letzterBrusttyp. */
+  feedType: FeedType;
+  /** 0 | 1 — "menge noch nicht geprüft", same convention as LogBottleInput#needsReview. Defaults to 0. */
+  needsReview?: number;
+  localDate?: string;
+  time?: string;
+};
+
+/**
+ * Logs a COMPLETED breastfeed with no duration — the quick-entry bar's
+ * "Brust" button (task 2026-09-23). Unlike `startBreastFeed`, this never
+ * becomes a running timer: `ended_at` is stamped to the same instant as
+ * `occurred_at` right away, so it can never show up as an open session
+ * (`useOpenFeed`) or a running-timer conflict candidate — the two write
+ * paths are deliberately independent, not a zero-duration case of
+ * `startBreastFeed`/`endFeed`.
+ */
+export async function logInstantBreastFeed(
+  db: AbstractPowerSyncDatabase,
+  input: LogInstantBreastFeedInput,
+): Promise<LoggedFeed> {
+  const { occurredAtUtcIso, localDate } = resolveLogOccurredAt(
+    input.tz,
+    input.localDate && input.time ? { localDate: input.localDate, time: input.time } : undefined,
+  );
+  const now = nowUtcIso();
+  const feedId = newId();
+
+  await db.execute(
+    `INSERT INTO feeds (
+       id, household_id, child_id, occurred_at, tz, local_date, created_by,
+       created_at, updated_at, deleted_at, source_device_id, note,
+       feed_type, amount_ml, duration_left_s, duration_right_s, ended_at,
+       is_running, needs_review, running_side, running_since
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      feedId,
+      input.householdId,
+      input.childId,
+      occurredAtUtcIso,
+      input.tz,
+      localDate,
+      input.userId,
+      now,
+      now,
+      null,
+      null,
+      null,
+      input.feedType,
+      null,
+      null,
+      null,
+      occurredAtUtcIso,
+      0,
+      input.needsReview ?? 0,
+      null,
+      null,
+    ],
+  );
+
+  return { id: feedId, occurredAtUtcIso, localDate };
 }
 
 /**
@@ -528,6 +607,25 @@ export function useFeedsNeedingReview(childId: string | undefined): FeedRow[] {
       WHERE child_id = ? AND deleted_at IS NULL AND needs_review = 1
       ORDER BY occurred_at DESC`,
     [childId ?? ''],
+  );
+  return data ?? [];
+}
+
+/**
+ * Reactive: a child's most recent feeds (any day), newest first — the
+ * quick-entry bar's own source of "last used" defaults
+ * (features/schnelleingabe/logic.ts#letzterFlaschentyp/letzterBrusttyp).
+ * `limit` keeps this cheap: the last-used bottle/breast type is always among
+ * the very newest rows in practice, and this feeds a live UI default, not a
+ * report that must see every feed ever.
+ */
+export function useRecentFeedsForChild(childId: string | undefined, limit = 20): FeedRow[] {
+  const { data } = useQuery<FeedRow>(
+    `SELECT ${FEED_COLUMNS} FROM feeds
+      WHERE child_id = ? AND deleted_at IS NULL
+      ORDER BY occurred_at DESC
+      LIMIT ?`,
+    [childId ?? '', limit],
   );
   return data ?? [];
 }

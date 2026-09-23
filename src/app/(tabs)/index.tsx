@@ -18,7 +18,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
+import { useAuth } from '@/core/auth/session-store';
 import { ageInDays, formatDayLabel, formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
+import { deviceTimeZone } from '@/core/time/device';
 import {
   formatHeadCircumferenceCm,
   formatLengthCm,
@@ -33,14 +35,20 @@ import { formatDayAndWeekLabel, resolveFullscreenUri } from '@/features/photos/i
 import { useSignedUrls } from '@/features/photos/hooks';
 import { usePhotosOfChild } from '@/features/photos/repository';
 import type { PhotoRow } from '@/features/photos/types';
+import { SchnellLeiste } from '@/features/schnelleingabe/components/schnell-leiste';
 
 /** How many of the newest photos the strip shows. */
 const PHOTO_STRIP_COUNT = 5;
 
 export default function StartScreen() {
+  const { session } = useAuth();
   const { child, isLoading: childLoading } = useActiveChild();
   const { photos } = usePhotosOfChild(child?.childId);
   const { people } = usePeopleOfChild(child?.childId);
+  const tz = deviceTimeZone();
+  // Die Karte hier kennt keine Tageswahl (die gibt es nur im Alltag-Tab) —
+  // sie bucht deshalb immer auf "heute" (task 2026-09-23).
+  const todayLocalDate = toLocalDate(nowUtcIso(), tz);
 
   // avatar_photo_id if set, otherwise the newest photo (`photos` is already
   // occurred_at DESC — see repository.ts#usePhotosOfChild).
@@ -132,6 +140,24 @@ export default function StartScreen() {
               minimumFontScale={0.6}>
               {formatDayAndWeekLabel(todayAgeDays)}
             </ThemedText>
+          ) : null}
+
+          {child ? (
+            <View style={styles.schnellCard}>
+              <SchnellLeiste
+                child={child}
+                session={session}
+                tz={tz}
+                selectedLocalDate={todayLocalDate}
+                todayLocalDate={todayLocalDate}
+                onRequestEdit={(kind, id) =>
+                  router.push({
+                    pathname: '/alltag',
+                    params: { editKind: kind, editId: id, editToken: String(Date.now()) },
+                  })
+                }
+              />
+            </View>
           ) : null}
 
           {child ? (
@@ -290,6 +316,10 @@ const styles = StyleSheet.create({
     marginTop: Spacing.one,
   },
   name: { textAlign: 'center', marginTop: Spacing.three },
+  // SchnellLeiste bringt ihr eigenes horizontales Innenabstandsmaß schon mit
+  // (für den Einsatz als Fuß im Alltag-Tab) — hier als Karte nur der
+  // senkrechte Abstand zu Alter/Geburtsdaten-Karte, keine zweite Umrandung.
+  schnellCard: { marginTop: Spacing.three, marginHorizontal: -Spacing.three },
   age: { textAlign: 'center' },
   card: {
     gap: Spacing.one,

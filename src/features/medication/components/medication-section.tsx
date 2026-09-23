@@ -15,7 +15,7 @@
 import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -71,9 +71,22 @@ export type MedicationSectionProps = {
   tz: string;
   /** The Alltag day selector's currently viewed day — task 2026-09-24. */
   selectedLocalDate: string;
+  /**
+   * "Ändern" tapped on a schnelleingabe snackbar for a Medikament entry —
+   * opens this section's own edit panel for that id. `token` changes on
+   * every request so the SAME entry can be requested again after closing
+   * the panel (task 2026-09-23, schnelleingabe/components/schnell-leiste.tsx).
+   */
+  requestedEdit?: { id: string; token: number } | null;
 };
 
-export function MedicationSection({ child, session, tz, selectedLocalDate }: MedicationSectionProps) {
+export function MedicationSection({
+  child,
+  session,
+  tz,
+  selectedLocalDate,
+  requestedEdit,
+}: MedicationSectionProps) {
   const db = usePowerSync();
   const { accent } = useUiColors();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
@@ -88,6 +101,13 @@ export function MedicationSection({ child, session, tz, selectedLocalDate }: Med
   const [creating, setCreating] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const messageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (requestedEdit) {
+      setEditId(requestedEdit.id);
+      setCreating(false);
+    }
+  }, [requestedEdit?.id, requestedEdit?.token]);
 
   const showMessage = useCallback((text: string) => {
     if (messageTimeoutRef.current) {

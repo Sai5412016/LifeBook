@@ -15,7 +15,7 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -65,9 +65,24 @@ export type FeedingSectionProps = {
   tickingNow: string;
   /** The Alltag day selector's currently viewed day — task 2026-09-24. */
   selectedLocalDate: string;
+  /**
+   * "Ändern" tapped on a schnelleingabe snackbar for a Flasche/Brust entry —
+   * opens this section's own edit panel for that id, bottle or breast alike
+   * (`FeedEditPanel` already branches on `feed.feed_type`). `token` changes
+   * on every request so the SAME entry can be requested again after closing
+   * the panel (task 2026-09-23, schnelleingabe/components/schnell-leiste.tsx).
+   */
+  requestedEdit?: { id: string; token: number } | null;
 };
 
-export function FeedingSection({ child, session, tz, tickingNow, selectedLocalDate }: FeedingSectionProps) {
+export function FeedingSection({
+  child,
+  session,
+  tz,
+  tickingNow,
+  selectedLocalDate,
+  requestedEdit,
+}: FeedingSectionProps) {
   const db = usePowerSync();
   const { accent, amber, green } = useUiColors();
 
@@ -87,6 +102,14 @@ export function FeedingSection({ child, session, tz, tickingNow, selectedLocalDa
   const [reviewFeedIdOpen, setReviewFeedIdOpen] = useState<string | null>(null);
   const [editFeedId, setEditFeedId] = useState<string | null>(null);
   const [runawayDismissedFeedId, setRunawayDismissedFeedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (requestedEdit) {
+      setEditFeedId(requestedEdit.id);
+      setBottleFormOpen(false);
+      setReviewFeedIdOpen(null);
+    }
+  }, [requestedEdit?.id, requestedEdit?.token]);
 
   const handleStart = useCallback(
     async (side: FeedSide) => {
@@ -692,7 +715,6 @@ function TodayFeedRow({
     feed.is_running === 1
       ? formatDuration(elapsedSeconds(feed, tickingNow).left + elapsedSeconds(feed, tickingNow).right)
       : describeFeedAmount(feed);
-  const { amber } = useUiColors();
 
   return (
     <Pressable onPress={onPress}>
@@ -706,7 +728,18 @@ function TodayFeedRow({
         <ThemedText type="small" themeColor="textSecondary">
           {amountLabel}
         </ThemedText>
-        {feed.needs_review === 1 ? <ThemedText style={{ color: amber }}> ⚠</ThemedText> : null}
+        {/* "Menge/Angabe noch nicht geprüft" — bewusst kein Ausrufezeichen
+            und keine Warnfarbe (task 2026-09-23: ein fehlender Wert ist kein
+            Fehler des Nutzers). needs_review deckt seit diesem Task zwei
+            Ursachen ab, Timer-Konflikt (Spec §6.2) und Schnelleingabe, beide
+            bekommen denselben, zurückhaltenden Marker — die Spalte
+            unterscheidet die Ursache nicht, also auch nicht die Anzeige. */}
+        {feed.needs_review === 1 ? (
+          <ThemedText themeColor="textSecondary" accessibilityLabel="Noch nicht geprüft">
+            {' '}
+            ○
+          </ThemedText>
+        ) : null}
       </ThemedView>
     </Pressable>
   );
