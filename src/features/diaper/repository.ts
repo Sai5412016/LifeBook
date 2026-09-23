@@ -15,7 +15,7 @@ import { useQuery } from '@powersync/react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 
 import { newId } from '@/core/db/ids';
-import { combineLocalDateAndTime, nowUtcIso, toLocalDate } from '@/core/time';
+import { combineLocalDateAndTime, nowUtcIso, resolveLogOccurredAt, toLocalDate } from '@/core/time';
 
 import type { DiaperColor, DiaperConsistency, DiaperKind, DiaperRow } from './types';
 
@@ -43,20 +43,31 @@ export type LogDiaperInput = {
   userId: string;
   tz: string;
   kind: DiaperKind;
+  /**
+   * Explicit local date + time to log at instead of "jetzt" — Alltag's day
+   * selector, for backdating (Nachtragen) to a past day. Omitted (or a
+   * malformed pair) falls back to `nowUtcIso()`, exactly the previous
+   * behaviour — see core/time#resolveLogOccurredAt.
+   */
+  localDate?: string;
+  time?: string;
 };
 
 /**
- * Logs a diaper change immediately, at the current time, with no details —
- * the common case that must work one-handed without a follow-up question.
- * Returns the new row's id so the caller can offer to add details right
- * after, without a second query.
+ * Logs a diaper change immediately, with no details — the common case that
+ * must work one-handed without a follow-up question. Returns the new row's
+ * id so the caller can offer to add details right after, without a second
+ * query.
  */
 export async function logDiaper(
   db: AbstractPowerSyncDatabase,
   input: LogDiaperInput,
 ): Promise<string> {
+  const { occurredAtUtcIso, localDate } = resolveLogOccurredAt(
+    input.tz,
+    input.localDate && input.time ? { localDate: input.localDate, time: input.time } : undefined,
+  );
   const now = nowUtcIso();
-  const localDate = toLocalDate(now, input.tz);
   const diaperId = newId();
 
   await db.execute(
@@ -69,7 +80,7 @@ export async function logDiaper(
       diaperId,
       input.householdId,
       input.childId,
-      now,
+      occurredAtUtcIso,
       input.tz,
       localDate,
       input.userId,

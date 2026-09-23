@@ -21,7 +21,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-nat
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { formatTimeLabel, toLocalDate } from '@/core/time';
+import { formatDayMonthLabel, formatTimeLabel, toLocalDate } from '@/core/time';
+import { canStartRunningEntry } from '@/core/tracking/day-selection';
 import type { ActiveChild } from '@/features/household/repository';
 import {
   acknowledgeReviewFlag,
@@ -54,14 +55,19 @@ import {
 import type { BottleKind, FeedRow, FeedSide } from '@/features/feeding/types';
 import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
+/** Default wall-clock time a backdated (Nachtragen) Fläschchen gets — task requirement, changeable afterwards via the edit panel. */
+const BACKFILL_TIME = '12:00';
+
 export type FeedingSectionProps = {
   child: ActiveChild | null;
   session: Session | null;
   tz: string;
   tickingNow: string;
+  /** The Alltag day selector's currently viewed day — task 2026-09-24. */
+  selectedLocalDate: string;
 };
 
-export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectionProps) {
+export function FeedingSection({ child, session, tz, tickingNow, selectedLocalDate }: FeedingSectionProps) {
   const db = usePowerSync();
   const { accent, amber, green } = useUiColors();
 
@@ -72,7 +78,8 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
   const { feed: openFeed, isLoading: openLoading } = useOpenFeed(child?.childId);
   const { feed: lastCompletedFeed } = useLastCompletedFeed(child?.childId);
   const todayLocalDate = toLocalDate(tickingNow, tz);
-  const { feeds: todayFeeds } = useFeedsOfDay(child?.childId, todayLocalDate);
+  const isViewingToday = selectedLocalDate === todayLocalDate;
+  const { feeds: selectedDayFeeds } = useFeedsOfDay(child?.childId, selectedLocalDate);
   const reviewFeeds = useFeedsNeedingReview(child?.childId);
 
   const [busy, setBusy] = useState(false);
@@ -83,7 +90,10 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
 
   const handleStart = useCallback(
     async (side: FeedSide) => {
-      if (!child || !session?.user.id) return;
+      // Laufende Einträge dürfen nur heute gestartet werden (task
+      // requirement) — der Knopf ist dafür schon ausgegraut, diese Prüfung
+      // ist das zusätzliche Netz.
+      if (!child || !session?.user.id || !canStartRunningEntry(selectedLocalDate, todayLocalDate)) return;
       setBusy(true);
       try {
         await startBreastFeed(db, {
@@ -99,7 +109,7 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
         setBusy(false);
       }
     },
-    [child, session?.user.id, db, tz],
+    [child, session?.user.id, db, tz, selectedLocalDate, todayLocalDate],
   );
 
   const handleSwitchSide = useCallback(async () => {
@@ -149,13 +159,14 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
           tz,
           amountMl,
           kind,
+          ...(isViewingToday ? {} : { localDate: selectedLocalDate, time: BACKFILL_TIME }),
         });
         setBottleFormOpen(false);
       } finally {
         setBusy(false);
       }
     },
-    [child, session?.user.id, db, tz],
+    [child, session?.user.id, db, tz, isViewingToday, selectedLocalDate],
   );
 
   const handleAcknowledgeReview = useCallback(
@@ -248,7 +259,7 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
   const reviewFeedOpen = reviewFeedIdOpen
     ? reviewFeeds.find((feed) => feed.id === reviewFeedIdOpen)
     : undefined;
-  const editFeedTarget = editFeedId ? todayFeeds.find((feed) => feed.id === editFeedId) : undefined;
+  const editFeedTarget = editFeedId ? selectedDayFeeds.find((feed) => feed.id === editFeedId) : undefined;
 
   return (
     <View style={styles.section}>
@@ -304,13 +315,13 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
             label="Stillen links"
             color={accent}
             onPress={() => handleStart('left')}
-            disabled={busy || !child}
+            disabled={busy || !child || !canStartRunningEntry(selectedLocalDate, todayLocalDate)}
           />
           <BigButton
             label="Stillen rechts"
             color={accent}
             onPress={() => handleStart('right')}
-            disabled={busy || !child}
+            disabled={busy || !child || !canStartRunningEntry(selectedLocalDate, todayLocalDate)}
           />
           <BigButton
             label="Fläschchen"
@@ -326,7 +337,7 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
       )}
 
       <ThemedText type="smallBold" style={styles.listTitle}>
-        Heute
+        {isViewingToday ? 'Heute' : formatDayMonthLabel(selectedLocalDate)}
       </ThemedText>
 
       {editFeedTarget ? (
@@ -339,13 +350,13 @@ export function FeedingSection({ child, session, tz, tickingNow }: FeedingSectio
         />
       ) : null}
 
-      {todayFeeds.length === 0 ? (
+      {selectedDayFeeds.length === 0 ? (
         <ThemedText type="small" themeColor="textSecondary">
-          Noch keine Fütterung heute.
+          {isViewingToday ? 'Noch keine Fütterung heute.' : `Noch keine Fütterung am ${formatDayMonthLabel(selectedLocalDate)}.`}
         </ThemedText>
       ) : (
         <View style={styles.list}>
-          {[...todayFeeds].reverse().map((feed) => (
+          {[...selectedDayFeeds].reverse().map((feed) => (
             <TodayFeedRow
               key={feed.id}
               feed={feed}

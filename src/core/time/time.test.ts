@@ -9,12 +9,14 @@ import {
   epochMillisToUtcIso,
   exifWallClockToUtcIso,
   formatDayLabel,
+  formatDayMonthLabel,
   formatDuration,
   formatTimeLabel,
   localDateToPickerDate,
   localTimeToPickerDate,
   pickerDateToLocalDate,
   pickerDateToLocalTime,
+  resolveLogOccurredAt,
   secondsBetween,
 } from './index';
 
@@ -31,6 +33,20 @@ describe('formatDayLabel', () => {
 
   it('passes malformed input through untouched instead of inventing a date', () => {
     expect(formatDayLabel('nope')).toBe('nope');
+  });
+});
+
+describe('formatDayMonthLabel', () => {
+  it('renders day and month only, no year or weekday', () => {
+    expect(formatDayMonthLabel('2026-09-21')).toBe('21. September');
+  });
+
+  it('does not shift the day at the start of the month', () => {
+    expect(formatDayMonthLabel('2026-01-01')).toBe('1. Januar');
+  });
+
+  it('passes malformed input through untouched instead of inventing a date', () => {
+    expect(formatDayMonthLabel('nope')).toBe('nope');
   });
 });
 
@@ -150,6 +166,33 @@ describe('combineLocalDateAndTime', () => {
 
   it('returns null for an unknown timezone rather than a wrong instant', () => {
     expect(combineLocalDateAndTime('2026-08-08', '14:32', 'Mars/Olympus')).toBeNull();
+  });
+});
+
+describe('resolveLogOccurredAt', () => {
+  it('resolves an explicit backdate to that date/time, not to now', () => {
+    expect(resolveLogOccurredAt(BERLIN, { localDate: '2026-09-20', time: '12:00' })).toEqual({
+      occurredAtUtcIso: '2026-09-20T10:00:00.000Z',
+      localDate: '2026-09-20',
+    });
+  });
+
+  it('falls back to nowUtcIso() when no backdate is given', () => {
+    const before = Date.now();
+    const result = resolveLogOccurredAt(BERLIN);
+    const after = Date.now();
+
+    const resolvedMs = new Date(result.occurredAtUtcIso).getTime();
+    expect(resolvedMs).toBeGreaterThanOrEqual(before);
+    expect(resolvedMs).toBeLessThanOrEqual(after);
+    expect(result.localDate).toBe(toLocalDate(result.occurredAtUtcIso, BERLIN));
+  });
+
+  it('falls back to now for a malformed backdate rather than failing the write', () => {
+    const result = resolveLogOccurredAt(BERLIN, { localDate: 'not-a-date', time: '12:00' });
+    expect(result.localDate).toBe(toLocalDate(result.occurredAtUtcIso, BERLIN));
+    // A malformed backdate must not silently become a bogus far-past/future instant.
+    expect(Math.abs(Date.now() - new Date(result.occurredAtUtcIso).getTime())).toBeLessThan(5000);
   });
 });
 

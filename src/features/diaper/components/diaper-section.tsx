@@ -16,7 +16,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
+import { formatDayMonthLabel, formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
 import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 
@@ -34,18 +34,23 @@ import type { DiaperColor, DiaperConsistency, DiaperKind, DiaperRow } from '../t
 const KIND_OPTIONS: readonly DiaperKind[] = ['wet', 'dirty', 'both'];
 const CONSISTENCY_OPTIONS: readonly DiaperConsistency[] = ['liquid', 'soft', 'formed', 'hard'];
 const COLOR_OPTIONS: readonly DiaperColor[] = ['yellow', 'green', 'brown', 'black', 'red', 'white'];
+/** Default wall-clock time a backdated (Nachtragen) quick-log gets — task requirement, changeable afterwards via the edit panel. */
+const BACKFILL_TIME = '12:00';
 
 export type DiaperSectionProps = {
   child: ActiveChild | null;
   session: Session | null;
   tz: string;
+  /** The Alltag day selector's currently viewed day — task 2026-09-24. */
+  selectedLocalDate: string;
 };
 
-export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
+export function DiaperSection({ child, session, tz, selectedLocalDate }: DiaperSectionProps) {
   const db = usePowerSync();
   const { accent, amber, green } = useUiColors();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
-  const { diapers: todayDiapers } = useDiapersOfDay(child?.childId, todayLocalDate);
+  const isViewingToday = selectedLocalDate === todayLocalDate;
+  const { diapers: selectedDayDiapers } = useDiapersOfDay(child?.childId, selectedLocalDate);
 
   const [busy, setBusy] = useState(false);
   const [detailsPromptId, setDetailsPromptId] = useState<string | null>(null);
@@ -56,12 +61,16 @@ export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
       if (!child || !session?.user.id) return;
       setBusy(true);
       try {
+        // gewählter Tag = heute -> aktuelle Uhrzeit, wie bisher (kein
+        // explizites localDate/time, logDiaper fällt auf nowUtcIso()
+        // zurück); ein vergangener Tag trägt bei 12:00 mittags nach.
         const diaperId = await logDiaper(db, {
           householdId: child.householdId,
           childId: child.childId,
           userId: session.user.id,
           tz,
           kind,
+          ...(isViewingToday ? {} : { localDate: selectedLocalDate, time: BACKFILL_TIME }),
         });
         setDetailsPromptId(diaperId);
         setEditDiaperId(null);
@@ -71,7 +80,7 @@ export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
         setBusy(false);
       }
     },
-    [child, session?.user.id, db, tz],
+    [child, session?.user.id, db, tz, isViewingToday, selectedLocalDate, todayLocalDate],
   );
 
   const handleSaveDetails = useCallback(
@@ -125,8 +134,10 @@ export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
     [db],
   );
 
-  const summary = summarizeDiapersOfDay(todayDiapers);
-  const editTarget = editDiaperId ? todayDiapers.find((diaper) => diaper.id === editDiaperId) : undefined;
+  const summary = summarizeDiapersOfDay(selectedDayDiapers);
+  const editTarget = editDiaperId
+    ? selectedDayDiapers.find((diaper) => diaper.id === editDiaperId)
+    : undefined;
 
   return (
     <View style={styles.section}>
@@ -159,13 +170,13 @@ export function DiaperSection({ child, session, tz }: DiaperSectionProps) {
         />
       ) : null}
 
-      {todayDiapers.length === 0 ? (
+      {selectedDayDiapers.length === 0 ? (
         <ThemedText type="small" themeColor="textSecondary">
-          Noch kein Wickeln heute.
+          {isViewingToday ? 'Noch kein Wickeln heute.' : `Noch kein Wickeln am ${formatDayMonthLabel(selectedLocalDate)}.`}
         </ThemedText>
       ) : (
         <View style={styles.list}>
-          {[...todayDiapers].reverse().map((diaper) => (
+          {[...selectedDayDiapers].reverse().map((diaper) => (
             <DiaperRowItem key={diaper.id} diaper={diaper} onPress={() => handleOpenEdit(diaper.id)} />
           ))}
         </View>

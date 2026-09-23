@@ -101,6 +101,24 @@ export const formatDayLabel = (localDate: string): string => {
   return formatInTimeZone(date, 'UTC', 'EEEE, d. MMMM yyyy', { locale: de });
 };
 
+/**
+ * "21. September" — day and month only, no year or weekday. For contexts
+ * that already establish the day is in the past (Alltag's
+ * Nachtragen-Hinweis, core/tracking/day-selection.ts#formatBackfillHint)
+ * and don't need `formatDayLabel`'s fuller "Montag, 21. September 2026".
+ * Same construction as `formatDayLabel` (UTC noon, formatted in UTC) so
+ * `new Date(...)` stays confined to this module.
+ */
+export const formatDayMonthLabel = (localDate: string): string => {
+  const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return localDate;
+  }
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  return formatInTimeZone(date, 'UTC', 'd. MMMM', { locale: de });
+};
+
 /** Wall-clock time of a UTC instant in `tz`, e.g. "14:32" — for event-list rows. */
 export const formatTimeLabel = (occurredAtUtcIso: string, tz: string): string =>
   formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'HH:mm');
@@ -141,6 +159,39 @@ export const combineLocalDateAndTime = (
  */
 export const toLocalDate = (occurredAtUtcIso: string, tz: string): string =>
   formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'yyyy-MM-dd');
+
+export type ResolvedLogOccurredAt = { occurredAtUtcIso: string; localDate: string };
+
+/**
+ * Resolves occurred_at + local_date for a freshly-logged row: an explicit
+ * `backdate` (Alltag's day selector — task requirement, 2026-09-24) when
+ * given, otherwise `nowUtcIso()` exactly as every quick-log action already
+ * behaved before day selection existed. A malformed `backdate` falls back to
+ * "now" rather than failing the write — the caller only ever constructs
+ * `backdate` from already-validated app state (the selected day, a fixed
+ * "12:00"), never from free-text input, so this path is a safety net, not
+ * the expected route.
+ *
+ * Shared by every quick-log repository function that now accepts an
+ * optional backdate (diaper/repository.ts#logDiaper,
+ * feeding/repository.ts#logBottle) — RUNNING entries (startBreastFeed,
+ * startSleep) deliberately do NOT take this: they may only ever start at the
+ * true current instant, gated instead by
+ * core/tracking/day-selection.ts#canStartRunningEntry.
+ */
+export const resolveLogOccurredAt = (
+  tz: string,
+  backdate?: { localDate: string; time: string },
+): ResolvedLogOccurredAt => {
+  if (backdate) {
+    const occurredAtUtcIso = combineLocalDateAndTime(backdate.localDate, backdate.time, tz);
+    if (occurredAtUtcIso) {
+      return { occurredAtUtcIso, localDate: toLocalDate(occurredAtUtcIso, tz) };
+    }
+  }
+  const occurredAtUtcIso = nowUtcIso();
+  return { occurredAtUtcIso, localDate: toLocalDate(occurredAtUtcIso, tz) };
+};
 
 /**
  * 2026-08-13: THE ONE EXCEPTION to "`local_date` is derived once and never
