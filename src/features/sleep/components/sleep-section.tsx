@@ -10,7 +10,7 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -56,9 +56,25 @@ export type SleepSectionProps = {
   tickingNow: string;
   /** The Alltag day selector's currently viewed day — task 2026-09-24. */
   selectedLocalDate: string;
+  /**
+   * A Tagesverlauf-Tipp auf einen Schlaf-Eintrag (task 2026-09-26) —
+   * öffnet diese Sektion eigenes Bearbeiten-Panel für genau diesen Eintrag.
+   * `token` ändert sich bei jeder Anforderung, damit derselbe Eintrag auch
+   * nach dem Schließen des Panels erneut angefordert werden kann, gleiches
+   * Muster wie Füttern/Wickeln/Medikamente
+   * (schnelleingabe/components/schnell-leiste.tsx).
+   */
+  requestedEdit?: { id: string; token: number } | null;
 };
 
-export function SleepSection({ child, session, tz, tickingNow, selectedLocalDate }: SleepSectionProps) {
+export function SleepSection({
+  child,
+  session,
+  tz,
+  tickingNow,
+  selectedLocalDate,
+  requestedEdit,
+}: SleepSectionProps) {
   const db = usePowerSync();
   const { accent } = useUiColors();
 
@@ -76,6 +92,13 @@ export function SleepSection({ child, session, tz, tickingNow, selectedLocalDate
   const [locationPromptId, setLocationPromptId] = useState<string | null>(null);
   const [editSleepId, setEditSleepId] = useState<string | null>(null);
   const [runawayDismissedSleepId, setRunawayDismissedSleepId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (requestedEdit) {
+      setEditSleepId(requestedEdit.id);
+      setLocationPromptId(null);
+    }
+  }, [requestedEdit?.id, requestedEdit?.token]);
 
   const handleStart = useCallback(async () => {
     // Laufende Einträge dürfen nur heute gestartet werden (task
@@ -190,8 +213,12 @@ export function SleepSection({ child, session, tz, tickingNow, selectedLocalDate
     statusText = formatSleepingSince(runningSleep.occurred_at, tickingNow);
   } else if (lastCompletedSleep && lastCompletedSleep.ended_at) {
     const awake = formatAwakeSince(lastCompletedSleep.ended_at, tickingNow);
-    const lastDuration = formatDuration(sleepDurationSeconds(lastCompletedSleep, tickingNow));
-    statusText = `${awake} · letzter Schlaf ${lastDuration}`;
+    // Gerätetest 2026-09-25: ein Schlafeintrag von vor Tagen/Wochen darf
+    // nicht als "Wach seit 993 h" neben seiner eigenen Dauer erscheinen —
+    // in dem Fall lieber der Klartext allein, siehe sleep/timer.ts#formatAwakeSince.
+    statusText = awake
+      ? `${awake} · letzter Schlaf ${formatDuration(sleepDurationSeconds(lastCompletedSleep, tickingNow))}`
+      : 'kein Schlaf erfasst';
   } else {
     statusText = 'Noch kein Schlaf erfasst';
   }

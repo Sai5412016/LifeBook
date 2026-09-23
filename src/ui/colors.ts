@@ -11,7 +11,7 @@
 
 import { useTheme } from '@/hooks/use-theme';
 
-export { withAlpha } from './color-utils';
+export { lighten, withAlpha } from './color-utils';
 
 export type UiColors = {
   accent: string;

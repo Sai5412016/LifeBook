@@ -1,24 +1,45 @@
 /**
  * Abpumpen — heutige Menge, ein grosser Knopf, und die letzten 14 Tage.
  *
- * Bewusst KARG. Was dieser Tab absichtlich NICHT zeigt (Produktentscheidung,
- * keine Lücke): keine Zielmenge, keinen Sollwert, keinen Fortschrittsbalken,
- * keinen Prozentwert, keinen Vergleich mit gestern, keine Pfeile, keine
- * Streaks, keine Erfolgsmeldung — und in keiner der beiden Paletten einen
- * Rotton. Wer abpumpt, hat oft ohnehin das Gefühl, zu wenig zu schaffen; die
- * App zeigt die Zahl und bewertet sie nicht. Wer hier später "hilfreich"
- * einen Zielwert ergänzt, macht den Tab kaputt.
+ * Bewusst KARG. Was dieser Bildschirm absichtlich NICHT zeigt (Produkt-
+ * entscheidung, keine Lücke): keine Zielmenge, keinen Sollwert, keinen
+ * Fortschrittsbalken, keinen Prozentwert, keinen Vergleich mit gestern,
+ * keine Pfeile, keine Streaks, keine Erfolgsmeldung — und in keiner der
+ * beiden Paletten einen Rotton. Wer abpumpt, hat oft ohnehin das Gefühl, zu
+ * wenig zu schaffen; die App zeigt die Zahl und bewertet sie nicht. Wer hier
+ * später "hilfreich" einen Zielwert ergänzt, macht den Bildschirm kaputt.
  *
- * Zwischen 22:00 und 06:00 schaltet der Tab auf eine eigene dunkle Palette,
- * unabhängig vom App-Theme — siehe features/pumping/night-mode.ts.
+ * Zwischen 22:00 und 06:00 schaltet der Bildschirm auf eine eigene dunkle
+ * Palette, unabhängig vom App-Theme — siehe features/pumping/night-mode.ts.
+ *
+ * ROUTE VERSCHOBEN 2026-09-26 (war app/(tabs)/abpumpen.tsx)
+ * -----------------------------------------------------------
+ * Abpumpen ist kein eigener Reiter mehr (task: der Alltag-Tab wird die
+ * einzige Versorgungsseite) — erreichbar über die Timer-Zeile im
+ * Alltag-Tab (features/timeline/components/timer-row.tsx),
+ * `router.push('/abpumpen')`. Derselbe Pfad wie vorher: Route-Gruppen wie
+ * `(tabs)` tauchen im URL-Pfad nicht auf. Die Datei musste trotzdem aus
+ * `app/(tabs)/` heraus, nicht nur den `<NativeTabs.Trigger>` verlieren:
+ * `NativeTabs` läuft mit `useOnlyUserDefinedScreens = true` — jede
+ * Routendatei in einem `NativeTabs`-Verzeichnis OHNE eigenen Trigger wird
+ * aus dem Navigator komplett entfernt, nicht nur aus der Leiste versteckt,
+ * genau der Fehler, der `explore.tsx` schon einmal unerreichbar gemacht
+ * hat (siehe app/einstellungen.tsx's eigener Kommentar zu genau diesem
+ * Fallstrick). Jetzt eine gewöhnliche Root-Stack-Route wie
+ * `einstellungen.tsx`/`kind/bearbeiten.tsx`/`menschen/*` — dieselbe
+ * Anpassung wie dort: kein `BottomTabInset` mehr (die Reiterleiste liegt
+ * nicht mehr darunter, dieser Bildschirm deckt sie vollständig ab), dafür
+ * jetzt eine eigene `SafeAreaView` für die obere Sicherheitszone, die
+ * vorher implizit vom `NativeTabs`-Rahmen kam.
  */
 
 import { usePowerSync } from '@powersync/react-native';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import { addDaysToLocalDate, formatDayLabel, formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
@@ -147,14 +168,14 @@ export default function AbpumpenScreen() {
 
   if (childLoading) {
     return (
-      <View style={[styles.centered, { backgroundColor: palette.background }]}>
+      <SafeAreaView style={[styles.centered, { backgroundColor: palette.background }]}>
         <ActivityIndicator />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: palette.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: palette.background }]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Oben: die eine Zahl, die zählt. */}
         <View style={styles.header}>
@@ -261,7 +282,7 @@ export default function AbpumpenScreen() {
         onCancel={() => setSheetOpen(false)}
         onSave={(values) => void handleSave(values)}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -271,7 +292,9 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.four,
-    paddingBottom: BottomTabInset + Spacing.five,
+    // Kein BottomTabInset mehr: als Root-Stack-Route deckt dieser Bildschirm
+    // die Reiterleiste vollständig ab, genau wie einstellungen.tsx.
+    paddingBottom: Spacing.five,
     gap: Spacing.three,
   },
   header: { alignItems: 'center', gap: Spacing.one },

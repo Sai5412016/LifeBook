@@ -259,6 +259,33 @@ export const toDashboardDate = (
   formatInTimeZone(subHours(parseISO(occurredAtUtcIso), dayStartHour), tz, 'yyyy-MM-dd');
 
 /**
+ * Beyond this many hours, "time since X" stops being shown as a live
+ * duration — Gerätetest 2026-09-25: the app's only sleep entry, from
+ * 11.08.2026, was shown as "Wach seit 993 h 53 min" (41 days), presented as
+ * if it were a real, current fact rather than "we have basically no recent
+ * data". The ONE named threshold every "time since the last entry" display
+ * shares (Architekturregel-adjacent: one place, not re-guessed per
+ * feature) — see `recentDurationSeconds` below.
+ */
+export const RECENT_REFERENCE_THRESHOLD_HOURS = 24;
+
+/**
+ * Whole seconds since `refUtcIso`, or `null` once that's more than
+ * `RECENT_REFERENCE_THRESHOLD_HOURS` in the past. Callers that show "time
+ * since the last entry" (feeding/timer.ts#formatSinceLastFeed,
+ * sleep/timer.ts#formatAwakeSince) fall back to a plain no-data label
+ * instead of formatting a multi-day duration as if it were meaningful.
+ * Deliberately NOT applied to a RUNNING timer's own live elapsed time
+ * (that is a different, already-guarded concern — see each feature's own
+ * "runaway" detection) — this is only about a reference point that has
+ * already passed.
+ */
+export const recentDurationSeconds = (refUtcIso: string, jetzt: string): number | null => {
+  const seconds = secondsBetween(refUtcIso, jetzt);
+  return seconds > RECENT_REFERENCE_THRESHOLD_HOURS * 3600 ? null : seconds;
+};
+
+/**
  * Whole seconds from `fromUtcIso` to `toUtcIso` (negative when `to` is
  * earlier than `from`). Both instants are UTC, so — unlike calendar-day math
  * — this needs no timezone and is never affected by a DST transition
