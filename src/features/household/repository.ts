@@ -13,6 +13,7 @@
 
 import { useQuery } from '@powersync/react-native';
 import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
+import { useMemo } from 'react';
 
 import { newId } from '@/core/db/ids';
 import { combineLocalDateAndTime, nowUtcIso } from '@/core/time';
@@ -58,6 +59,22 @@ export function useHasHousehold(userId: string | undefined) {
     'SELECT household_id FROM household_members WHERE user_id = ? AND deleted_at IS NULL LIMIT 1',
     [userId ?? ''],
   );
+}
+
+/**
+ * Reactive: every (non-deleted) member's own `display_name`, keyed by
+ * `user_id` — for attributing an entry to whoever made it ("Heute 09:12 ·
+ * Tamara", features/medication). A `Map`, not the raw rows: every caller
+ * just wants a lookup by user id, and this way that lookup is only built
+ * once per query result instead of once per row rendered.
+ */
+export function useHouseholdMemberNames(householdId: string | undefined): Map<string, string> {
+  const { data } = useQuery<{ user_id: string; display_name: string }>(
+    'SELECT user_id, display_name FROM household_members WHERE household_id = ? AND deleted_at IS NULL',
+    [householdId ?? ''],
+  );
+
+  return useMemo(() => new Map((data ?? []).map((row) => [row.user_id, row.display_name])), [data]);
 }
 
 /** Columns every child read selects, so callers always get a complete row. */
