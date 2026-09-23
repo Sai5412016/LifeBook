@@ -14,19 +14,19 @@ const BIRTH = '2026-08-05';
 
 describe('formatDayNavigationLabel', () => {
   it('shows "Heute · <Datum>" when the selected day is today', () => {
-    expect(formatDayNavigationLabel(TODAY, TODAY)).toBe('Heute · Mittwoch, 23. September 2026');
+    expect(formatDayNavigationLabel(TODAY, TODAY)).toBe('Heute · Mi., 23. Sep.');
   });
 
   it('shows "Gestern · <Datum>" for exactly one day before today', () => {
-    expect(formatDayNavigationLabel('2026-09-22', TODAY)).toBe('Gestern · Dienstag, 22. September 2026');
+    expect(formatDayNavigationLabel('2026-09-22', TODAY)).toBe('Gestern · Di., 22. Sep.');
   });
 
   it('shows just the date for anything older than yesterday', () => {
-    expect(formatDayNavigationLabel('2026-09-12', TODAY)).toBe('Samstag, 12. September 2026');
+    expect(formatDayNavigationLabel('2026-09-12', TODAY)).toBe('Sa., 12. Sep.');
   });
 
   it('shows just the date for a day older still', () => {
-    expect(formatDayNavigationLabel(BIRTH, TODAY)).toBe('Mittwoch, 5. August 2026');
+    expect(formatDayNavigationLabel(BIRTH, TODAY)).toBe('Mi., 5. Aug.');
   });
 });
 

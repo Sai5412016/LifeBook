@@ -17,11 +17,10 @@ import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
 import {
   addDaysToLocalDate,
@@ -66,7 +65,6 @@ export default function AlltagScreen() {
   const { child, isLoading: childLoading } = useActiveChild();
   const tz = deviceTimeZone();
   const tickingNow = useTickingNow();
-  const insets = useSafeAreaInsets();
   // Live, not frozen at mount: if the app stays open across midnight, the
   // right arrow un-grays itself the moment "heute" genuinely advances,
   // without needing any special-cased reset of `selectedLocalDate` itself.
@@ -109,11 +107,24 @@ export default function AlltagScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      {/* Die Schnelleingabe-Leiste sitzt AUSSERHALB des scrollenden
-          KeyboardSafeScreen, als eigener Fuß darunter — deshalb hier kein
-          `hasTabBar` mehr auf KeyboardSafeScreen: der Reiterleisten-Abstand
-          wird jetzt einmal, vom Fuß selbst, reserviert (Spacing.safeFooter
-          unten), nicht mehr zusätzlich vom Scroll-Inhalt. */}
+      {/*
+        Die Schnelleingabe-Leiste ist ein GEWÖHNLICHES Flex-Geschwister
+        unter dem scrollenden Bereich, kein Overlay — Gerätetest 2026-09-24
+        fand sie ~130dp über der nativen Reiterleiste schwebend, mit
+        antippbaren Inhalten (u. a. "Stillen rechts") halb dahinter versteckt.
+        Ursache war eine von Hand aufaddierte Polsterung
+        (`insets.bottom + BottomTabInset`) auf diesem Fuß: `BottomTabInset`
+        ist für SCROLLENDEN Inhalt gedacht, dessen letztes Element sich sonst
+        hinter der Reiterleiste verstecken könnte (siehe constants/theme.ts) —
+        bei einem bereits als Flex-Kind positionierten, NICHT scrollenden Fuß
+        addierte sie sich zusätzlich zur echten Sicherheitsabstand-Angabe des
+        Geräts und drückte ihn zu weit nach oben, wobei der so verkleinerte
+        Platz für die ScrollView den Inhalt zusammenquetschte. Ein normales
+        Flex-Kind braucht dafür keine Konstante: Flexbox reicht dem Fuß genau
+        seine eigene Höhe zu und reserviert den Rest für die ScrollView
+        darüber — beide teilen sich denselben Bildschirmbereich, nichts
+        überlappt. Kein `hasTabBar` mehr auf KeyboardSafeScreen, aus
+        demselben Grund. */}
       <KeyboardSafeScreen style={styles.safeArea} contentContainerStyle={styles.content}>
         <ThemedText type="small" themeColor="textSecondary">
           {child ? child.firstName : 'Heute'}
@@ -170,16 +181,14 @@ export default function AlltagScreen() {
         />
       </KeyboardSafeScreen>
 
-      <View style={[styles.schnellFooter, { paddingBottom: insets.bottom + BottomTabInset }]}>
-        <SchnellLeiste
-          child={child}
-          session={session}
-          tz={tz}
-          selectedLocalDate={selectedLocalDate}
-          todayLocalDate={todayLocalDate}
-          onRequestEdit={(kind, id) => setQuickEdit({ kind, id, token: Date.now() })}
-        />
-      </View>
+      <SchnellLeiste
+        child={child}
+        session={session}
+        tz={tz}
+        selectedLocalDate={selectedLocalDate}
+        todayLocalDate={todayLocalDate}
+        onRequestEdit={(kind, id) => setQuickEdit({ kind, id, token: Date.now() })}
+      />
     </ThemedView>
   );
 }
@@ -276,11 +285,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   safeArea: { flex: 1, paddingHorizontal: Spacing.three },
-  // Fuß unter dem scrollenden Bereich, direkt über der Reiterleiste (task
-  // 2026-09-23) — `paddingBottom` reserviert Safe-Area + Reiterleiste EINMAL
-  // hier, nicht mehr zusätzlich im Scroll-Inhalt (siehe KeyboardSafeScreen
-  // oben, jetzt ohne `hasTabBar`).
-  schnellFooter: { paddingTop: Spacing.one },
   content: {
     gap: Spacing.three,
     paddingTop: Spacing.three,

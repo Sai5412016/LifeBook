@@ -10,17 +10,18 @@
  * (lexical order == chronological order for that format).
  */
 
-import { addDaysToLocalDate, formatDayLabel, formatDayMonthLabel } from '@/core/time';
+import { addDaysToLocalDate, formatDayMonthLabel, formatShortDayLabel } from '@/core/time';
 
 /**
  * The day-navigation header's label: "Heute · <Datum>" / "Gestern · <Datum>"
- * / just the date for anything older. `<Datum>` is `formatDayLabel`'s full
- * "Wochentag, D. Monat JAHR" form — the same label Chronik and every other
- * day heading in this app already uses, for one consistent date format
- * app-wide rather than a second, shorter one invented just for this header.
+ * / just the date for anything older. `<Datum>` is `formatShortDayLabel`'s
+ * abbreviated "Mi., D. Monatskürzel" form — NOT `formatDayLabel`'s full
+ * "Wochentag, D. Monat JAHR" (Gerätetest 2026-09-24: the full form + "Heute
+ * · " overflowed the header on a real device). This header is the only
+ * caller of the short form; Chronik's whole-day headings keep the full one.
  */
 export function formatDayNavigationLabel(selectedLocalDate: string, todayLocalDate: string): string {
-  const dateLabel = formatDayLabel(selectedLocalDate);
+  const dateLabel = formatShortDayLabel(selectedLocalDate);
   if (selectedLocalDate === todayLocalDate) {
     return `Heute · ${dateLabel}`;
   }

@@ -119,6 +119,27 @@ export const formatDayMonthLabel = (localDate: string): string => {
   return formatInTimeZone(date, 'UTC', 'd. MMMM', { locale: de });
 };
 
+/**
+ * "Mi., 23. Sep." — abbreviated weekday + day + abbreviated month, no year.
+ * For contexts too narrow for `formatDayLabel`'s full "Mittwoch, 23.
+ * September 2026" — the Alltag day-selector header
+ * (core/tracking/day-selection.ts#formatDayNavigationLabel), which overflowed
+ * on a real device with the full form (Gerätetest 2026-09-24). The exact
+ * abbreviations (weekday with a trailing dot, "Sep." not "Sept.") come from
+ * date-fns' own German locale data, not a hand-guessed shortening. Same
+ * UTC-noon construction as `formatDayLabel`/`formatDayMonthLabel` so
+ * `new Date(...)` stays confined to this module.
+ */
+export const formatShortDayLabel = (localDate: string): string => {
+  const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return localDate;
+  }
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+  return formatInTimeZone(date, 'UTC', 'EEE, d. MMM', { locale: de });
+};
+
 /** Wall-clock time of a UTC instant in `tz`, e.g. "14:32" — for event-list rows. */
 export const formatTimeLabel = (occurredAtUtcIso: string, tz: string): string =>
   formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'HH:mm');
