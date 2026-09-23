@@ -200,3 +200,37 @@ export function useGabenHistorie(childId: string | undefined): MedicationRow[] {
   );
   return data ?? [];
 }
+
+/**
+ * Reactive: every Gabe with `local_date` in [fromLocalDate, toLocalDate]
+ * (inclusive) — feeds features/berichte/logic.ts#berichtBerechnen. Same
+ * "includes soft-deleted rows" convention as `useGabenHistorie` above —
+ * berichtBerechnen does its OWN deleted_at filtering.
+ */
+export function useGabenInRange(
+  childId: string | undefined,
+  fromLocalDate: string | undefined,
+  toLocalDate: string | undefined,
+): MedicationRow[] {
+  const { data } = useQuery<MedicationRow>(
+    `SELECT ${MEDICATION_COLUMNS} FROM medications
+      WHERE child_id = ? AND local_date >= ? AND local_date <= ?
+      ORDER BY occurred_at ASC`,
+    [childId ?? '', fromLocalDate ?? '', toLocalDate ?? ''],
+  );
+  return data ?? [];
+}
+
+/** One-shot: every non-deleted Gabe since `sinceLocalDate` — CSV-Export (task requirement: die gesamte Historie seit Geburt). */
+export async function getGabenForExport(
+  db: AbstractPowerSyncDatabase,
+  childId: string,
+  sinceLocalDate: string,
+): Promise<MedicationRow[]> {
+  return db.getAll<MedicationRow>(
+    `SELECT ${MEDICATION_COLUMNS} FROM medications
+      WHERE child_id = ? AND local_date >= ? AND deleted_at IS NULL
+      ORDER BY occurred_at ASC`,
+    [childId, sinceLocalDate],
+  );
+}

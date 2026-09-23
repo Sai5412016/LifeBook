@@ -12,6 +12,7 @@ import {
   formatDayMonthLabel,
   formatDuration,
   formatTimeLabel,
+  isoWeekdayOfLocalDate,
   localDateToPickerDate,
   localTimeToPickerDate,
   pickerDateToLocalDate,
@@ -320,6 +321,24 @@ describe('formatDuration', () => {
   it('rounds to the nearest minute', () => {
     expect(formatDuration(89)).toBe('1 min'); // 1.48 min
     expect(formatDuration(91)).toBe('2 min'); // 1.52 min
+  });
+});
+
+describe('isoWeekdayOfLocalDate', () => {
+  it('gives 1 for a Monday', () => {
+    expect(isoWeekdayOfLocalDate('2026-09-21')).toBe(1);
+  });
+
+  it('gives 7 for a Sunday, not 0', () => {
+    expect(isoWeekdayOfLocalDate('2026-09-27')).toBe(7);
+  });
+
+  it('gives 3 for a Wednesday', () => {
+    expect(isoWeekdayOfLocalDate('2026-09-23')).toBe(3);
+  });
+
+  it('throws on a malformed date', () => {
+    expect(() => isoWeekdayOfLocalDate('nope')).toThrow();
   });
 });
 

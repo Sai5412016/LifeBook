@@ -65,17 +65,29 @@ describe('firstNameOf', () => {
 });
 
 describe('formatGivenTodayLabel', () => {
-  it('formats "Heute HH:MM · Vorname"', () => {
-    expect(formatGivenTodayLabel('2026-09-23T07:12:00.000Z', 'Europe/Berlin', 'Tamara')).toBe(
+  it('formats "Heute HH:MM · Vorname" when the selected day is today', () => {
+    expect(formatGivenTodayLabel('2026-09-23T07:12:00.000Z', 'Europe/Berlin', 'Tamara', true, '23. September')).toBe(
       'Heute 09:12 · Tamara',
     );
+  });
+
+  it('formats "<Datum> HH:MM · Vorname" for a past selected day', () => {
+    expect(
+      formatGivenTodayLabel('2026-09-21T07:12:00.000Z', 'Europe/Berlin', 'Tamara', false, '21. September'),
+    ).toBe('21. September 09:12 · Tamara');
   });
 });
 
 describe('formatDuplicateDoseWarning', () => {
-  it('formats the doppelgabe confirmation text exactly', () => {
-    expect(formatDuplicateDoseWarning('2026-09-23T07:12:00.000Z', 'Europe/Berlin')).toBe(
+  it('formats the doppelgabe confirmation text exactly for the selected day being today', () => {
+    expect(formatDuplicateDoseWarning('2026-09-23T07:12:00.000Z', 'Europe/Berlin', true, '23. September')).toBe(
       'Heute um 09:12 bereits gegeben. Wirklich noch einmal?',
+    );
+  });
+
+  it('formats the doppelgabe confirmation text exactly for a past selected day (Korrektur 2026-09-25)', () => {
+    expect(formatDuplicateDoseWarning('2026-09-21T07:12:00.000Z', 'Europe/Berlin', false, '21. September')).toBe(
+      'Am 21. September um 09:12 bereits gegeben. Wirklich noch einmal?',
     );
   });
 });

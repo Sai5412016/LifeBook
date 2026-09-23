@@ -321,6 +321,25 @@ export const addDaysToLocalDate = (localDate: string, days: number): string => {
   return `${shifted.getUTCFullYear()}-${shiftedMonth}-${shiftedDay}`;
 };
 
+/**
+ * ISO weekday of a local_date: 1 = Monday … 7 = Sunday. For finding the
+ * Monday/Sunday bounds of the week containing a date
+ * (features/berichte/logic.ts#zeitraumTage). Constructed the same way as
+ * `addDaysToLocalDate` (UTC, no DST) so the result never depends on which
+ * timezone the JS engine itself happens to run in — `local_date` is already
+ * a plain civil date, no timezone left to resolve.
+ */
+export const isoWeekdayOfLocalDate = (localDate: string): number => {
+  const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    throw new Error(`core/time: malformed local date "${localDate}"`);
+  }
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  const jsWeekday = date.getUTCDay(); // 0 = Sunday … 6 = Saturday
+  return jsWeekday === 0 ? 7 : jsWeekday;
+};
+
 export const localDateToPickerDate = (localDate: string): Date => {
   const match = localDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {

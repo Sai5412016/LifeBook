@@ -132,21 +132,23 @@ export function MedicationSection({ child, session, tz, selectedLocalDate }: Med
 
   const handleQuickTap = useCallback(
     (favorite: MedicationFavorite) => {
-      // Doppelgabe-Schutz ist ein Sicherheitsnetz für den laufenden Tag —
-      // beim bewussten Nachtragen für einen vergangenen Tag (eigener
-      // Hinweis-Banner weiter oben) entfällt die Rückfrage, damit mehrere
-      // Gaben desselben Tages ohne Umweg nachgetragen werden können.
-      const given = isViewingToday ? letzteGabeHeute(selectedDayGaben, favorite, selectedLocalDate) : null;
+      // Korrektur 2026-09-25: der Doppelgabe-Schutz prüft jetzt den
+      // GEWÄHLTEN Tag, nicht mehr nur heute — darf nicht wegoptimiert werden
+      // (task requirement), unabhängig davon, welcher Tag gerade offen ist.
+      const given = letzteGabeHeute(selectedDayGaben, favorite, selectedLocalDate);
       if (!given) {
         void logNow(favorite);
         return;
       }
 
-      // Doppelgabe-Schutz — darf nicht wegoptimiert werden (task requirement).
-      Alert.alert('Schon gegeben', formatDuplicateDoseWarning(given.occurred_at, tz), [
-        { text: 'Abbrechen', style: 'cancel' },
-        { text: 'Trotzdem eintragen', onPress: () => void logNow(favorite) },
-      ]);
+      Alert.alert(
+        'Schon gegeben',
+        formatDuplicateDoseWarning(given.occurred_at, tz, isViewingToday, formatDayMonthLabel(selectedLocalDate)),
+        [
+          { text: 'Abbrechen', style: 'cancel' },
+          { text: 'Trotzdem eintragen', onPress: () => void logNow(favorite) },
+        ],
+      );
     },
     [isViewingToday, selectedDayGaben, selectedLocalDate, tz, logNow],
   );
@@ -214,15 +216,23 @@ export function MedicationSection({ child, session, tz, selectedLocalDate }: Med
       {favorites.length > 0 ? (
         <View style={styles.quickGrid}>
           {favorites.map((favorite) => {
-            const given = isViewingToday
-              ? letzteGabeHeute(selectedDayGaben, favorite, selectedLocalDate)
-              : null;
+            const given = letzteGabeHeute(selectedDayGaben, favorite, selectedLocalDate);
             const givenByName = given ? (memberNames.get(given.created_by) ?? '') : '';
             return (
               <MedicationQuickButton
                 key={`${favorite.name.toLowerCase()}|${favorite.doseAmount ?? ''}|${favorite.doseUnit ?? ''}`}
                 favorite={favorite}
-                givenTodayLabel={given ? formatGivenTodayLabel(given.occurred_at, tz, firstNameOf(givenByName)) : null}
+                givenTodayLabel={
+                  given
+                    ? formatGivenTodayLabel(
+                        given.occurred_at,
+                        tz,
+                        firstNameOf(givenByName),
+                        isViewingToday,
+                        formatDayMonthLabel(selectedLocalDate),
+                      )
+                    : null
+                }
                 accent={accent}
                 disabled={busy || !child}
                 onPress={() => handleQuickTap(favorite)}
