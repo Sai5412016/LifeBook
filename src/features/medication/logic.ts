@@ -64,6 +64,7 @@ export type MedicationHistoryEntry = {
   name: string;
   dose_amount: number | null;
   dose_unit: MedicationDoseUnit | null;
+  route: MedicationRoute | null;
   occurred_at: string;
   deleted_at: string | null;
 };
@@ -72,6 +73,8 @@ export type MedicationFavorite = {
   name: string;
   doseAmount: number | null;
   doseUnit: MedicationDoseUnit | null;
+  /** The Gabeart of the MOST RECENTLY used entry in this group — route is not part of the grouping key itself (task requirement). */
+  route: MedicationRoute | null;
 };
 
 /**
@@ -82,8 +85,11 @@ export type MedicationFavorite = {
  * caller's already-resolved "now" — never computed in here, see file
  * header), and sorts by that count descending, ties broken by whichever
  * group was used more recently overall (not just within the 30-day window).
- * The displayed name keeps whichever CASING was used most recently, even
- * though grouping itself ignores case.
+ * The displayed name and route both keep whichever CASING/Gabeart was used
+ * most recently, even though grouping itself ignores case and does not key
+ * on route at all — two doses of the same medicine can disagree on route
+ * (2026-09-24: a quick-tap re-log now carries the newer one forward instead
+ * of always writing null).
  */
 export function favoritenAusVerlauf(
   eintraege: readonly MedicationHistoryEntry[],
@@ -93,6 +99,7 @@ export function favoritenAusVerlauf(
     name: string;
     doseAmount: number | null;
     doseUnit: MedicationDoseUnit | null;
+    route: MedicationRoute | null;
     countLast30Days: number;
     lastUsedAtUtcIso: string;
   };
@@ -111,6 +118,7 @@ export function favoritenAusVerlauf(
         name: entry.name,
         doseAmount: entry.dose_amount,
         doseUnit: entry.dose_unit,
+        route: entry.route,
         countLast30Days: withinWindow ? 1 : 0,
         lastUsedAtUtcIso: entry.occurred_at,
       });
@@ -123,6 +131,7 @@ export function favoritenAusVerlauf(
     if (entry.occurred_at > existing.lastUsedAtUtcIso) {
       existing.lastUsedAtUtcIso = entry.occurred_at;
       existing.name = entry.name;
+      existing.route = entry.route;
     }
   }
 
@@ -134,7 +143,7 @@ export function favoritenAusVerlauf(
       return a.lastUsedAtUtcIso < b.lastUsedAtUtcIso ? 1 : -1;
     })
     .slice(0, MAX_FAVORITES)
-    .map(({ name, doseAmount, doseUnit }) => ({ name, doseAmount, doseUnit }));
+    .map(({ name, doseAmount, doseUnit, route }) => ({ name, doseAmount, doseUnit, route }));
 }
 
 export type MedicationTodayEntry = {

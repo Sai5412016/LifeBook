@@ -1,23 +1,40 @@
 /**
  * Alltag — one screen, one section per tracking feature: Füttern (needed ten
- * times a day), Wickeln, Schlafen. Each section owns its own data and state;
- * this file only supplies the shared shell (child, session, device timezone,
- * the live clock) and lays the sections out one after another.
+ * times a day), Wickeln, Medikamente & Vitamine, Schlafen. Each section owns
+ * its own data and state; this file supplies the shared shell (child,
+ * session, device timezone, the live clock) AND, since 2026-09-24, the day
+ * selector: which single calendar day every section currently shows and
+ * backfills to. That selected day is held ONCE here (`useState`, no
+ * context/store — task requirement) and passed down as a prop, the same way
+ * `tickingNow` already was.
  *
  * Formerly the app's launch screen at route "index" — moved to tab 3 (still
  * functionally identical) when tab 1 became the child profile ("Marina",
  * `index.tsx`). See components/app-tabs.tsx.
  */
 
+import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useAuth } from '@/core/auth/session-store';
-import { nowUtcIso } from '@/core/time';
+import {
+  addDaysToLocalDate,
+  localDateToPickerDate,
+  nowUtcIso,
+  pickerDateToLocalDate,
+  toLocalDate,
+} from '@/core/time';
 import { deviceTimeZone } from '@/core/time/device';
+import {
+  canGoToNextDay,
+  formatBackfillHint,
+  formatDayNavigationLabel,
+  isSelectableDay,
+} from '@/core/tracking/day-selection';
 import { DiaperSection } from '@/features/diaper/components/diaper-section';
 import { FeedingSection } from '@/features/feeding/components/feeding-section';
 import { useActiveChild } from '@/features/household/repository';
@@ -42,6 +59,19 @@ export default function AlltagScreen() {
   const { child, isLoading: childLoading } = useActiveChild();
   const tz = deviceTimeZone();
   const tickingNow = useTickingNow();
+  // Live, not frozen at mount: if the app stays open across midnight, the
+  // right arrow un-grays itself the moment "heute" genuinely advances,
+  // without needing any special-cased reset of `selectedLocalDate` itself.
+  const todayLocalDate = toLocalDate(tickingNow, tz);
+  const earliestLocalDate = child ? toLocalDate(child.birthAtUtcIso, child.birthTz) : todayLocalDate;
+
+  const [selectedLocalDate, setSelectedLocalDate] = useState(() => toLocalDate(nowUtcIso(), tz));
+
+  const changeDay = (localDate: string) => {
+    if (isSelectableDay(localDate, earliestLocalDate, todayLocalDate)) {
+      setSelectedLocalDate(localDate);
+    }
+  };
 
   if (childLoading) {
     return (
@@ -51,6 +81,8 @@ export default function AlltagScreen() {
     );
   }
 
+  const isViewingToday = selectedLocalDate === todayLocalDate;
+
   return (
     <ThemedView style={styles.container}>
       <KeyboardSafeScreen style={styles.safeArea} contentContainerStyle={styles.content} hasTabBar>
@@ -58,19 +90,132 @@ export default function AlltagScreen() {
           {child ? child.firstName : 'Heute'}
         </ThemedText>
 
+        <DayNavigationHeader
+          selectedLocalDate={selectedLocalDate}
+          todayLocalDate={todayLocalDate}
+          earliestLocalDate={earliestLocalDate}
+          onChange={changeDay}
+        />
+
+        {!isViewingToday ? (
+          <ThemedText type="small" themeColor="textSecondary">
+            {formatBackfillHint(selectedLocalDate)}
+          </ThemedText>
+        ) : null}
+
         <ThemedText type="subtitle">Füttern</ThemedText>
-        <FeedingSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
+        <FeedingSection
+          child={child}
+          session={session}
+          tz={tz}
+          tickingNow={tickingNow}
+          selectedLocalDate={selectedLocalDate}
+        />
 
         <ThemedText type="subtitle">Wickeln</ThemedText>
-        <DiaperSection child={child} session={session} tz={tz} />
+        <DiaperSection child={child} session={session} tz={tz} selectedLocalDate={selectedLocalDate} />
 
         <ThemedText type="subtitle">Medikamente & Vitamine</ThemedText>
-        <MedicationSection child={child} session={session} tz={tz} />
+        <MedicationSection child={child} session={session} tz={tz} selectedLocalDate={selectedLocalDate} />
 
         <ThemedText type="subtitle">Schlafen</ThemedText>
-        <SleepSection child={child} session={session} tz={tz} tickingNow={tickingNow} />
+        <SleepSection
+          child={child}
+          session={session}
+          tz={tz}
+          tickingNow={tickingNow}
+          selectedLocalDate={selectedLocalDate}
+        />
       </KeyboardSafeScreen>
     </ThemedView>
+  );
+}
+
+/**
+ * "‹  Heute · Dienstag, 23. September 2026  ›  [Heute]" — day-navigation
+ * header (task 2026-09-24). Tapping the label opens the same
+ * `@expo/ui` `DateTimePicker` every other date field in this app already
+ * uses (features/events/components/event-form.tsx,
+ * features/people/components/person-form.tsx), bounded to
+ * [earliestLocalDate, todayLocalDate] via `minimumDate`/`maximumDate` — and
+ * re-checked with `isSelectableDay` before actually applying the pick, the
+ * same belt-and-braces guard `changeDay` above already applies to the
+ * arrows, in case a platform's native bounds enforcement ever disagrees.
+ */
+function DayNavigationHeader({
+  selectedLocalDate,
+  todayLocalDate,
+  earliestLocalDate,
+  onChange,
+}: {
+  selectedLocalDate: string;
+  todayLocalDate: string;
+  earliestLocalDate: string;
+  onChange: (localDate: string) => void;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const canGoBack = isSelectableDay(
+    addDaysToLocalDate(selectedLocalDate, -1),
+    earliestLocalDate,
+    todayLocalDate,
+  );
+  const canGoNext = canGoToNextDay(selectedLocalDate, todayLocalDate);
+  const isToday = selectedLocalDate === todayLocalDate;
+
+  return (
+    <View style={styles.dayNav}>
+      <Pressable
+        onPress={() => onChange(addDaysToLocalDate(selectedLocalDate, -1))}
+        disabled={!canGoBack}
+        hitSlop={12}
+        style={styles.dayNavArrow}
+        accessibilityLabel="Ein Tag zurück">
+        <ThemedText themeColor={canGoBack ? undefined : 'textSecondary'} style={styles.dayNavArrowText}>
+          ‹
+        </ThemedText>
+      </Pressable>
+
+      <Pressable onPress={() => setPickerOpen(true)} style={styles.dayNavLabel} hitSlop={8}>
+        <ThemedText type="smallBold" numberOfLines={1}>
+          {formatDayNavigationLabel(selectedLocalDate, todayLocalDate)}
+        </ThemedText>
+      </Pressable>
+
+      <Pressable
+        onPress={() => onChange(addDaysToLocalDate(selectedLocalDate, 1))}
+        disabled={!canGoNext}
+        hitSlop={12}
+        style={styles.dayNavArrow}
+        accessibilityLabel="Ein Tag vor">
+        <ThemedText themeColor={canGoNext ? undefined : 'textSecondary'} style={styles.dayNavArrowText}>
+          ›
+        </ThemedText>
+      </Pressable>
+
+      {!isToday ? (
+        <Pressable onPress={() => onChange(todayLocalDate)} hitSlop={8} style={styles.dayNavToday}>
+          <ThemedText type="linkPrimary">Heute</ThemedText>
+        </Pressable>
+      ) : null}
+
+      {pickerOpen ? (
+        <DateTimePicker
+          mode="date"
+          presentation="dialog"
+          value={localDateToPickerDate(selectedLocalDate)}
+          minimumDate={localDateToPickerDate(earliestLocalDate)}
+          maximumDate={localDateToPickerDate(todayLocalDate)}
+          onValueChange={(_event, date) => {
+            setPickerOpen(false);
+            const picked = pickerDateToLocalDate(date);
+            if (isSelectableDay(picked, earliestLocalDate, todayLocalDate)) {
+              onChange(picked);
+            }
+          }}
+          onDismiss={() => setPickerOpen(false)}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -82,4 +227,18 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
     paddingTop: Spacing.three,
   },
+  dayNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  dayNavArrow: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayNavArrowText: { fontSize: 24, fontWeight: '700' },
+  dayNavLabel: { flex: 1, alignItems: 'center', paddingVertical: Spacing.one },
+  dayNavToday: { paddingHorizontal: Spacing.one, paddingVertical: Spacing.one },
 });

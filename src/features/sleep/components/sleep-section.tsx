@@ -16,7 +16,8 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-nat
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { formatDuration, formatTimeLabel, toLocalDate } from '@/core/time';
+import { formatDayMonthLabel, formatDuration, formatTimeLabel, toLocalDate } from '@/core/time';
+import { canStartRunningEntry } from '@/core/tracking/day-selection';
 import { isRunaway } from '@/core/tracking/running-conflicts';
 import type { ActiveChild } from '@/features/household/repository';
 import { BigButton, Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
@@ -53,9 +54,11 @@ export type SleepSectionProps = {
   session: Session | null;
   tz: string;
   tickingNow: string;
+  /** The Alltag day selector's currently viewed day — task 2026-09-24. */
+  selectedLocalDate: string;
 };
 
-export function SleepSection({ child, session, tz, tickingNow }: SleepSectionProps) {
+export function SleepSection({ child, session, tz, tickingNow, selectedLocalDate }: SleepSectionProps) {
   const db = usePowerSync();
   const { accent } = useUiColors();
 
@@ -65,7 +68,8 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
 
   const { sleep: lastCompletedSleep } = useLastCompletedSleep(child?.childId);
   const todayLocalDate = toLocalDate(tickingNow, tz);
-  const { sleeps: todaySleeps } = useSleepsOfDay(child?.childId, todayLocalDate);
+  const isViewingToday = selectedLocalDate === todayLocalDate;
+  const { sleeps: selectedDaySleeps } = useSleepsOfDay(child?.childId, selectedLocalDate);
   const reviewSleeps = useSleepsNeedingReview(child?.childId);
 
   const [busy, setBusy] = useState(false);
@@ -74,7 +78,10 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
   const [runawayDismissedSleepId, setRunawayDismissedSleepId] = useState<string | null>(null);
 
   const handleStart = useCallback(async () => {
-    if (!child || !session?.user.id) return;
+    // Laufende Einträge dürfen nur heute gestartet werden (task
+    // requirement) — der Knopf ist dafür schon ausgegraut, diese Prüfung
+    // ist das zusätzliche Netz.
+    if (!child || !session?.user.id || !canStartRunningEntry(selectedLocalDate, todayLocalDate)) return;
     setBusy(true);
     try {
       const sleepId = await startSleep(db, {
@@ -90,7 +97,7 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
     } finally {
       setBusy(false);
     }
-  }, [child, session?.user.id, db, tz]);
+  }, [child, session?.user.id, db, tz, selectedLocalDate, todayLocalDate]);
 
   const handleEnd = useCallback(async () => {
     if (!runningSleep) return;
@@ -189,12 +196,12 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
     statusText = 'Noch kein Schlaf erfasst';
   }
 
-  const summary = summarizeSleepOfDay(todaySleeps, tickingNow);
+  const summary = summarizeSleepOfDay(selectedDaySleeps, tickingNow);
   const reviewSleepOpen = editSleepId
     ? reviewSleeps.find((sleep) => sleep.id === editSleepId)
     : undefined;
   const editTarget =
-    (editSleepId ? todaySleeps.find((sleep) => sleep.id === editSleepId) : undefined) ?? reviewSleepOpen;
+    (editSleepId ? selectedDaySleeps.find((sleep) => sleep.id === editSleepId) : undefined) ?? reviewSleepOpen;
 
   return (
     <View style={styles.section}>
@@ -221,7 +228,12 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
         {runningSleep ? (
           <BigButton label="Wach" color={accent} onPress={handleEnd} disabled={busy} />
         ) : (
-          <BigButton label="Schläft jetzt" color={accent} onPress={handleStart} disabled={busy || !child} />
+          <BigButton
+            label="Schläft jetzt"
+            color={accent}
+            onPress={handleStart}
+            disabled={busy || !child || !canStartRunningEntry(selectedLocalDate, todayLocalDate)}
+          />
         )}
       </View>
 
@@ -246,13 +258,13 @@ export function SleepSection({ child, session, tz, tickingNow }: SleepSectionPro
         />
       ) : null}
 
-      {todaySleeps.length === 0 ? (
+      {selectedDaySleeps.length === 0 ? (
         <ThemedText type="small" themeColor="textSecondary">
-          Noch kein Schlaf heute.
+          {isViewingToday ? 'Noch kein Schlaf heute.' : `Noch kein Schlaf am ${formatDayMonthLabel(selectedLocalDate)}.`}
         </ThemedText>
       ) : (
         <View style={styles.list}>
-          {[...todaySleeps].reverse().map((sleep) => (
+          {[...selectedDaySleeps].reverse().map((sleep) => (
             <TodaySleepRow
               key={sleep.id}
               sleep={sleep}

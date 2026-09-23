@@ -22,6 +22,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import {
+  formatDayMonthLabel,
   formatTimeLabel,
   localDateToPickerDate,
   localTimeToPickerDate,
@@ -30,6 +31,7 @@ import {
   pickerDateToLocalTime,
   toLocalDate,
 } from '@/core/time';
+import { defaultLogTime } from '@/core/tracking/day-selection';
 import { formatShortGermanDate } from '@/features/events/logic';
 import type { ActiveChild } from '@/features/household/repository';
 import { useHouseholdMemberNames } from '@/features/household/repository';
@@ -67,13 +69,16 @@ export type MedicationSectionProps = {
   child: ActiveChild | null;
   session: Session | null;
   tz: string;
+  /** The Alltag day selector's currently viewed day — task 2026-09-24. */
+  selectedLocalDate: string;
 };
 
-export function MedicationSection({ child, session, tz }: MedicationSectionProps) {
+export function MedicationSection({ child, session, tz, selectedLocalDate }: MedicationSectionProps) {
   const db = usePowerSync();
   const { accent } = useUiColors();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
-  const { gaben: todayGaben } = useGabenDesTages(child?.childId, todayLocalDate);
+  const isViewingToday = selectedLocalDate === todayLocalDate;
+  const { gaben: selectedDayGaben } = useGabenDesTages(child?.childId, selectedLocalDate);
   const historie = useGabenHistorie(child?.childId);
   const memberNames = useHouseholdMemberNames(child?.householdId);
   const favorites = favoritenAusVerlauf(historie, nowUtcIso());
@@ -97,7 +102,6 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
       if (!child || !session?.user.id) {
         return;
       }
-      const now = nowUtcIso();
       setBusy(true);
       try {
         await gabeEintragen(db, {
@@ -108,12 +112,14 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
           name: favorite.name,
           doseAmount: favorite.doseAmount,
           doseUnit: favorite.doseUnit,
-          // Quick-tap re-logs never carry a route over: favoritenAusVerlauf
-          // deliberately does not group by route (task requirement), so
-          // entries in the same favorite can disagree on it.
-          route: null,
-          localDate: toLocalDate(now, tz),
-          time: formatTimeLabel(now, tz),
+          // 2026-09-24: a quick-tap re-log now carries the favorite's OWN
+          // route (the most recently used one for this group — see
+          // logic.ts#favoritenAusVerlauf) forward, instead of always null.
+          route: favorite.route,
+          // gewählter Tag = heute -> aktuelle Uhrzeit, wie bisher; ein
+          // vergangener Tag trägt bei 12:00 mittags nach (task requirement).
+          localDate: selectedLocalDate,
+          time: defaultLogTime(selectedLocalDate, todayLocalDate, formatTimeLabel(nowUtcIso(), tz)),
           note: null,
         });
         showMessage(`${favorite.name} eingetragen.`);
@@ -121,12 +127,16 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
         setBusy(false);
       }
     },
-    [child, session?.user.id, db, tz, showMessage],
+    [child, session?.user.id, db, tz, selectedLocalDate, todayLocalDate, showMessage],
   );
 
   const handleQuickTap = useCallback(
     (favorite: MedicationFavorite) => {
-      const given = letzteGabeHeute(todayGaben, favorite, todayLocalDate);
+      // Doppelgabe-Schutz ist ein Sicherheitsnetz für den laufenden Tag —
+      // beim bewussten Nachtragen für einen vergangenen Tag (eigener
+      // Hinweis-Banner weiter oben) entfällt die Rückfrage, damit mehrere
+      // Gaben desselben Tages ohne Umweg nachgetragen werden können.
+      const given = isViewingToday ? letzteGabeHeute(selectedDayGaben, favorite, selectedLocalDate) : null;
       if (!given) {
         void logNow(favorite);
         return;
@@ -138,7 +148,7 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
         { text: 'Trotzdem eintragen', onPress: () => void logNow(favorite) },
       ]);
     },
-    [todayGaben, todayLocalDate, tz, logNow],
+    [isViewingToday, selectedDayGaben, selectedLocalDate, tz, logNow],
   );
 
   const handleCreateSubmit = useCallback(
@@ -197,14 +207,16 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
     [db],
   );
 
-  const editTarget = editId ? todayGaben.find((gabe) => gabe.id === editId) : undefined;
+  const editTarget = editId ? selectedDayGaben.find((gabe) => gabe.id === editId) : undefined;
 
   return (
     <View style={styles.section}>
       {favorites.length > 0 ? (
         <View style={styles.quickGrid}>
           {favorites.map((favorite) => {
-            const given = letzteGabeHeute(todayGaben, favorite, todayLocalDate);
+            const given = isViewingToday
+              ? letzteGabeHeute(selectedDayGaben, favorite, selectedLocalDate)
+              : null;
             const givenByName = given ? (memberNames.get(given.created_by) ?? '') : '';
             return (
               <MedicationQuickButton
@@ -238,6 +250,8 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
           favorites={favorites}
           tz={tz}
           busy={busy}
+          defaultLocalDate={selectedLocalDate}
+          defaultTime={defaultLogTime(selectedLocalDate, todayLocalDate, formatTimeLabel(nowUtcIso(), tz))}
           onSubmit={handleCreateSubmit}
           onCancel={() => setCreating(false)}
         />
@@ -249,19 +263,21 @@ export function MedicationSection({ child, session, tz }: MedicationSectionProps
           favorites={favorites}
           tz={tz}
           busy={busy}
+          defaultLocalDate={selectedLocalDate}
+          defaultTime={defaultLogTime(selectedLocalDate, todayLocalDate, formatTimeLabel(nowUtcIso(), tz))}
           onSubmit={(input) => handleEditSubmit(editTarget.id, input)}
           onCancel={() => setEditId(null)}
           onDelete={() => handleRequestDelete(editTarget)}
         />
       ) : null}
 
-      {todayGaben.length === 0 ? (
+      {selectedDayGaben.length === 0 ? (
         <ThemedText type="small" themeColor="textSecondary">
-          Noch keine Gabe heute.
+          {isViewingToday ? 'Noch keine Gabe heute.' : `Noch keine Gabe am ${formatDayMonthLabel(selectedLocalDate)}.`}
         </ThemedText>
       ) : (
         <View style={styles.list}>
-          {[...todayGaben].reverse().map((gabe) => (
+          {[...selectedDayGaben].reverse().map((gabe) => (
             <MedicationRowItem
               key={gabe.id}
               gabe={gabe}
@@ -371,6 +387,8 @@ function MedicationFormPanel({
   favorites,
   tz,
   busy,
+  defaultLocalDate,
+  defaultTime,
   onSubmit,
   onCancel,
   onDelete,
@@ -379,6 +397,9 @@ function MedicationFormPanel({
   favorites: readonly MedicationFavorite[];
   tz: string;
   busy: boolean;
+  /** Anlegen startet hierauf — der Alltag-Tageswahl (2026-09-24), nicht mehr fest auf "heute, jetzt". */
+  defaultLocalDate: string;
+  defaultTime: string;
   onSubmit: (input: MedicationFormSubmitInput) => void;
   onCancel: () => void;
   onDelete?: () => void;
@@ -389,13 +410,12 @@ function MedicationFormPanel({
   const [doseAmountText, setDoseAmountText] = useState('');
   const [doseUnit, setDoseUnit] = useState<MedicationDoseUnit | null>(null);
   const [route, setRoute] = useState<MedicationRoute | null>(null);
-  // Anlegen startet auf "jetzt" — Nachtragen bleibt möglich, es ändert nur
+  // Anlegen startet auf dem gewählten Tag (Vorgabe "jetzt" nur, solange der
+  // heute gewählt ist) — Nachtragen bleibt zusätzlich möglich, es ändert nur
   // diesen Startwert (task requirement). Bearbeiten überschreibt das gleich
   // wieder über useHydrateOnce, sobald der echte Datensatz da ist.
-  const [localDate, setLocalDate] = useState(() =>
-    mode.kind === 'create' ? toLocalDate(nowUtcIso(), tz) : '',
-  );
-  const [time, setTime] = useState(() => (mode.kind === 'create' ? formatTimeLabel(nowUtcIso(), tz) : ''));
+  const [localDate, setLocalDate] = useState(() => (mode.kind === 'create' ? defaultLocalDate : ''));
+  const [time, setTime] = useState(() => (mode.kind === 'create' ? defaultTime : ''));
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);

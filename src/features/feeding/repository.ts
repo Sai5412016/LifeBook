@@ -24,7 +24,7 @@ import type { AbstractPowerSyncDatabase } from '@powersync/react-native';
 import { useEffect } from 'react';
 
 import { newId } from '@/core/db/ids';
-import { combineLocalDateAndTime, nowUtcIso, toLocalDate } from '@/core/time';
+import { combineLocalDateAndTime, nowUtcIso, resolveLogOccurredAt, toLocalDate } from '@/core/time';
 
 import {
   elapsedSeconds,
@@ -377,12 +377,25 @@ export type LogBottleInput = {
   tz: string;
   amountMl: number;
   kind: BottleKind;
+  /**
+   * Explicit local date + time to log at instead of "jetzt" — Alltag's day
+   * selector, for backdating (Nachtragen) to a past day. Omitted (or a
+   * malformed pair) falls back to `nowUtcIso()`, exactly the previous
+   * behaviour — see core/time#resolveLogOccurredAt. A bottle feed is never
+   * "running" (unlike startBreastFeed), so — unlike that one — it CAN be
+   * backdated at all.
+   */
+  localDate?: string;
+  time?: string;
 };
 
-/** Logs a completed bottle feed immediately — no timer involved. */
+/** Logs a completed bottle feed — no timer involved. */
 export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleInput): Promise<void> {
+  const { occurredAtUtcIso, localDate } = resolveLogOccurredAt(
+    input.tz,
+    input.localDate && input.time ? { localDate: input.localDate, time: input.time } : undefined,
+  );
   const now = nowUtcIso();
-  const localDate = toLocalDate(now, input.tz);
   const feedId = newId();
   const feedType: FeedType = input.kind === 'breastmilk' ? 'bottle_breastmilk' : 'bottle_formula';
 
@@ -397,7 +410,7 @@ export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleI
       feedId,
       input.householdId,
       input.childId,
-      now,
+      occurredAtUtcIso,
       input.tz,
       localDate,
       input.userId,
@@ -410,7 +423,7 @@ export async function logBottle(db: AbstractPowerSyncDatabase, input: LogBottleI
       input.amountMl,
       null,
       null,
-      now,
+      occurredAtUtcIso,
       0,
       0,
       null,

@@ -87,6 +87,7 @@ describe('favoritenAusVerlauf', () => {
     name: 'Vigantol',
     dose_amount: 500,
     dose_unit: 'ie',
+    route: 'oral',
     occurred_at: NOW,
     deleted_at: null,
     ...overrides,
@@ -128,7 +129,9 @@ describe('favoritenAusVerlauf', () => {
       entry({ name: 'Eisen', dose_amount: 10, dose_unit: 'drops', occurred_at: '2026-09-21T08:00:00.000Z' }),
     ];
 
-    expect(favoritenAusVerlauf(eintraege, NOW)).toEqual([{ name: 'Eisen', doseAmount: 10, doseUnit: 'drops' }]);
+    expect(favoritenAusVerlauf(eintraege, NOW)).toEqual([
+      { name: 'Eisen', doseAmount: 10, doseUnit: 'drops', route: 'oral' },
+    ]);
   });
 
   it('groups names case-insensitively but displays the most recently used casing', () => {
@@ -137,7 +140,9 @@ describe('favoritenAusVerlauf', () => {
       entry({ name: 'Vigantol', occurred_at: '2026-09-22T08:00:00.000Z' }),
     ];
 
-    expect(favoritenAusVerlauf(eintraege, NOW)).toEqual([{ name: 'Vigantol', doseAmount: 500, doseUnit: 'ie' }]);
+    expect(favoritenAusVerlauf(eintraege, NOW)).toEqual([
+      { name: 'Vigantol', doseAmount: 500, doseUnit: 'ie', route: 'oral' },
+    ]);
   });
 
   it('never returns more than 6 suggestions', () => {
@@ -147,12 +152,32 @@ describe('favoritenAusVerlauf', () => {
 
     expect(favoritenAusVerlauf(eintraege, NOW)).toHaveLength(6);
   });
+
+  it('carries the Gabeart (route) of the MOST RECENT entry in the group, not the oldest', () => {
+    const eintraege = [
+      entry({ occurred_at: '2026-09-10T08:00:00.000Z', route: 'oral' }),
+      entry({ occurred_at: '2026-09-20T08:00:00.000Z', route: 'bottle' }),
+    ];
+
+    const favorites = favoritenAusVerlauf(eintraege, NOW);
+
+    expect(favorites[0].route).toBe('bottle');
+  });
+
+  it('a route-only difference still counts as the SAME group (route is not part of the grouping key)', () => {
+    const eintraege = [
+      entry({ occurred_at: '2026-09-10T08:00:00.000Z', route: 'oral' }),
+      entry({ occurred_at: '2026-09-20T08:00:00.000Z', route: 'bottle' }),
+    ];
+
+    expect(favoritenAusVerlauf(eintraege, NOW)).toHaveLength(1);
+  });
 });
 
 describe('letzteGabeHeute', () => {
   const TODAY = '2026-09-23';
   const YESTERDAY = '2026-09-22';
-  const favorite: MedicationFavorite = { name: 'Vigantol', doseAmount: 500, doseUnit: 'ie' };
+  const favorite: MedicationFavorite = { name: 'Vigantol', doseAmount: 500, doseUnit: 'ie', route: 'oral' };
 
   const todayEntry = (overrides: Partial<MedicationTodayEntry> = {}): MedicationTodayEntry => ({
     name: 'Vigantol',
