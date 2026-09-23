@@ -173,14 +173,24 @@ export default function BerichteScreen() {
                 <StatLine label="Menge gesamt (ml)" value={formatBerichtZahl(bericht.feeding.totalMl)} />
                 <StatLine label="Ø ml pro Tag" value={formatBerichtZahl(bericht.feeding.avgMlPerDay)} />
                 <StatLine label="Ø ml je Flasche" value={formatMlProFlasche(bericht.feeding.avgMlPerBottle)} />
-                <StatLine
-                  label="Stilldauer gesamt (min)"
-                  value={formatBerichtZahl(bericht.feeding.totalBreastMinutes)}
-                />
-                <StatLine
-                  label="Ø Stillminuten pro Tag"
-                  value={formatBerichtZahl(bericht.feeding.avgBreastMinutesPerDay)}
-                />
+                {/* Nur anzeigen, wenn im Zeitraum tatsächlich gestillt wurde
+                    (task 2026-09-26: Marina wird ausschließlich mit der
+                    Flasche ernährt) — ausgeblendet, nicht herausgerechnet:
+                    berichtBerechnen selbst bleibt unverändert, inklusive
+                    seiner Stillen-Zählung, für eine mögliche spätere
+                    Wiederaufnahme (Geschwisterkind). */}
+                {bericht.feeding.totalBreastMinutes > 0 ? (
+                  <>
+                    <StatLine
+                      label="Stilldauer gesamt (min)"
+                      value={formatBerichtZahl(bericht.feeding.totalBreastMinutes)}
+                    />
+                    <StatLine
+                      label="Ø Stillminuten pro Tag"
+                      value={formatBerichtZahl(bericht.feeding.avgBreastMinutesPerDay)}
+                    />
+                  </>
+                ) : null}
               </>
             )}
           </ReportSection>

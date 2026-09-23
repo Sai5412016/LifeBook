@@ -1,19 +1,25 @@
 /**
  * feeding/timer — pure logic for the breastfeeding timer: elapsed time,
- * multi-device conflict resolution, runaway detection, and display
- * formatting. Deliberately free of any Expo / React Native / PowerSync
- * import so it runs in plain Node under Vitest; the device- and
- * database-touching side lives in ./repository.
+ * multi-device conflict resolution, and display formatting. Deliberately
+ * free of any Expo / React Native / PowerSync import so it runs in plain
+ * Node under Vitest; the device- and database-touching side lives in
+ * ./repository.
  *
  * All instants that come in are ISO-8601 UTC strings (Master-Spec §7) — this
  * module never constructs a `Date` of its own; every duration is computed via
  * `secondsBetween` from core/time, the single allowed place for time math.
+ *
+ * 2026-09-26: this module's own `isRunaway` wrapper (the "läuft schon
+ * länger als 3 Stunden" banner's logic) was removed along with that banner
+ * — Marina is fed exclusively by bottle, no new breastfeed timer can start,
+ * so a runaway ONE never arises in normal use anymore. The GENERIC
+ * `isRunaway` in core/tracking/running-conflicts.ts is untouched and still
+ * backs Schlafen's own runaway warning.
  */
 
 import { formatDuration, recentDurationSeconds, secondsBetween } from '@/core/time';
 import {
   hasUnresolvedRunningConflict,
-  isRunaway as isRunawayGeneric,
   resolveRunningConflicts as resolveRunningConflictsGeneric,
 } from '@/core/tracking/running-conflicts';
 
@@ -104,21 +110,6 @@ export function resolveRunningConflicts(
   });
 
   return { winnerId, losers };
-}
-
-/**
- * True when the CURRENT live segment (since `running_since`) has been
- * ticking for at least `thresholdHours` — the "parent forgot to stop the
- * timer" case. Measured from `running_since`, not the feed's total banked
- * duration: a long session built from several short, deliberately paused
- * segments is not a runaway, but one segment nobody stopped is.
- */
-export function isRunaway(
-  feed: Pick<FeedTimerState, 'running_since'>,
-  jetzt: string,
-  thresholdHours = 3,
-): boolean {
-  return isRunawayGeneric(feed.running_since, jetzt, thresholdHours);
 }
 
 /**

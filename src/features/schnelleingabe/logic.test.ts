@@ -4,10 +4,8 @@ import { toLocalDate } from '@/core/time';
 
 import {
   DEFAULT_BOTTLE_FEED_TYPE,
-  DEFAULT_BREAST_FEED_TYPE,
   formatSnackbarLabel,
   isDoubleTap,
-  letzterBrusttyp,
   letzterFlaschentyp,
   resolveSchnellOccurredAt,
 } from './logic';
@@ -45,20 +43,6 @@ describe('letzterFlaschentyp', () => {
   });
 });
 
-describe('letzterBrusttyp', () => {
-  it('liefert den zuletzt benutzten Brust-Typ', () => {
-    const feeds = [
-      { feed_type: 'breast_left' as const, occurred_at: '2026-09-20T08:00:00.000Z', deleted_at: null },
-      { feed_type: 'breast_right' as const, occurred_at: '2026-09-22T08:00:00.000Z', deleted_at: null },
-      { feed_type: 'bottle_formula' as const, occurred_at: '2026-09-23T09:00:00.000Z', deleted_at: null },
-    ];
-    expect(letzterBrusttyp(feeds)).toBe('breast_right');
-  });
-
-  it('kein früherer Brust-Eintrag vorhanden -> Standardwert, kein Absturz', () => {
-    expect(letzterBrusttyp([])).toBe(DEFAULT_BREAST_FEED_TYPE);
-  });
-});
 
 describe('resolveSchnellOccurredAt', () => {
   it('gewählter Tag ist nicht heute -> occurred_at liegt auf dem gewählten Tag (12:00)', () => {

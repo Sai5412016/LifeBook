@@ -1,10 +1,17 @@
 /**
  * pumping — repository (Spec §4 rule: features access data ONLY through here).
  *
- * Every read and write for the "Abpumpen" tab against the LOCAL PowerSync
- * database — never a network call, never `supabase` directly: the tab has
- * to work at 03:00 in a flat with no signal, and sync carries the rows up
- * afterwards (core/sync/connector.ts).
+ * Every read and write for `pumping_sessions` against the LOCAL PowerSync
+ * database — never a network call, never `supabase` directly: sync carries
+ * the rows up afterwards (core/sync/connector.ts).
+ *
+ * 2026-09-26: the "Abpumpen" entry screen this once served (`/abpumpen`,
+ * write functions + the entry sheet) was removed — Marina is fed
+ * exclusively by bottle. This repository stays unchanged: the read
+ * functions are still used by features/timeline (the Tagesverlauf still
+ * shows any existing pumping_sessions rows), and the write functions are a
+ * database-layer primitive a later reuse (a sibling who IS pumped for)
+ * would need intact, not rebuilt from scratch.
  *
  * `local_date` IS SET ONCE, HERE, AT INSERT
  * -------------------------------------------

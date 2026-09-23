@@ -6,11 +6,11 @@
  * der EIGENEN Repository-Datei des Features weitergibt (Füttern, Wickeln,
  * Medikamente) — diese Datei schreibt selbst nichts in die Datenbank.
  *
- * Dieselbe Komponente wird an zwei Stellen eingebunden: als klebende Leiste
- * im Alltag-Tab (app/(tabs)/alltag.tsx) und als Karte im ersten Tab
- * (app/(tabs)/index.tsx, ohne Tageswahl — dort immer "heute"). `onRequestEdit`
- * unterscheidet die beiden: im Alltag-Tab hebt es lokal einen State an, vom
- * ersten Tab aus navigiert es zum Alltag-Tab mit Parametern.
+ * Eingebunden als fester Fuß im Alltag-Tab (app/(tabs)/alltag.tsx), seit dem
+ * Umbau 2026-09-26 die einzige Stelle — die Karte auf dem ersten Tab ist mit
+ * diesem Umbau entfallen. `onRequestEdit` navigiert deshalb dort immer zu
+ * der zuständigen Unterseite (fuettern/mehr), nie ein lokal gehobener
+ * State.
  */
 
 import { usePowerSync } from '@powersync/react-native';
@@ -33,10 +33,19 @@ import { gabeLoeschen, useGabenHistorie } from '@/features/medication/repository
 import { lighten, useUiColors } from '@/ui';
 
 import { formatSnackbarLabel, isDoubleTap } from '../logic';
-import { schnellBrust, schnellFlasche, schnellMedikament, schnellWindel } from '../repository';
+import { schnellFlasche, schnellMedikament, schnellWindel } from '../repository';
 import type { SchnellContext } from '../repository';
 
-export type SchnellEditKind = 'bottle' | 'breast' | 'diaper' | 'medication';
+/**
+ * 'breast' entfernt (task 2026-09-26: Marina wird ausschließlich mit der
+ * Flasche ernährt, der "Brust"-Knopf entfällt) — dieser Wert konnte nur aus
+ * genau diesem Knopf entstehen, `schnellBrust`/`logInstantBreastFeed`
+ * werden von hier aus nicht mehr aufgerufen. Historische Stilleinträge
+ * (falls je welche entstünden) laufen weiterhin über den generischen
+ * 'feed'-Zweig im Tagesverlauf (features/timeline), der nicht von dieser
+ * Datei abhängt.
+ */
+export type SchnellEditKind = 'bottle' | 'diaper' | 'medication';
 
 export type SchnellLeisteProps = {
   child: ActiveChild | null;
@@ -63,24 +72,23 @@ export function SchnellLeiste({
 }: SchnellLeisteProps) {
   const db = usePowerSync();
   const { accent, amber, green } = useUiColors();
-  // Ein Farbton je KATEGORIE, Abstufung innerhalb der Kategorie (Gerätetest
-  // 2026-09-24, Befund E): vorher trug Farbe für sich genommen die falsche
-  // Bedeutung (gleiche Kategorie in zwei Farben, verschiedene Kategorien in
-  // derselben). Mahlzeiten = accent (kräftig: Flasche, gedämpft: Brust),
-  // Windeln = amber (kräftig: nass, gedämpft: Stuhl), Medizin = green als
-  // eigene dritte Farbe — alle drei bereits Teil der Palette
-  // (constants/themes/oktopus.ts), keine neue erfunden.
+  // Ein Farbton je KATEGORIE (Gerätetest 2026-09-24, Befund E): Mahlzeiten =
+  // accent, Windeln = amber in zwei Stufen (kräftig: nass, gedämpft: Stuhl —
+  // `lighten` statt `withAlpha`, siehe Gerätetest 2026-09-25 Befund 3b unten),
+  // Medizin = green als eigene dritte Farbe — alle drei bereits Teil der
+  // Palette (constants/themes/oktopus.ts), keine neue erfunden.
   //
-  // KORREKTUR Gerätetest 2026-09-25 (Befund 3b): `withAlpha(…, 0.6)` für die
-  // gedämpfte Stufe mischte auf dem dunklen Grund zu Schlammbraun — "Brust"
-  // und "Windel Stuhl" waren kaum zu unterscheiden. `lighten` mischt
-  // stattdessen bei VOLLER Deckkraft Richtung Weiß, unabhängig vom
-  // Hintergrund — dafür bekommen die beiden gedämpften Knöpfe eine dunkle
-  // Schriftfarbe statt der weißen der kräftigen Knöpfe (siehe SchnellButton
-  // unten), sonst wäre der Text auf der jetzt hellen Fläche kaum lesbar.
+  // Seit 2026-09-26 gibt es nur noch EINEN Mahlzeiten-Knopf ("Flasche" —
+  // Marina wird ausschließlich mit der Flasche ernährt, "Brust" entfällt),
+  // deshalb keine gedämpfte Mahlzeiten-Stufe mehr: eine Abstufung setzt
+  // zwei Knöpfe derselben Kategorie voraus.
   const mealColor = accent;
-  const mealColorMuted = lighten(accent, 0.55);
   const diaperColor = amber;
+  // `lighten` mischt bei VOLLER Deckkraft Richtung Weiß, unabhängig vom
+  // Hintergrund (`withAlpha` mischte auf dem dunklen Grund zu
+  // Schlammbraun) — dafür bekommt der gedämpfte Windel-Knopf eine dunkle
+  // Schriftfarbe statt der weißen der kräftigen Knöpfe (siehe SchnellButton
+  // unten).
   const diaperColorMuted = lighten(amber, 0.55);
   const medicationColor = green;
   const recentFeeds = useRecentFeedsForChild(child?.childId);
@@ -148,15 +156,6 @@ export function SchnellLeiste({
     });
   }, [context, db, recentFeeds, tz, guardedTap, showSnackbar]);
 
-  const handleBrust = useCallback(() => {
-    if (!context) return;
-    guardedTap('breast', async () => {
-      const result = await schnellBrust(db, context, recentFeeds);
-      const timeLabel = formatTimeLabel(result.occurredAtUtcIso, tz);
-      showSnackbar({ entryId: result.id, kind: 'breast', label: formatSnackbarLabel('Brust', null, timeLabel) });
-    });
-  }, [context, db, recentFeeds, tz, guardedTap, showSnackbar]);
-
   const handleWindel = useCallback(
     (kind: DiaperKind) => {
       if (!context) return;
@@ -192,7 +191,7 @@ export function SchnellLeiste({
     if (!snackbar) return;
     const { entryId, kind } = snackbar;
     setSnackbar(null);
-    if (kind === 'bottle' || kind === 'breast') {
+    if (kind === 'bottle') {
       void softDeleteFeed(db, entryId);
     } else if (kind === 'diaper') {
       void softDeleteDiaper(db, entryId);
@@ -247,14 +246,6 @@ export function SchnellLeiste({
 
       <View style={styles.row}>
         <SchnellButton icon="🍼" label="Flasche" color={mealColor} onPress={handleFlasche} disabled={disabled} />
-        <SchnellButton
-          icon="🤱"
-          label="Brust"
-          color={mealColorMuted}
-          textColor={DARK_TEXT_ON_LIGHT}
-          onPress={handleBrust}
-          disabled={disabled}
-        />
         <SchnellButton
           icon="💧"
           label="Windel nass"
@@ -412,7 +403,10 @@ const styles = StyleSheet.create({
     minHeight: 60,
     minWidth: 60,
     flexGrow: 1,
-    flexBasis: '18%',
+    // Vier statt fünf Knöpfe seit 2026-09-26 ("Brust" entfällt) — flexBasis
+    // entsprechend angehoben, damit sie den gewonnenen Platz ausfüllen statt
+    // ihn ungenutzt zu lassen (flexGrow verteilt den Rest ohnehin gleich).
+    flexBasis: '22%',
     borderRadius: Spacing.two,
     alignItems: 'center',
     justifyContent: 'center',
