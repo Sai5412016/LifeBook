@@ -21,6 +21,13 @@
 const API = 'https://qjoujiyzthzwkqhildub.supabase.co/functions/v1/album';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 2;
 
+// PWA "Add to Home Screen" (task 2026-10-03). Both colors are the app's own
+// Oktopus palette, already in production use on this very page: #FAF3E3 is
+// `body`'s background below, and #E9613A is the button/link accent — see
+// STYLE. Not new values invented for the manifest.
+const PWA_BACKGROUND_COLOR = '#FAF3E3';
+const PWA_THEME_COLOR = '#E9613A';
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -157,12 +164,19 @@ const STYLE = `
   svg a text, svg a circle { cursor:pointer; }
 `;
 
-function sendPage(res, status, title, body) {
+// `headExtra`: markup for <head>, used only by pages reachable at /a/<token>
+// (see pwaHeadTags) so a visitor can add that exact album/tree to their home
+// screen from wherever they currently are — the code form included, since
+// that may be the very first page a new guest sees. Left out of the "/"
+// landing page and of unavailable() on purpose: neither represents a
+// specific, installable album.
+function sendPage(res, status, title, body, headExtra) {
   const html = '<!doctype html><html lang="de"><head>'
     + '<meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width, initial-scale=1">'
     + '<meta name="robots" content="noindex, nofollow, noarchive, noimageindex">'
     + '<title>' + escapeHtml(title) + '</title>'
+    + (headExtra || '')
     + '<style>' + STYLE + '</style></head>'
     + '<body><div class="wrap">' + body + '</div></body></html>';
   res.statusCode = status;
@@ -171,6 +185,69 @@ function sendPage(res, status, title, body) {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Cache-Control', 'no-store');
   res.end(html);
+}
+
+// name/short_name are deliberately fixed strings, not data.name from the API
+// — the task asks for exactly "Marinas Album" / "Marina" regardless of which
+// album or tree is open, and this keeps the manifest route from ever having
+// to decide what to do with an API-supplied name.
+function pwaHeadTags(token) {
+  const manifestHref = '/a/' + encodeURIComponent(token) + '/manifest.webmanifest';
+  return '<link rel="manifest" href="' + escapeHtml(manifestHref) + '">'
+    + '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
+    + '<link rel="icon" type="image/png" href="/favicon.png">'
+    + '<meta name="apple-mobile-web-app-title" content="Marina">'
+    + '<meta name="theme-color" content="' + PWA_THEME_COLOR + '">';
+}
+
+// Same shape manifestRoute() checks against — scope/start_url are identical
+// strings ("/a/<token>/"), which trivially satisfies the spec's "start_url
+// must be within scope" rule without needing a second, narrower scope that
+// could accidentally also swallow unrelated routes.
+function manifestFor(token) {
+  const base = '/a/' + encodeURIComponent(token) + '/';
+  return {
+    name: 'Marinas Album',
+    short_name: 'Marina',
+    start_url: base,
+    scope: base,
+    display: 'standalone',
+    background_color: PWA_BACKGROUND_COLOR,
+    theme_color: PWA_THEME_COLOR,
+    icons: [
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/favicon.png', sizes: '32x32', type: 'image/png', purpose: 'any' },
+    ],
+  };
+}
+
+// Same token check as the page route below (same callApi call, same
+// status-to-outcome mapping: 'ok' or 'code_required' means the token itself
+// is real) — deliberately not a second validation path. An invalid/revoked
+// token gets a bare 404 with no album name, no icons, nothing else.
+async function manifestRoute(res, token, req) {
+  const deviceSecret = readCookie(req, cookieName(token));
+  const data = await callApi(token, deviceSecret ? { deviceSecret } : {}, req);
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, noimageindex');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+
+  if (data.status !== 'ok' && data.status !== 'code_required') {
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.end('{}');
+  }
+
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+  // Short-lived and revalidated, not "no-store": a manifest is fetched only
+  // now and then (install time, occasional re-checks), so a little caching
+  // avoids hammering the Edge Function — but a revoked token must stop being
+  // served within minutes, not indefinitely.
+  res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+  res.end(JSON.stringify(manifestFor(token)));
 }
 
 function unavailable(res) {
@@ -182,7 +259,7 @@ function unavailable(res) {
 // The first name is a NAME TAG, not a second lock: the names are printed on the
 // very page it would protect, so checking them would secure nothing. It exists
 // so the owner's device list reads "Rosi" instead of "Samsung, München".
-function codeForm(res, name, message, status, kind) {
+function codeForm(res, name, message, status, kind, token) {
   const what = kind === 'tree' ? 'Stammbaum' : 'Album';
   sendPage(res, status || 200, name,
     '<h1>' + escapeHtml(name) + '</h1>'
@@ -203,7 +280,8 @@ function codeForm(res, name, message, status, kind) {
     // twice and claims two places.
     + '<script>(function(){var f=document.forms[0];f.addEventListener("submit",'
     + 'function(){var b=f.querySelector("button");b.disabled=true;'
-    + 'b.textContent="Einen Moment...";});})();</' + 'script>');
+    + 'b.textContent="Einen Moment...";});})();</' + 'script>',
+    token ? pwaHeadTags(token) : undefined);
 }
 
 // Background music, gallery page only. The file lives in a private Supabase
@@ -236,7 +314,7 @@ function musicPlayer(url) {
   + '})();</' + 'script>';
 }
 
-function gallery(res, data) {
+function gallery(res, data, token) {
   const photos = data.photos || [];
   let body = '<h1>' + escapeHtml(data.name) + '</h1><p class="sub">'
     + photos.length + (photos.length === 1 ? ' Foto' : ' Fotos') + ', privat geteilt.</p>'
@@ -286,7 +364,7 @@ function gallery(res, data) {
   // because this line only runs once somebody actually opens the gallery.
   body += '<p class="foot">Privat geteilt. Bitte nicht weiterleiten.</p>'
     + musicPlayer(data.musicUrl);
-  sendPage(res, 200, data.name, body);
+  sendPage(res, 200, data.name, body, token ? pwaHeadTags(token) : undefined);
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,18 +1167,21 @@ function newsBanners(data) {
   return out;
 }
 
-function treePage(res, data, personId) {
+function treePage(res, data, personId, token) {
+  const headExtra = token ? pwaHeadTags(token) : undefined;
   const tree = data.tree;
   if (!tree || !tree.nodes || tree.nodes.length === 0) {
     return sendPage(res, 200, data.name,
       '<h1>' + escapeHtml(data.name) + '</h1>'
-      + '<p class="sub">Für diesen Stammbaum sind noch keine Personen eingetragen.</p>');
+      + '<p class="sub">Für diesen Stammbaum sind noch keine Personen eingetragen.</p>',
+      headExtra);
   }
   const plan = layoutTree(tree.nodes, tree.unions || []);
   if (!plan) {
     return sendPage(res, 200, data.name,
       '<h1>' + escapeHtml(data.name) + '</h1>'
-      + '<p class="sub">Der Stammbaum lässt sich gerade nicht darstellen.</p>');
+      + '<p class="sub">Der Stammbaum lässt sich gerade nicht darstellen.</p>',
+      headExtra);
   }
 
   const rootNode = tree.nodes.find((n) => n.isRoot) || tree.nodes[0];
@@ -1145,12 +1226,12 @@ function treePage(res, data, personId) {
   if (data.allowSuggestions) body += suggestionForm(tree.nodes);
   body += '<p class="foot">Privat geteilt. Bitte nicht weiterleiten.</p>'
     + musicPlayer(data.musicUrl);
-  sendPage(res, 200, data.name, body);
+  sendPage(res, 200, data.name, body, headExtra);
 }
 
-function render(res, data, personId) {
-  if (data.kind === 'tree') return treePage(res, data, personId);
-  return gallery(res, data);
+function render(res, data, personId, token) {
+  if (data.kind === 'tree') return treePage(res, data, personId, token);
+  return gallery(res, data, token);
 }
 
 module.exports = async function handler(req, res) {
@@ -1166,6 +1247,12 @@ module.exports = async function handler(req, res) {
 
   const token = parts[1];
   const name = cookieName(token);
+
+  // A manifest fetch is its own, simple GET — handled before the POST/GET
+  // split below so it never falls into the form-handling branches.
+  if (req.method === 'GET' && parts.length === 3 && parts[2] === 'manifest.webmanifest') {
+    return manifestRoute(res, token, req);
+  }
 
   if (req.method === 'POST') {
     const raw = await readBody(req);
@@ -1202,7 +1289,7 @@ module.exports = async function handler(req, res) {
       }
       if (form.get('deceased')) suggestion.deceased = true;
       const sent = await callApi(token, { deviceSecret: secret, suggestion }, req);
-      if (sent.status === 'ok') return render(res, sent);
+      if (sent.status === 'ok') return render(res, sent, null, token);
       return unavailable(res);
     }
 
@@ -1213,20 +1300,20 @@ module.exports = async function handler(req, res) {
     if (data.status === 'ok') {
       res.setHeader('Set-Cookie', name + '=' + encodeURIComponent(data.deviceSecret)
         + '; Path=/a/' + token + '; HttpOnly; Secure; SameSite=Lax; Max-Age=' + COOKIE_MAX_AGE);
-      return render(res, data);
+      return render(res, data, null, token);
     }
     if (data.status === 'invalid_code') {
-      return codeForm(res, data.name, 'Der Code stimmt nicht.', 401, data.kind);
+      return codeForm(res, data.name, 'Der Code stimmt nicht.', 401, data.kind, token);
     }
     if (data.status === 'locked') {
       return codeForm(res, data.name,
-        'Zu viele Fehlversuche. Bitte versuch es in einigen Minuten noch einmal.', 429, data.kind);
+        'Zu viele Fehlversuche. Bitte versuch es in einigen Minuten noch einmal.', 429, data.kind, token);
     }
     if (data.status === 'seats_full') {
       return sendPage(res, 403, data.name,
         '<h1>Alle Plätze vergeben</h1><p class="sub">Für dieses Album sind bereits alle '
         + 'Zugänge belegt. Bitte melde dich bei der Person, die dir den Link geschickt hat — '
-        + 'sie kann einen Platz freigeben.</p>');
+        + 'sie kann einen Platz freigeben.</p>', pwaHeadTags(token));
     }
     return unavailable(res);
   }
@@ -1234,7 +1321,7 @@ module.exports = async function handler(req, res) {
   const deviceSecret = readCookie(req, name);
   const data = await callApi(token, deviceSecret ? { deviceSecret } : {}, req);
 
-  if (data.status === 'ok') return render(res, data, url.searchParams.get('p'));
-  if (data.status === 'code_required') return codeForm(res, data.name, null, 200, data.kind);
+  if (data.status === 'ok') return render(res, data, url.searchParams.get('p'), token);
+  if (data.status === 'code_required') return codeForm(res, data.name, null, 200, data.kind, token);
   return unavailable(res);
 };
