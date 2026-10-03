@@ -237,8 +237,18 @@ function pwaHeadTags(token) {
 // Script uses only `window.*` and `document` (no bare navigator/location) so
 // smoke.js can run it against a stub window, including a throwing
 // localStorage.
-const INSTALL_OPEN_IN_BROWSER = 'diese Seite zuerst im Browser: oben rechts auf ⋮ '
-  + 'bzw. das Kompass-/Safari-Symbol tippen, dann „Im Browser öffnen“.';
+//
+// Wording (2026-10-03, after Andi's Samsung test): Samsung puts an installed
+// symbol only into the app drawer by default, so the Android variants say
+// where to look. The "open in the browser" fallback is one sentence PER
+// platform — a mixed "⋮ bzw. Safari-Symbol" read as noise to the people this
+// is for. The in-app variant picks its sentence via data-os, chosen by the
+// script; the mode itself (when anything shows or hides) is unchanged.
+const INSTALL_ANDROID_WHERE = 'Danach findest du Marina auf dem Startbildschirm '
+  + 'oder in deiner App-Übersicht.';
+const INSTALL_ANDROID_FALLBACK = 'Klappt das nicht? Tippe oben rechts auf ⋮ und dann auf '
+  + '„In Chrome öffnen“.';
+const INSTALL_IOS_FALLBACK = 'Klappt das nicht? Öffne die Seite zuerst in Safari.';
 
 function installHint() {
   return '<aside class="install" id="lbInstall" hidden aria-label="Zum Startbildschirm hinzufügen">'
@@ -246,21 +256,24 @@ function installHint() {
     + '<p>Leg dir diese Seite als Symbol auf deinen Startbildschirm, '
     + 'dann bist du mit einem Tipp hier.</p>'
     + '<div data-mode="prompt" hidden>'
+    + '<p>' + INSTALL_ANDROID_WHERE + '</p>'
     + '<button type="button" id="lbInstallGo">Zum Startbildschirm hinzufügen</button>'
     + '<button type="button" class="install-dismiss">Nicht mehr anzeigen</button>'
     + '</div>'
     + '<div data-mode="android" class="install-steps" hidden>'
     + '<p>Tippe oben rechts auf ⋮ und dann auf „Zum Startbildschirm hinzufügen“.</p>'
-    + '<p>Siehst du das nicht, öffne ' + INSTALL_OPEN_IN_BROWSER + '</p>'
+    + '<p>' + INSTALL_ANDROID_WHERE + '</p>'
+    + '<p>' + INSTALL_ANDROID_FALLBACK + '</p>'
     + '<button type="button" class="install-dismiss">Erledigt</button>'
     + '</div>'
     + '<div data-mode="ios" class="install-steps" hidden>'
     + '<p>Tippe unten auf das Teilen-Symbol und dann auf „Zum Home-Bildschirm“.</p>'
-    + '<p>Siehst du das nicht, öffne ' + INSTALL_OPEN_IN_BROWSER + '</p>'
+    + '<p>' + INSTALL_IOS_FALLBACK + '</p>'
     + '<button type="button" class="install-dismiss">Erledigt</button>'
     + '</div>'
     + '<div data-mode="inapp" class="install-steps" hidden>'
-    + '<p>Öffne ' + INSTALL_OPEN_IN_BROWSER + '</p>'
+    + '<p data-os="android" hidden>' + INSTALL_ANDROID_FALLBACK + '</p>'
+    + '<p data-os="ios" hidden>' + INSTALL_IOS_FALLBACK + '</p>'
     + '<button type="button" class="install-dismiss">Nicht mehr anzeigen</button>'
     + '</div>'
     + '</aside>'
@@ -287,7 +300,9 @@ function installHint() {
     // In-app browsers that say so in their user agent (Android WebView marks
     // itself "; wv)"; on iOS an embedded view lacks Safari's own "Safari/").
     + 'if(/FBAN|FBAV|FB_IAB|FB4A|Instagram|WhatsApp|Line\\/|MicroMessenger|Snapchat|; wv\\)/.test(ua)'
-    + '||(ios&&!/Safari\\//.test(ua))){show("inapp");return;}'
+    + '||(ios&&!/Safari\\//.test(ua))){var o=box.querySelectorAll("[data-os]");'
+    + 'for(var k=0;k<o.length;k++){o[k].hidden=o[k].getAttribute("data-os")!==(ios?"ios":"android");}'
+    + 'show("inapp");return;}'
     + 'if(ios){show("ios");return;}'
     + 'w.addEventListener("appinstalled",hide);'
     + 'w.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferred=e;show("prompt");});'

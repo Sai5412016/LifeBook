@@ -204,9 +204,11 @@ function runHint(opts) {
   const parts = [...markup.matchAll(/data-mode="(\w+)"/g)].map((m) => el({ 'data-mode': m[1] }));
   assert(parts.map((p) => p.attrs['data-mode']).join() === 'prompt,android,ios,inapp', 'Varianten im Markup geändert');
   const dismiss = (markup.match(/class="install-dismiss"/g) || []).map(() => el());
+  const osParts = [...markup.matchAll(/data-os="(\w+)"/g)].map((m) => el({ 'data-os': m[1] }));
   const go = el();
   const box = el();
-  box.querySelectorAll = (sel) => (sel === '[data-mode]' ? parts : sel === '.install-dismiss' ? dismiss : []);
+  box.querySelectorAll = (sel) => (sel === '[data-mode]' ? parts : sel === '.install-dismiss' ? dismiss
+    : sel === '[data-os]' ? osParts : []);
   box.querySelector = (sel) => {
     const m = sel.match(/data-mode="(\w+)"/);
     return m ? parts.find((p) => p.attrs['data-mode'] === m[1]) : null;
@@ -236,6 +238,7 @@ function runHint(opts) {
   return {
     store, go, dismiss,
     shown() { return box.hidden ? null : parts.filter((p) => !p.hidden).map((p) => p.attrs['data-mode']).join('+'); },
+    osShown() { return osParts.filter((p) => !p.hidden).map((p) => p.attrs['data-os']).join('+'); },
     fire(type, ev) { (winListeners[type] || []).forEach((f) => f(ev)); },
     runTimers() { timers.splice(0).forEach((f) => f()); },
     clickDismissOf(mode) {
@@ -348,6 +351,34 @@ async function installHintChecks() {
     const a = runHint({ ...ANDROID, ua: UA.androidWebView }); a.runTimers();
     const i = runHint({ ...IPHONE, ua: UA.iphoneInstagram });
     assert(a.shown() === 'inapp' && i.shown() === 'inapp', a.shown() + ' / ' + i.shown());
+  });
+  await check('Skript: In-App-Browser zeigt nur den Satz der eigenen Plattform', () => {
+    const a = runHint({ ...ANDROID, ua: UA.androidWebView });
+    const i = runHint({ ...IPHONE, ua: UA.iphoneInstagram });
+    assert(a.osShown() === 'android', 'Android: ' + a.osShown());
+    assert(i.osShown() === 'ios', 'iPhone: ' + i.osShown());
+  });
+  await check('Hinweistexte je Variante (Samsung-Satz, Browser-Satz pro Plattform)', () => {
+    const html = internals.installHint();
+    const block = (attr) => {
+      const start = html.indexOf(attr);
+      assert(start !== -1, attr + ' fehlt');
+      return html.slice(start, html.indexOf('</div>', start));
+    };
+    const where = 'Danach findest du Marina auf dem Startbildschirm oder in deiner App-Übersicht.';
+    const androidFallback = 'Klappt das nicht? Tippe oben rechts auf ⋮ und dann auf „In Chrome öffnen“.';
+    const iosFallback = 'Klappt das nicht? Öffne die Seite zuerst in Safari.';
+    const prompt = block('data-mode="prompt"');
+    assert(prompt.indexOf(where) !== -1 && prompt.indexOf(where) < prompt.indexOf('id="lbInstallGo"'),
+      'Knopf-Variante: Samsung-Satz fehlt oder steht nach dem Knopf');
+    const android = block('data-mode="android"');
+    assert(android.indexOf('Zum Startbildschirm hinzufügen“.') < android.indexOf(where)
+      && android.indexOf(where) < android.indexOf(androidFallback), 'Android-Anleitung: Reihenfolge/Text');
+    const ios = block('data-mode="ios"');
+    assert(ios.includes(iosFallback) && !ios.includes('⋮') && !ios.includes('Chrome'), 'iPhone-Text');
+    const inapp = block('data-mode="inapp"');
+    assert(inapp.includes(androidFallback) && inapp.includes(iosFallback), 'In-App-Texte');
+    assert(!html.includes('bzw.'), 'noch ein "bzw." im Hinweis');
   });
   await check('Skript: gemerkt pro Album-Pfad (mit/ohne Schrägstrich gleich)', () => {
     const same = runHint({ ...IPHONE, path: '/a/tok-1/', stored: 'lb_install_hint:/a/tok-1' });
