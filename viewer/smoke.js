@@ -202,14 +202,16 @@ function runHint(opts) {
     click() { (this.listeners.click || []).forEach((f) => f()); },
   });
   const parts = [...markup.matchAll(/data-mode="(\w+)"/g)].map((m) => el({ 'data-mode': m[1] }));
-  assert(parts.map((p) => p.attrs['data-mode']).join() === 'prompt,android,ios,inapp', 'Varianten im Markup geändert');
+  assert(parts.map((p) => p.attrs['data-mode']).join() === 'prompt,android,ios,inapp,samsung', 'Varianten im Markup geändert');
   const dismiss = (markup.match(/class="install-dismiss"/g) || []).map(() => el());
   const osParts = [...markup.matchAll(/data-os="(\w+)"/g)].map((m) => el({ 'data-os': m[1] }));
   const go = el();
+  const whereEl = el({ 'data-where': '' });
   const box = el();
   box.querySelectorAll = (sel) => (sel === '[data-mode]' ? parts : sel === '.install-dismiss' ? dismiss
     : sel === '[data-os]' ? osParts : []);
   box.querySelector = (sel) => {
+    if (sel === '[data-where]') return whereEl;
     const m = sel.match(/data-mode="(\w+)"/);
     return m ? parts.find((p) => p.attrs['data-mode'] === m[1]) : null;
   };
@@ -235,8 +237,13 @@ function runHint(opts) {
     win.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v) };
   }
   new Function('window', 'document', js)(win, doc);
+  const modeShown = (m) => !parts.find((p) => p.attrs['data-mode'] === m).hidden && !box.hidden;
   return {
     store, go, dismiss,
+    // How many times the app-drawer sentence is visible: once in the "prompt"
+    // block, once more in the written steps unless the script hid that copy.
+    whereCount() { return (modeShown('prompt') ? 1 : 0) + (modeShown('android') && !whereEl.hidden ? 1 : 0); },
+    listeners(type) { return (winListeners[type] || []).length; },
     shown() { return box.hidden ? null : parts.filter((p) => !p.hidden).map((p) => p.attrs['data-mode']).join('+'); },
     osShown() { return osParts.filter((p) => !p.hidden).map((p) => p.attrs['data-os']).join('+'); },
     fire(type, ev) { (winListeners[type] || []).forEach((f) => f(ev)); },
@@ -258,9 +265,15 @@ const UA = {
   androidWebView: 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/AP2A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/129.0.0.0 Mobile Safari/537.36',
   iphoneSafari: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
   iphoneInstagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0.0',
+  samsung: 'Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36',
+  edge: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 EdgA/129.0.0.0',
+  opera: 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36 OPR/80.0.0.0',
+  yandex: 'Mozilla/5.0 (Linux; arm_64; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 YaBrowser/24.10.0 Mobile Safari/537.36',
+  firefox: 'Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0',
   desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
 };
 const ANDROID = { ua: UA.androidChrome, platform: 'Linux armv8l', touch: 5 };
+const SAMSUNG = { ua: UA.samsung, platform: 'Linux armv8l', touch: 5 };
 const IPHONE = { ua: UA.iphoneSafari, platform: 'iPhone', touch: 5 };
 
 async function installHintChecks() {
@@ -377,8 +390,68 @@ async function installHintChecks() {
     const ios = block('data-mode="ios"');
     assert(ios.includes(iosFallback) && !ios.includes('⋮') && !ios.includes('Chrome'), 'iPhone-Text');
     const inapp = block('data-mode="inapp"');
-    assert(inapp.includes(androidFallback) && inapp.includes(iosFallback), 'In-App-Texte');
+    assert(!inapp.includes('Klappt das nicht?'), 'In-App: "Klappt das nicht?" steht noch da');
+    assert(inapp.includes('<p data-os="android" hidden>Tippe oben rechts auf ⋮ und dann auf „In Chrome öffnen“.</p>'), 'In-App Android');
+    assert(inapp.includes('<p data-os="ios" hidden>Öffne die Seite zuerst in Safari.</p>'), 'In-App iPhone');
+    const samsung = block('data-mode="samsung"');
+    assert(samsung.includes('Tippe unten rechts auf ⋮, dann auf „Seite hinzufügen zu“ und auf „Startbildschirm“.'), 'Samsung-Anleitung');
+    assert(samsung.includes('Bitte nicht „Installieren“ wählen, das blockiert dein Handy.'), 'Samsung-Warnung');
+    assert(samsung.includes('>Erledigt<') && !samsung.includes('App-Übersicht') && !samsung.includes('id="lbInstallGo"'), 'Samsung-Block');
     assert(!html.includes('bzw.'), 'noch ein "bzw." im Hinweis');
+    // (c) the app-drawer sentence exists in exactly two places: the Chrome button variant and the Chrome written steps
+    assert(html.split(where).length - 1 === 2, 'App-Übersicht-Satz steht nicht genau zweimal im Markup');
+  });
+  // (a) Samsung Internet: never an install button, even when the event fires
+  await check('Skript: Samsung Internet -> Samsung-Anleitung, kein Installations-Knopf', async () => {
+    const h = runHint(SAMSUNG);
+    assert(h.shown() === 'samsung', 'sofort erwartet, war: ' + h.shown());
+    assert(h.listeners('beforeinstallprompt') === 0, 'lauscht auf beforeinstallprompt');
+    const ev = installEvent('accepted');
+    h.fire('beforeinstallprompt', ev); h.runTimers(); await tick();
+    assert(h.shown() === 'samsung' && ev.prompted === 0, 'nach Ereignis: ' + h.shown());
+    assert(h.whereCount() === 0, 'App-Übersicht-Satz bei Samsung sichtbar');
+    h.clickDismissOf('samsung');
+    assert(h.shown() === null && h.store.size === 1, '"Erledigt" blendet nicht aus/merkt nicht');
+  });
+  await check('Skript: Edge/Opera/Yandex/Firefox -> sofort bisherige Anleitung, kein Knopf', async () => {
+    for (const ua of [UA.edge, UA.opera, UA.yandex, UA.firefox]) {
+      const h = runHint({ ...ANDROID, ua });
+      assert(h.shown() === 'android', ua.slice(-24) + ': ' + h.shown());
+      assert(h.listeners('beforeinstallprompt') === 0, 'lauscht auf beforeinstallprompt');
+      const ev = installEvent('accepted'); h.fire('beforeinstallprompt', ev); h.runTimers();
+      assert(h.shown() === 'android' && ev.prompted === 0, 'Knopf trotz Nicht-Chrome');
+      assert(h.whereCount() === 0, 'App-Übersicht-Satz bei Nicht-Chrome sichtbar');
+    }
+  });
+  // (b) Chrome keeps the button
+  await check('Skript: Chrome bekommt weiterhin den Knopf (Dialog öffnet sich)', async () => {
+    const h = runHint(ANDROID); const ev = installEvent('accepted');
+    assert(h.listeners('beforeinstallprompt') === 1, 'lauscht nicht');
+    h.fire('beforeinstallprompt', ev);
+    assert(h.shown() === 'prompt', 'kein Knopf: ' + h.shown());
+    h.go.click(); await tick();
+    assert(ev.prompted === 1, 'prompt() nicht aufgerufen');
+  });
+  // (c) the app-drawer sentence at most once
+  await check('Skript: App-Übersicht-Satz höchstens einmal (auch nach Abbruch + erneutem Tipp)', async () => {
+    const h = runHint(ANDROID);
+    h.fire('beforeinstallprompt', installEvent('dismissed'));
+    assert(h.whereCount() === 1, 'Knopf-Variante: ' + h.whereCount());
+    h.go.click(); await tick();
+    assert(h.shown() === 'prompt' && h.whereCount() === 1, 'nach Abbruch: ' + h.whereCount());
+    h.go.click();
+    assert(h.shown() === 'prompt+android', 'zweiter Tipp: ' + h.shown());
+    assert(h.whereCount() === 1, 'Satz doppelt nach zweitem Tipp: ' + h.whereCount());
+    const t = runHint(ANDROID); t.runTimers();
+    assert(t.shown() === 'android' && t.whereCount() === 1, 'Chrome ohne Ereignis: ' + t.whereCount());
+  });
+  // (d) in-app texts without "Klappt das nicht?" — checked on the rendered state, not just the markup
+  await check('Skript: In-App-Texte ohne "Klappt das nicht?"', () => {
+    const html = internals.installHint();
+    const inapp = html.slice(html.indexOf('data-mode="inapp"'), html.indexOf('</div>', html.indexOf('data-mode="inapp"')));
+    assert(!/Klappt das nicht/.test(inapp), 'noch vorhanden');
+    assert(runHint({ ...ANDROID, ua: UA.androidWebView }).shown() === 'inapp', 'Android erkennt In-App nicht');
+    assert(runHint({ ...IPHONE, ua: UA.iphoneInstagram }).shown() === 'inapp', 'iPhone erkennt In-App nicht');
   });
   await check('Skript: gemerkt pro Album-Pfad (mit/ohne Schrägstrich gleich)', () => {
     const same = runHint({ ...IPHONE, path: '/a/tok-1/', stored: 'lb_install_hint:/a/tok-1' });
