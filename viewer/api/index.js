@@ -226,8 +226,13 @@ function pwaHeadTags(token) {
 // blocked localStorage (private mode, in-app browsers) must mean "show the
 // hint", never a script error.
 //
-// Android: the install button only appears after Chrome fires
-// beforeinstallprompt. Only a confirmed install (userChoice "accepted" or the
+// Android: the install button is offered in Google Chrome ONLY (user agent
+// has "Chrome/" and none of SamsungBrowser, EdgA, OPR, YaBrowser, "; wv"),
+// and only after Chrome fires beforeinstallprompt. Samsung Internet packages
+// the web app itself and Google Play Protect blocks that package ("Unsichere
+// App blockiert", device test 2026-10-03), so it gets plain-shortcut steps
+// instead; other non-Chrome browsers ignore the event and show the steps at
+// once. Only a confirmed install (userChoice "accepted" or the
 // appinstalled event) hides it for good; cancelling the system dialog leaves
 // the button standing. That event can be used only once, so a second tap
 // after a cancel shows the written steps instead of doing nothing. If the
@@ -246,9 +251,16 @@ function pwaHeadTags(token) {
 // script; the mode itself (when anything shows or hides) is unchanged.
 const INSTALL_ANDROID_WHERE = 'Danach findest du Marina auf dem Startbildschirm '
   + 'oder in deiner App-Übersicht.';
-const INSTALL_ANDROID_FALLBACK = 'Klappt das nicht? Tippe oben rechts auf ⋮ und dann auf '
-  + '„In Chrome öffnen“.';
-const INSTALL_IOS_FALLBACK = 'Klappt das nicht? Öffne die Seite zuerst in Safari.';
+const INSTALL_ANDROID_OPEN = 'Tippe oben rechts auf ⋮ und dann auf „In Chrome öffnen“.';
+const INSTALL_IOS_OPEN = 'Öffne die Seite zuerst in Safari.';
+// Inside an in-app browser the instruction stands alone (no "Klappt das
+// nicht?" — nothing was tried before); in the written steps it is the
+// fallback after the main instruction.
+const INSTALL_ANDROID_FALLBACK = 'Klappt das nicht? ' + INSTALL_ANDROID_OPEN;
+const INSTALL_IOS_FALLBACK = 'Klappt das nicht? ' + INSTALL_IOS_OPEN;
+const INSTALL_SAMSUNG_STEPS = 'Tippe unten rechts auf ⋮, dann auf „Seite hinzufügen zu“ '
+  + 'und auf „Startbildschirm“.';
+const INSTALL_SAMSUNG_WARNING = 'Bitte nicht „Installieren“ wählen, das blockiert dein Handy.';
 
 function installHint() {
   return '<aside class="install" id="lbInstall" hidden aria-label="Zum Startbildschirm hinzufügen">'
@@ -262,7 +274,7 @@ function installHint() {
     + '</div>'
     + '<div data-mode="android" class="install-steps" hidden>'
     + '<p>Tippe oben rechts auf ⋮ und dann auf „Zum Startbildschirm hinzufügen“.</p>'
-    + '<p>' + INSTALL_ANDROID_WHERE + '</p>'
+    + '<p data-where hidden>' + INSTALL_ANDROID_WHERE + '</p>'
     + '<p>' + INSTALL_ANDROID_FALLBACK + '</p>'
     + '<button type="button" class="install-dismiss">Erledigt</button>'
     + '</div>'
@@ -272,20 +284,31 @@ function installHint() {
     + '<button type="button" class="install-dismiss">Erledigt</button>'
     + '</div>'
     + '<div data-mode="inapp" class="install-steps" hidden>'
-    + '<p data-os="android" hidden>' + INSTALL_ANDROID_FALLBACK + '</p>'
-    + '<p data-os="ios" hidden>' + INSTALL_IOS_FALLBACK + '</p>'
+    + '<p data-os="android" hidden>' + INSTALL_ANDROID_OPEN + '</p>'
+    + '<p data-os="ios" hidden>' + INSTALL_IOS_OPEN + '</p>'
     + '<button type="button" class="install-dismiss">Nicht mehr anzeigen</button>'
+    + '</div>'
+    + '<div data-mode="samsung" class="install-steps" hidden>'
+    + '<p>' + INSTALL_SAMSUNG_STEPS + '</p>'
+    + '<p>' + INSTALL_SAMSUNG_WARNING + '</p>'
+    + '<button type="button" class="install-dismiss">Erledigt</button>'
     + '</div>'
     + '</aside>'
     + '<script>(function(){'
     + 'var w=window,d=document,box=d.getElementById("lbInstall");if(!box)return;'
     + 'var key="lb_install_hint:"+w.location.pathname.replace(/\\/+$/,"");'
-    + 'var gone=false,deferred=null;'
+    + 'var gone=false,deferred=null,chrome=false;'
     + 'function stored(){try{return w.localStorage.getItem(key)==="1";}catch(e){return false;}}'
     + 'function hide(){gone=true;box.hidden=true;try{w.localStorage.setItem(key,"1");}catch(e){}}'
     + 'function show(mode){if(gone)return;var p=box.querySelectorAll("[data-mode]");'
     + 'for(var i=0;i<p.length;i++){p[i].hidden=p[i].getAttribute("data-mode")!==mode;}'
+    // The app-drawer sentence belongs to Chrome only, and only once: it is
+    // part of the "prompt" variant, so the written steps carry it only when
+    // they are shown on their own (see more() for the combined case).
+    + 'var wh=box.querySelector("[data-where]");if(wh)wh.hidden=!(mode==="android"&&chrome);'
     + 'box.hidden=false;}'
+    + 'function more(){var wh=box.querySelector("[data-where]");if(wh)wh.hidden=true;'
+    + 'box.querySelector(\'[data-mode="android"]\').hidden=false;}'
     // Opened from the home-screen icon: never show anything.
     + 'var standalone=false;try{standalone=w.navigator.standalone===true'
     + '||(!!w.matchMedia&&w.matchMedia("(display-mode: standalone)").matches);}catch(e){}'
@@ -304,13 +327,20 @@ function installHint() {
     + 'for(var k=0;k<o.length;k++){o[k].hidden=o[k].getAttribute("data-os")!==(ios?"ios":"android");}'
     + 'show("inapp");return;}'
     + 'if(ios){show("ios");return;}'
+    // Samsung Internet builds the web app as its own package, which Google
+    // Play Protect blocks ("Unsichere App blockiert") — so no install button
+    // there, only the steps for a plain shortcut. Same for every other
+    // non-Chrome Android browser: ignore beforeinstallprompt, show the steps now.
+    + 'if(/SamsungBrowser/.test(ua)){show("samsung");return;}'
+    + 'chrome=/Chrome\\//.test(ua)&&!/SamsungBrowser|EdgA|OPR|YaBrowser|; wv/.test(ua);'
+    + 'if(!chrome){show("android");return;}'
     + 'w.addEventListener("appinstalled",hide);'
     + 'w.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferred=e;show("prompt");});'
     + 'd.getElementById("lbInstallGo").addEventListener("click",function(){'
-    + 'if(!deferred){box.querySelector(\'[data-mode="android"]\').hidden=false;return;}'
+    + 'if(!deferred){more();return;}'
     + 'var ev=deferred;deferred=null;'
     + 'try{ev.prompt();ev.userChoice.then(function(c){if(c&&c.outcome==="accepted")hide();},'
-    + 'function(){});}catch(e){box.querySelector(\'[data-mode="android"]\').hidden=false;}});'
+    + 'function(){});}catch(e){more();}});'
     + 'w.setTimeout(function(){if(!deferred&&box.hidden)show("android");},4000);'
     + '})();</' + 'script>';
 }
