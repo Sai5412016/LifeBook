@@ -162,6 +162,17 @@ const STYLE = `
   .person dd { margin:2px 0 0; }
   .person a { color:#E9613A; text-decoration:none; }
   svg a text, svg a circle { cursor:pointer; }
+  .install { background:#fff; border-left:4px solid #E9613A; border-radius:16px;
+    padding:14px 16px; margin:0 0 24px; font-size:.92rem;
+    box-shadow:0 1px 3px rgba(58,46,38,.10); }
+  .install[hidden], .install [hidden] { display:none; }
+  .install p { margin:0 0 6px; }
+  .install .install-title { font-weight:600; }
+  .install button { width:auto; margin:8px 12px 0 0; padding:10px 16px; font-size:.92rem; }
+  .install button.install-dismiss { background:none; color:#7A6A5E; font-weight:400;
+    padding:10px 4px; }
+  .install .install-steps { margin-top:10px; }
+  .card + .install { margin-top:20px; }
 `;
 
 // `headExtra`: markup for <head>, used only by pages reachable at /a/<token>
@@ -198,6 +209,103 @@ function pwaHeadTags(token) {
     + '<link rel="icon" type="image/png" href="/favicon.png">'
     + '<meta name="apple-mobile-web-app-title" content="Marina">'
     + '<meta name="theme-color" content="' + PWA_THEME_COLOR + '">';
+}
+
+// "Zum Startbildschirm hinzufügen" hint (task 2026-10-03), for every page at
+// /a/<token>. Rendered `hidden`: the script alone decides whether and which
+// variant to show, so without JavaScript, on a desktop, or when the page was
+// opened from the home-screen icon, nothing appears — never a dead button.
+//
+// All texts live in the markup, not in the script, so smoke.js can check them
+// and Andi can read them in one place. Each variant (data-mode) carries its
+// own dismiss button because the label differs ("Erledigt" after following
+// written steps, "Nicht mehr anzeigen" where the person simply declines).
+//
+// Remembered per album PATH in localStorage (two links = two symbols), only
+// on this device, never sent anywhere. Every storage access is wrapped: a
+// blocked localStorage (private mode, in-app browsers) must mean "show the
+// hint", never a script error.
+//
+// Android: the install button only appears after Chrome fires
+// beforeinstallprompt. Only a confirmed install (userChoice "accepted" or the
+// appinstalled event) hides it for good; cancelling the system dialog leaves
+// the button standing. That event can be used only once, so a second tap
+// after a cancel shows the written steps instead of doing nothing. If the
+// event never comes (Firefox, Custom Tabs from WhatsApp, …), the written
+// steps appear after a short wait.
+//
+// Script uses only `window.*` and `document` (no bare navigator/location) so
+// smoke.js can run it against a stub window, including a throwing
+// localStorage.
+const INSTALL_OPEN_IN_BROWSER = 'diese Seite zuerst im Browser: oben rechts auf ⋮ '
+  + 'bzw. das Kompass-/Safari-Symbol tippen, dann „Im Browser öffnen“.';
+
+function installHint() {
+  return '<aside class="install" id="lbInstall" hidden aria-label="Zum Startbildschirm hinzufügen">'
+    + '<p class="install-title">Marina immer griffbereit</p>'
+    + '<p>Leg dir diese Seite als Symbol auf deinen Startbildschirm, '
+    + 'dann bist du mit einem Tipp hier.</p>'
+    + '<div data-mode="prompt" hidden>'
+    + '<button type="button" id="lbInstallGo">Zum Startbildschirm hinzufügen</button>'
+    + '<button type="button" class="install-dismiss">Nicht mehr anzeigen</button>'
+    + '</div>'
+    + '<div data-mode="android" class="install-steps" hidden>'
+    + '<p>Tippe oben rechts auf ⋮ und dann auf „Zum Startbildschirm hinzufügen“.</p>'
+    + '<p>Siehst du das nicht, öffne ' + INSTALL_OPEN_IN_BROWSER + '</p>'
+    + '<button type="button" class="install-dismiss">Erledigt</button>'
+    + '</div>'
+    + '<div data-mode="ios" class="install-steps" hidden>'
+    + '<p>Tippe unten auf das Teilen-Symbol und dann auf „Zum Home-Bildschirm“.</p>'
+    + '<p>Siehst du das nicht, öffne ' + INSTALL_OPEN_IN_BROWSER + '</p>'
+    + '<button type="button" class="install-dismiss">Erledigt</button>'
+    + '</div>'
+    + '<div data-mode="inapp" class="install-steps" hidden>'
+    + '<p>Öffne ' + INSTALL_OPEN_IN_BROWSER + '</p>'
+    + '<button type="button" class="install-dismiss">Nicht mehr anzeigen</button>'
+    + '</div>'
+    + '</aside>'
+    + '<script>(function(){'
+    + 'var w=window,d=document,box=d.getElementById("lbInstall");if(!box)return;'
+    + 'var key="lb_install_hint:"+w.location.pathname.replace(/\\/+$/,"");'
+    + 'var gone=false,deferred=null;'
+    + 'function stored(){try{return w.localStorage.getItem(key)==="1";}catch(e){return false;}}'
+    + 'function hide(){gone=true;box.hidden=true;try{w.localStorage.setItem(key,"1");}catch(e){}}'
+    + 'function show(mode){if(gone)return;var p=box.querySelectorAll("[data-mode]");'
+    + 'for(var i=0;i<p.length;i++){p[i].hidden=p[i].getAttribute("data-mode")!==mode;}'
+    + 'box.hidden=false;}'
+    // Opened from the home-screen icon: never show anything.
+    + 'var standalone=false;try{standalone=w.navigator.standalone===true'
+    + '||(!!w.matchMedia&&w.matchMedia("(display-mode: standalone)").matches);}catch(e){}'
+    + 'if(standalone||stored())return;'
+    + 'var n=w.navigator,ua=n.userAgent||"";'
+    + 'var ios=/iPhone|iPad|iPod/.test(ua)||(n.platform==="MacIntel"&&n.maxTouchPoints>1);'
+    + 'var android=/Android/i.test(ua);'
+    // Desktop: no hint at all.
+    + 'if(!ios&&!android)return;'
+    + 'var x=box.querySelectorAll(".install-dismiss");'
+    + 'for(var j=0;j<x.length;j++){x[j].addEventListener("click",hide);}'
+    // In-app browsers that say so in their user agent (Android WebView marks
+    // itself "; wv)"; on iOS an embedded view lacks Safari's own "Safari/").
+    + 'if(/FBAN|FBAV|FB_IAB|FB4A|Instagram|WhatsApp|Line\\/|MicroMessenger|Snapchat|; wv\\)/.test(ua)'
+    + '||(ios&&!/Safari\\//.test(ua))){show("inapp");return;}'
+    + 'if(ios){show("ios");return;}'
+    + 'w.addEventListener("appinstalled",hide);'
+    + 'w.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferred=e;show("prompt");});'
+    + 'd.getElementById("lbInstallGo").addEventListener("click",function(){'
+    + 'if(!deferred){box.querySelector(\'[data-mode="android"]\').hidden=false;return;}'
+    + 'var ev=deferred;deferred=null;'
+    + 'try{ev.prompt();ev.userChoice.then(function(c){if(c&&c.outcome==="accepted")hide();},'
+    + 'function(){});}catch(e){box.querySelector(\'[data-mode="android"]\').hidden=false;}});'
+    + 'w.setTimeout(function(){if(!deferred&&box.hidden)show("android");},4000);'
+    + '})();</' + 'script>';
+}
+
+// Every page at /a/<token> takes both from here, so the head tags and the hint
+// can never end up on one page and not the other. Pages put the hint on top,
+// except the code form, which puts it BELOW the entry form so it never pushes
+// the name/code fields (autofocus) out of view.
+function albumPageExtras(token) {
+  return token ? { head: pwaHeadTags(token), hint: installHint() } : { head: undefined, hint: '' };
 }
 
 // Same shape manifestRoute() checks against — scope/start_url are identical
@@ -261,6 +369,7 @@ function unavailable(res) {
 // so the owner's device list reads "Rosi" instead of "Samsung, München".
 function codeForm(res, name, message, status, kind, token) {
   const what = kind === 'tree' ? 'Stammbaum' : 'Album';
+  const extras = albumPageExtras(token);
   sendPage(res, status || 200, name,
     '<h1>' + escapeHtml(name) + '</h1>'
     + '<p class="sub">Bitte gib deinen Vornamen und den Zugangscode ein.</p>'
@@ -274,6 +383,7 @@ function codeForm(res, name, message, status, kind, token) {
     + '<button type="submit">' + what + ' öffnen</button>'
     + (message ? '<p class="error">' + escapeHtml(message) + '</p>' : '')
     + '</form></div>'
+    + extras.hint
     + '<p class="foot">Dein Vorname wird nur der Familie angezeigt, die diesen '
     + 'Zugang eingerichtet hat.</p>'
     // One tap, one seat. Without this a nervous double-tap sends the form
@@ -281,7 +391,7 @@ function codeForm(res, name, message, status, kind, token) {
     + '<script>(function(){var f=document.forms[0];f.addEventListener("submit",'
     + 'function(){var b=f.querySelector("button");b.disabled=true;'
     + 'b.textContent="Einen Moment...";});})();</' + 'script>',
-    token ? pwaHeadTags(token) : undefined);
+    extras.head);
 }
 
 // Background music, gallery page only. The file lives in a private Supabase
@@ -315,8 +425,9 @@ function musicPlayer(url) {
 }
 
 function gallery(res, data, token) {
+  const extras = albumPageExtras(token);
   const photos = data.photos || [];
-  let body = '<h1>' + escapeHtml(data.name) + '</h1><p class="sub">'
+  let body = extras.hint + '<h1>' + escapeHtml(data.name) + '</h1><p class="sub">'
     + photos.length + (photos.length === 1 ? ' Foto' : ' Fotos') + ', privat geteilt.</p>'
     + (data.announcement
       ? '<p class="fresh">' + escapeHtml(String(data.announcement)) + '</p>' : '');
@@ -364,7 +475,7 @@ function gallery(res, data, token) {
   // because this line only runs once somebody actually opens the gallery.
   body += '<p class="foot">Privat geteilt. Bitte nicht weiterleiten.</p>'
     + musicPlayer(data.musicUrl);
-  sendPage(res, 200, data.name, body, token ? pwaHeadTags(token) : undefined);
+  sendPage(res, 200, data.name, body, extras.head);
 }
 
 // ---------------------------------------------------------------------------
@@ -1168,26 +1279,26 @@ function newsBanners(data) {
 }
 
 function treePage(res, data, personId, token) {
-  const headExtra = token ? pwaHeadTags(token) : undefined;
+  const extras = albumPageExtras(token);
   const tree = data.tree;
   if (!tree || !tree.nodes || tree.nodes.length === 0) {
     return sendPage(res, 200, data.name,
-      '<h1>' + escapeHtml(data.name) + '</h1>'
+      extras.hint + '<h1>' + escapeHtml(data.name) + '</h1>'
       + '<p class="sub">Für diesen Stammbaum sind noch keine Personen eingetragen.</p>',
-      headExtra);
+      extras.head);
   }
   const plan = layoutTree(tree.nodes, tree.unions || []);
   if (!plan) {
     return sendPage(res, 200, data.name,
-      '<h1>' + escapeHtml(data.name) + '</h1>'
+      extras.hint + '<h1>' + escapeHtml(data.name) + '</h1>'
       + '<p class="sub">Der Stammbaum lässt sich gerade nicht darstellen.</p>',
-      headExtra);
+      extras.head);
   }
 
   const rootNode = tree.nodes.find((n) => n.isRoot) || tree.nodes[0];
   const relation = relationTo(tree.nodes, tree.unions || [], rootNode.id);
 
-  let body = '<h1>' + escapeHtml(data.name) + '</h1>';
+  let body = extras.hint + '<h1>' + escapeHtml(data.name) + '</h1>';
   if (data.suggestionSaved) {
     body += '<p class="done">Danke! Dein Vorschlag ist angekommen und wird von '
       + 'der Familie geprüft.</p>';
@@ -1226,7 +1337,7 @@ function treePage(res, data, personId, token) {
   if (data.allowSuggestions) body += suggestionForm(tree.nodes);
   body += '<p class="foot">Privat geteilt. Bitte nicht weiterleiten.</p>'
     + musicPlayer(data.musicUrl);
-  sendPage(res, 200, data.name, body, headExtra);
+  sendPage(res, 200, data.name, body, extras.head);
 }
 
 function render(res, data, personId, token) {
@@ -1310,10 +1421,11 @@ module.exports = async function handler(req, res) {
         'Zu viele Fehlversuche. Bitte versuch es in einigen Minuten noch einmal.', 429, data.kind, token);
     }
     if (data.status === 'seats_full') {
+      const extras = albumPageExtras(token);
       return sendPage(res, 403, data.name,
-        '<h1>Alle Plätze vergeben</h1><p class="sub">Für dieses Album sind bereits alle '
+        extras.hint + '<h1>Alle Plätze vergeben</h1><p class="sub">Für dieses Album sind bereits alle '
         + 'Zugänge belegt. Bitte melde dich bei der Person, die dir den Link geschickt hat — '
-        + 'sie kann einen Platz freigeben.</p>', pwaHeadTags(token));
+        + 'sie kann einen Platz freigeben.</p>', extras.head);
     }
     return unavailable(res);
   }
