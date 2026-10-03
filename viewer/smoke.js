@@ -133,7 +133,37 @@ async function manifestRouteChecks() {
   }
 }
 
-manifestRouteChecks().then(() => {
+// /a/<token> and /a/<token>/ must be the SAME page (task 2026-10-03, Punkt 1):
+// start_url in manifestFor() is "/a/<token>/" with a trailing slash, so a
+// visitor who launches the installed app must land on a page the router
+// treats identically to the un-slashed form everyone's existing links use.
+// `handler()` itself does the parsing (parts = pathname.split('/').filter
+// (Boolean)), so this exercises the real router, not a reimplementation of it.
+function fakeReq(pathname, apiStatus) {
+  global.fetch = async () => ({ json: async () => (apiStatus) });
+  return { url: pathname, method: 'GET', headers: { host: 'lifebook-album-dabbly.vercel.app' } };
+}
+
+async function trailingSlashCheck() {
+  try {
+    const withoutSlash = fakeRes();
+    await internals.handler(fakeReq('/a/tok-slash', { status: 'unavailable' }), withoutSlash);
+    const withSlash = fakeRes();
+    await internals.handler(fakeReq('/a/tok-slash/', { status: 'unavailable' }), withSlash);
+    if (withoutSlash.statusCode !== withSlash.statusCode) {
+      throw new Error('unterschiedlicher Status: ' + withoutSlash.statusCode + ' vs. ' + withSlash.statusCode);
+    }
+    if (withoutSlash.out !== withSlash.out) {
+      throw new Error('unterschiedliche Seite ohne/mit Schrägstrich');
+    }
+    console.log('  ok   /a/<token> und /a/<token>/ liefern dieselbe Seite  (Status ' + withoutSlash.statusCode + ')');
+  } catch (error) {
+    failed++;
+    console.log('  FEHL /a/<token> und /a/<token>/ liefern dieselbe Seite  ' + error.message);
+  }
+}
+
+manifestRouteChecks().then(trailingSlashCheck).then(() => {
   console.log(failed ? '\n' + failed + ' Rauchprobe(n) fehlgeschlagen' : '\nAlle Rauchproben bestanden');
   process.exit(failed ? 1 : 0);
 });
