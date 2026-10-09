@@ -18,6 +18,7 @@ import { guardImport, guardImportAsync, useImportErrors } from '@/core/diagnosti
 import { checkEnv } from '@/core/env';
 import { registerForPushNotifications } from '@/core/notifications';
 import { useHasHousehold } from '@/features/household/repository';
+import { MedicationPlanRemindersEffect } from '@/features/medication-plan/components/plan-reminders-effect';
 import { runStartupTrashCleanup } from '@/features/photos/storage';
 
 // As early as this module can manage it — before anything else in the app
@@ -111,6 +112,7 @@ function DbAndAuthGate({ children }: { children: ReactNode }) {
     <PowerSyncContext.Provider value={db}>
       <PowerSyncConnector db={db} />
       <PushRegistrationEffect />
+      <MedicationPlanRemindersEffect />
       <TrashCleanupEffect db={db} />
       {children}
     </PowerSyncContext.Provider>

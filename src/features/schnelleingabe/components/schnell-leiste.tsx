@@ -15,21 +15,24 @@
 
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Spacing } from '@/constants/theme';
-import { formatTimeLabel, nowUtcIso } from '@/core/time';
+import { formatDayMonthLabel, formatTimeLabel, nowUtcIso } from '@/core/time';
 import { formatBackfillHint } from '@/core/tracking/day-selection';
 import { softDeleteDiaper } from '@/features/diaper/repository';
 import type { DiaperKind } from '@/features/diaper/types';
 import { softDeleteFeed, useRecentFeedsForChild } from '@/features/feeding/repository';
 import type { ActiveChild } from '@/features/household/repository';
-import { favoritenAusVerlauf } from '@/features/medication/logic';
+import { favoritenAusVerlauf, formatDuplicateDoseWarning } from '@/features/medication/logic';
 import type { MedicationFavorite } from '@/features/medication/logic';
-import { gabeLoeschen, useGabenHistorie } from '@/features/medication/repository';
+import { gabeLoeschen, useGabenDesTages, useGabenHistorie } from '@/features/medication/repository';
+import { formatPlanTitle, gabeFuerPlan, planAsFavorite, withoutPlanDuplicates } from '@/features/medication-plan/logic';
+import { useMedicationPlans } from '@/features/medication-plan/repository';
+import type { MedicationPlan } from '@/features/medication-plan/types';
 import { lighten, useUiColors } from '@/ui';
 
 import { formatSnackbarLabel, isDoubleTap } from '../logic';
@@ -56,6 +59,15 @@ export type SchnellLeisteProps = {
   todayLocalDate: string;
   /** "Ändern" auf der Snackbar — öffnet das zuständige Formular für genau diesen Eintrag. */
   onRequestEdit: (kind: SchnellEditKind, id: string) => void;
+  /** "Medikamentenplan öffnen" im Medizin-Panel, solange noch kein Mittel angelegt ist (task 2026-10-09). */
+  onOpenPlan: () => void;
+  /**
+   * Ein Abhaken in "Heute fällig" (features/medication-plan) meldet seinen
+   * neuen Eintrag hier an und bekommt damit dieselbe Snackbar mit "Ändern" /
+   * "Rückgängig" wie jeder Schnelleingabe-Tipp — keine zweite Snackbar.
+   * `token` ändert sich bei jedem Abhaken.
+   */
+  externalSnackbar?: { token: number; entryId: string; label: string } | null;
 };
 
 type Snackbar = { entryId: string; kind: SchnellEditKind; label: string };
@@ -69,6 +81,8 @@ export function SchnellLeiste({
   selectedLocalDate,
   todayLocalDate,
   onRequestEdit,
+  onOpenPlan,
+  externalSnackbar,
 }: SchnellLeisteProps) {
   const db = usePowerSync();
   const { accent, amber, green } = useUiColors();
@@ -93,7 +107,14 @@ export function SchnellLeiste({
   const medicationColor = green;
   const recentFeeds = useRecentFeedsForChild(child?.childId);
   const gabenHistorie = useGabenHistorie(child?.childId);
-  const favorites = favoritenAusVerlauf(gabenHistorie, nowUtcIso());
+  // Planmittel (features/medication-plan) stehen im Medizin-Panel IMMER als
+  // erste Knöpfe, auch ohne Verlauf; ein pausiertes Mittel nicht. Ein Favorit,
+  // der dasselbe Mittel mit derselben Dosis ist, entfällt, damit es nicht
+  // zweimal untereinander steht.
+  const { plans } = useMedicationPlans(child?.childId, tz);
+  const activePlans = useMemo(() => plans.filter((plan) => plan.enabled), [plans]);
+  const { gaben: selectedDayGaben } = useGabenDesTages(child?.childId, selectedLocalDate);
+  const favorites = withoutPlanDuplicates(favoritenAusVerlauf(gabenHistorie, nowUtcIso()), activePlans);
 
   const [snackbar, setSnackbar] = useState<Snackbar | null>(null);
   const [medSheetOpen, setMedSheetOpen] = useState(false);
@@ -187,6 +208,45 @@ export function SchnellLeiste({
     [context, db, tz, guardedTap, showSnackbar],
   );
 
+  useEffect(() => {
+    if (externalSnackbar) {
+      showSnackbar({ entryId: externalSnackbar.entryId, kind: 'medication', label: externalSnackbar.label });
+    }
+    // Only a NEW tap (new token) shows a snackbar, not a re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSnackbar?.token]);
+
+  /**
+   * Planmittel: wie ein Favorit, aber mit demselben Doppelgabe-Schutz wie
+   * "Heute fällig" — ein Mittel, das an diesem Tag schon eingetragen ist
+   * (gleicher Name, egal welche Menge), wird nur nach Rückfrage noch einmal
+   * geschrieben. Für gewöhnliche Favoriten bleibt das Verhalten unverändert.
+   */
+  const handlePlanMedikament = useCallback(
+    (plan: MedicationPlan) => {
+      const favorite = planAsFavorite(plan);
+      const given = gabeFuerPlan(selectedDayGaben, plan.name, selectedLocalDate);
+      if (!given) {
+        handleMedikament(favorite);
+        return;
+      }
+      Alert.alert(
+        'Schon gegeben',
+        formatDuplicateDoseWarning(given.occurred_at, given.tz, isViewingToday, formatDayMonthLabel(selectedLocalDate)),
+        [
+          { text: 'Abbrechen', style: 'cancel' },
+          { text: 'Trotzdem eintragen', onPress: () => handleMedikament(favorite) },
+        ],
+      );
+    },
+    [selectedDayGaben, selectedLocalDate, isViewingToday, handleMedikament],
+  );
+
+  const planItems = activePlans.map((plan) => {
+    const given = gabeFuerPlan(selectedDayGaben, plan.name, selectedLocalDate);
+    return { plan, givenTimeLabel: given ? formatTimeLabel(given.occurred_at, given.tz) : null };
+  });
+
   const handleUndo = useCallback(() => {
     if (!snackbar) return;
     const { entryId, kind } = snackbar;
@@ -237,9 +297,16 @@ export function SchnellLeiste({
 
       {medSheetOpen ? (
         <MedicationSheet
+          planItems={planItems}
           favorites={favorites}
           accent={accent}
+          green={green}
+          onPickPlan={handlePlanMedikament}
           onPick={handleMedikament}
+          onOpenPlan={() => {
+            setMedSheetOpen(false);
+            onOpenPlan();
+          }}
           onClose={() => setMedSheetOpen(false)}
         />
       ) : null}
@@ -336,14 +403,22 @@ function SchnellButton({
  * MedicationFormPanel) — "Schließen" statt Antippen außerhalb.
  */
 function MedicationSheet({
+  planItems,
   favorites,
   accent,
+  green,
+  onPickPlan,
   onPick,
+  onOpenPlan,
   onClose,
 }: {
+  planItems: readonly { plan: MedicationPlan; givenTimeLabel: string | null }[];
   favorites: readonly MedicationFavorite[];
   accent: string;
+  green: string;
+  onPickPlan: (plan: MedicationPlan) => void;
   onPick: (favorite: MedicationFavorite) => void;
+  onOpenPlan: () => void;
   onClose: () => void;
 }) {
   return (
@@ -356,13 +431,28 @@ function MedicationSheet({
           </ThemedText>
         </Pressable>
       </View>
-      {favorites.length === 0 ? (
-        <ThemedText type="small" themeColor="textSecondary">
-          Noch keine Favoriten. Im Alltag-Tab unter „Medikamente & Vitamine“ einmal eine Gabe eintragen — von da an
-          steht sie auch hier zur Auswahl.
-        </ThemedText>
+      {planItems.length === 0 && favorites.length === 0 ? (
+        <View style={styles.sheetEmpty}>
+          <ThemedText type="small" themeColor="textSecondary">
+            Noch keine Mittel angelegt.
+          </ThemedText>
+          <Pressable onPress={onOpenPlan} hitSlop={8}>
+            <ThemedText type="linkPrimary">Medikamentenplan öffnen</ThemedText>
+          </Pressable>
+        </View>
       ) : (
         <ScrollView style={styles.sheetList}>
+          {planItems.map(({ plan, givenTimeLabel }) => (
+            <Pressable
+              key={`plan:${plan.id}`}
+              onPress={() => onPickPlan(plan)}
+              style={[styles.sheetItem, { borderColor: green }]}>
+              <ThemedText type="smallBold">{formatPlanTitle(plan)}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                {givenTimeLabel ? `✓ ${givenTimeLabel} gegeben` : 'Plan'}
+              </ThemedText>
+            </Pressable>
+          ))}
           {favorites.map((favorite) => (
             <Pressable
               key={`${favorite.name.toLowerCase()}|${favorite.doseAmount ?? ''}|${favorite.doseUnit ?? ''}`}
@@ -430,6 +520,7 @@ const styles = StyleSheet.create({
   },
   sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sheetList: { gap: Spacing.two },
+  sheetEmpty: { gap: Spacing.two, alignItems: 'flex-start' },
   sheetItem: {
     padding: Spacing.two,
     borderRadius: Spacing.two,

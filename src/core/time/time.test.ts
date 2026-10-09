@@ -6,6 +6,7 @@ import {
   addSecondsToUtcIso,
   applyOccurredAtCorrection,
   combineLocalDateAndTime,
+  daysBetweenLocalDates,
   epochMillisToUtcIso,
   exifWallClockToUtcIso,
   formatDayLabel,
@@ -21,6 +22,7 @@ import {
   recentDurationSeconds,
   resolveLogOccurredAt,
   secondsBetween,
+  utcIsoToEpochMillis,
 } from './index';
 
 const BERLIN = 'Europe/Berlin';
@@ -415,5 +417,46 @@ describe('localTimeToPickerDate / pickerDateToLocalTime', () => {
 
   it('falls back to the current moment for a malformed input rather than throwing', () => {
     expect(() => localTimeToPickerDate('not-a-time')).not.toThrow();
+  });
+});
+
+describe('daysBetweenLocalDates', () => {
+  it('is 0 for the same day, positive forward, negative backward', () => {
+    expect(daysBetweenLocalDates('2026-10-09', '2026-10-09')).toBe(0);
+    expect(daysBetweenLocalDates('2026-10-09', '2026-10-11')).toBe(2);
+    expect(daysBetweenLocalDates('2026-10-11', '2026-10-09')).toBe(-2);
+  });
+
+  it('counts across a month and a year boundary', () => {
+    expect(daysBetweenLocalDates('2026-09-30', '2026-10-01')).toBe(1);
+    expect(daysBetweenLocalDates('2026-02-27', '2026-03-01')).toBe(2); // 2026 is no leap year
+    expect(daysBetweenLocalDates('2028-02-28', '2028-03-01')).toBe(2); // 2028 is
+    expect(daysBetweenLocalDates('2026-12-31', '2027-01-01')).toBe(1);
+  });
+
+  it('counts the 25-hour day of the autumn clock change (2026-10-25) as exactly one day', () => {
+    expect(daysBetweenLocalDates('2026-10-24', '2026-10-25')).toBe(1);
+    expect(daysBetweenLocalDates('2026-10-25', '2026-10-26')).toBe(1);
+    expect(daysBetweenLocalDates('2026-10-24', '2026-10-26')).toBe(2);
+  });
+
+  it('counts the 23-hour day of the spring clock change (2026-03-29) as exactly one day', () => {
+    expect(daysBetweenLocalDates('2026-03-28', '2026-03-30')).toBe(2);
+  });
+
+  it('throws on a malformed date instead of guessing', () => {
+    expect(() => daysBetweenLocalDates('nope', '2026-10-09')).toThrow();
+    expect(() => daysBetweenLocalDates('2026-10-09', '9.10.2026')).toThrow();
+  });
+});
+
+describe('utcIsoToEpochMillis', () => {
+  it('is the inverse of epochMillisToUtcIso', () => {
+    expect(utcIsoToEpochMillis('2026-10-09T06:00:00.000Z')).toBe(Date.UTC(2026, 9, 9, 6, 0, 0));
+    expect(epochMillisToUtcIso(utcIsoToEpochMillis('2026-10-25T07:00:00.000Z'))).toBe('2026-10-25T07:00:00.000Z');
+  });
+
+  it('throws on garbage instead of returning NaN', () => {
+    expect(() => utcIsoToEpochMillis('morgen')).toThrow();
   });
 });

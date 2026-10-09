@@ -25,6 +25,7 @@ import { DiaperSection } from '@/features/diaper/components/diaper-section';
 import { FeedingSection } from '@/features/feeding/components/feeding-section';
 import { useActiveChild } from '@/features/household/repository';
 import { MedicationSection } from '@/features/medication/components/medication-section';
+import { MedicationPlanSection } from '@/features/medication-plan/components/medication-plan-section';
 import { KeyboardSafeScreen } from '@/ui';
 
 export default function MehrScreen() {
@@ -77,6 +78,7 @@ export default function MehrScreen() {
         />
 
         <ThemedText type="subtitle">Medikamente & Vitamine</ThemedText>
+        <MedicationPlanSection child={child} session={session} tz={tz} />
         <MedicationSection
           child={child}
           session={session}
