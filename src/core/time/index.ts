@@ -75,6 +75,21 @@ export const toUtcIso = (date: Date): string => date.toISOString();
 export const epochMillisToUtcIso = (millis: number): string => new Date(millis).toISOString();
 
 /**
+ * ISO-8601 UTC -> epoch milliseconds — the inverse of `epochMillisToUtcIso`,
+ * for handing an instant to an API that wants a number (expo-notifications'
+ * DATE trigger, 2026-10-09). Throws on an unparseable string rather than
+ * returning NaN, so a bad instant can never become a notification at the
+ * wrong moment.
+ */
+export const utcIsoToEpochMillis = (utcIso: string): number => {
+  const millis = parseISO(utcIso).getTime();
+  if (Number.isNaN(millis)) {
+    throw new Error(`core/time: malformed instant "${utcIso}"`);
+  }
+  return millis;
+};
+
+/**
  * `utcIso` shifted forward (or back, for a negative `seconds`) by whole
  * seconds. 2026-08-13: added for the signed-URL cache (photos/storage.ts) to
  * compute an entry's own expiry instant — `new Date(...)` stays confined to
@@ -367,6 +382,28 @@ export const addDaysToLocalDate = (localDate: string, days: number): string => {
   const shiftedMonth = String(shifted.getUTCMonth() + 1).padStart(2, '0');
   const shiftedDay = String(shifted.getUTCDate()).padStart(2, '0');
   return `${shifted.getUTCFullYear()}-${shiftedMonth}-${shiftedDay}`;
+};
+
+/**
+ * Whole calendar days from `fromLocalDate` to `toLocalDate` (both YYYY-MM-DD):
+ * positive when `to` is later, 0 for the same day, negative when earlier.
+ * Pure civil-date arithmetic in UTC (`Date.UTC`, no DST) — exactly like
+ * `addDaysToLocalDate`, so the 23- and 25-hour days around a clock change
+ * count as one day each. Added 2026-10-09 for the medication plan's "jeden
+ * 2. Tag" (features/medication-plan/logic.ts#isPlanDueOn), which counts
+ * calendar days from the start day, never hours or time since the last dose.
+ * A malformed input throws — a plan with a corrupt start day must be caught
+ * by the caller's own parsing, never silently treated as "due".
+ */
+export const daysBetweenLocalDates = (fromLocalDate: string, toLocalDate: string): number => {
+  const parse = (value: string): number => {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new Error(`core/time: malformed local date "${value}"`);
+    }
+    return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  };
+  return Math.round((parse(toLocalDate) - parse(fromLocalDate)) / (24 * 60 * 60 * 1000));
 };
 
 /**

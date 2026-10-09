@@ -19,7 +19,7 @@
  */
 
 import DateTimePicker from '@expo/ui/community/datetime-picker';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,6 +41,8 @@ import { deviceTimeZone } from '@/core/time/device';
 import { canGoToNextDay, formatDayNavigationLabel, isSelectableDay } from '@/core/tracking/day-selection';
 import { zeitraumTage } from '@/features/berichte/logic';
 import { useActiveChild } from '@/features/household/repository';
+import { DueTodayList } from '@/features/medication-plan/components/due-today-list';
+import type { PlanTickResult } from '@/features/medication-plan/components/due-today-list';
 import { formatDayAndWeekLabel } from '@/features/photos/identity';
 import type { SchnellEditKind } from '@/features/schnelleingabe/components/schnell-leiste';
 import { SchnellLeiste } from '@/features/schnelleingabe/components/schnell-leiste';
@@ -74,6 +76,22 @@ export default function AlltagScreen() {
   const [selectedLocalDate, setSelectedLocalDate] = useState(() => toLocalDate(nowUtcIso(), tz));
   const [monthAnchor, setMonthAnchor] = useState(selectedLocalDate);
   const [viewMode, setViewMode] = useCalendarViewMode();
+  // Abhaken in "Heute fällig" -> dieselbe Snackbar wie die Schnelleingabe.
+  const [planTick, setPlanTick] = useState<PlanTickResult | null>(null);
+
+  // Tipp auf eine Medikamenten-Erinnerung (features/medication-plan,
+  // plan-reminders-effect.tsx): der Tab öffnet auf HEUTE, auch wenn davor ein
+  // anderer Tag gewählt war. `heute` ändert sich bei jedem Tipp.
+  const { heute } = useLocalSearchParams<{ heute?: string }>();
+  useEffect(() => {
+    if (heute) {
+      const today = toLocalDate(nowUtcIso(), tz);
+      setSelectedLocalDate(today);
+      setMonthAnchor(today);
+    }
+    // `tz` is stable for the device; only a new tap (new `heute`) matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heute]);
 
   const changeDay = (localDate: string) => {
     if (isSelectableDay(localDate, earliestLocalDate, todayLocalDate)) {
@@ -185,6 +203,15 @@ export default function AlltagScreen() {
 
           <DayChips selectedLocalDate={selectedLocalDate} daten={berichtDaten} />
 
+          <DueTodayList
+            child={child}
+            session={session}
+            tz={tz}
+            selectedLocalDate={selectedLocalDate}
+            todayLocalDate={todayLocalDate}
+            onLogged={setPlanTick}
+          />
+
           <TimerRow childId={child?.childId} tickingNow={tickingNow} />
         </View>
 
@@ -204,6 +231,8 @@ export default function AlltagScreen() {
         selectedLocalDate={selectedLocalDate}
         todayLocalDate={todayLocalDate}
         onRequestEdit={openEdit}
+        externalSnackbar={planTick}
+        onOpenPlan={() => router.push({ pathname: '/alltag/mehr', params: { selectedLocalDate } })}
       />
     </ThemedView>
   );

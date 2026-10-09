@@ -419,6 +419,34 @@ wenn Vercel „Ready" meldet.
 
 (2026-09-01)
 
+### 17. In `reminders` liegen Plan-Zeilen — und lokale Erinnerungen sind ungenau
+
+Am 09.10.2026 eingeführt: Der Medikamentenplan (`src/features/medication-plan/`)
+steht in der bisher ungenutzten Tabelle `reminders` — keine Migration, erkannt
+an `note.kind = 'medication_plan'`. Gegen die Live-Datenbank geprüft: RLS mit
+Haushalts-Mitgliedschaft, `REPLICA IDENTITY FULL`, in der Publikation
+`powersync`, keine Fremdschlüssel.
+
+→ Jede andere Nutzung von `reminders` (z. B. altersbezogene Erinnerungen über
+`trigger_age_days`) MUSS an `note.kind` unterscheiden und darf Planzeilen weder
+lesen noch ändern. Umgekehrt fasst das Plan-Repository nur Zeilen an, die
+`planFromReminderRow` als Plan akzeptiert (Tests in `repository.test.ts`).
+
+→ Ob `reminders` in den Sync-Regeln der PowerSync-KONSOLE freigegeben ist, kann
+kein Code und keine SQL-Abfrage zeigen (die Datei `sync-rules.yaml` im Repo
+nennt sie, die Konsole ist davon getrennt). Nur ein Gerätetest belegt es: Plan
+auf Gerät A anlegen, er muss auf Gerät B erscheinen.
+
+→ Lokale Erinnerungen laufen über `expo-notifications` (schon im Build, kein
+neues Paket). Die App deklariert `SCHEDULE_EXACT_ALARM` nicht (das würde den
+Fingerprint ändern); Android liefert deshalb ungenau, meist binnen Minuten,
+im Ruhezustand später. Der Text fragt deshalb „schon gegeben?", statt etwas
+zu behaupten. Eine Erinnerung für heute wird nur abgesagt, solange die App
+läuft/synchronisiert hat — hat das andere Handy die Gabe eingetragen und dieses
+noch nicht empfangen, klingelt es trotzdem.
+
+(2026-10-09)
+
 ## Speicher- und Zugriffsmodell für Fotos
 
 Privater Bucket `photos`, Pfadaufbau `{household_id}/{photo_id}/…`. **Der erste
