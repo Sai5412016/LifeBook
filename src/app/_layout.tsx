@@ -18,6 +18,7 @@ import { guardImport, guardImportAsync, useImportErrors } from '@/core/diagnosti
 import { checkEnv } from '@/core/env';
 import { registerForPushNotifications } from '@/core/notifications';
 import { useHasHousehold } from '@/features/household/repository';
+import { GabeUndoSnackbar } from '@/features/medication/components/gabe-undo-snackbar';
 import { MedicationPlanRemindersEffect } from '@/features/medication-plan/components/plan-reminders-effect';
 import { runStartupTrashCleanup } from '@/features/photos/storage';
 
@@ -115,6 +116,7 @@ function DbAndAuthGate({ children }: { children: ReactNode }) {
       <MedicationPlanRemindersEffect />
       <TrashCleanupEffect db={db} />
       {children}
+      <GabeUndoSnackbar />
     </PowerSyncContext.Provider>
   );
 }

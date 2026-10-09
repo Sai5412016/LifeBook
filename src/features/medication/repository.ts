@@ -169,6 +169,38 @@ export async function gabeLoeschen(db: AbstractPowerSyncDatabase, medicationId: 
   ]);
 }
 
+/**
+ * Undoes `gabeLoeschen`: clears `deleted_at` again, so the dose is back in the
+ * day's list, the totals, the calendar dots and "Heute fällig" (all of which
+ * only ever read rows with `deleted_at IS NULL`). Touches exactly the one row
+ * and only if it is currently deleted — restoring a live row is a no-op, so a
+ * stale second tap on "Rückgängig" can never rewrite anything. Returns whether
+ * a deleted row was restored.
+ */
+export async function gabeWiederherstellen(db: AbstractPowerSyncDatabase, medicationId: string): Promise<boolean> {
+  const rows = await db.getAll<{ id: string }>('SELECT id FROM medications WHERE id = ? AND deleted_at IS NOT NULL', [
+    medicationId,
+  ]);
+  if (rows.length === 0) {
+    return false;
+  }
+  await db.execute('UPDATE medications SET deleted_at = NULL, updated_at = ? WHERE id = ?', [nowUtcIso(), medicationId]);
+  return true;
+}
+
+/**
+ * Reactive: ONE dose by id — the edit screen's source. Returns the row even
+ * when it is soft-deleted (`deleted_at` set), so the screen can tell "gone"
+ * from "still loading"; callers must treat a deleted row as not editable.
+ */
+export function useGabe(medicationId: string | undefined): { gabe: MedicationRow | null; isLoading: boolean } {
+  const { data, isLoading } = useQuery<MedicationRow>(
+    `SELECT ${MEDICATION_COLUMNS} FROM medications WHERE id = ?`,
+    [medicationId ?? ''],
+  );
+  return { gabe: data?.[0] ?? null, isLoading };
+}
+
 /** Reactive: every dose of one local calendar day (`local_date`, YYYY-MM-DD), oldest first. */
 export function useGabenDesTages(
   childId: string | undefined,

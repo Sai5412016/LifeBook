@@ -155,6 +155,15 @@ export const formatShortDayLabel = (localDate: string): string => {
   return formatInTimeZone(date, 'UTC', 'EEE, d. MMM', { locale: de });
 };
 
+/**
+ * "9.10." — day and month of a UTC instant in `tz`, numeric, no year, no
+ * leading zeros. For short question texts that name a dose by when it was
+ * given ("Gabe vom 9.10. um 09:12 wirklich löschen?"). Read in the entry's
+ * OWN zone (pass the row's `tz`), same as `formatTimeLabel`.
+ */
+export const formatShortNumericDate = (utcIso: string, tz: string): string =>
+  formatInTimeZone(parseISO(utcIso), tz, 'd.M.');
+
 /** Wall-clock time of a UTC instant in `tz`, e.g. "14:32" — for event-list rows. */
 export const formatTimeLabel = (occurredAtUtcIso: string, tz: string): string =>
   formatInTimeZone(parseISO(occurredAtUtcIso), tz, 'HH:mm');

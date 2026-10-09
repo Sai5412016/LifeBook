@@ -8,7 +8,8 @@
  * Alltag-Tab zeigt seither nur noch "⏱ Schlaf" und "Mehr …", kein "⏱
  * Stillen" mehr. `editKind`/`editId`/`editToken` kommen optional als
  * Navigationsparameter (vom Tagesverlauf-Tipp auf eine Mahlzeit/Windel/Gabe,
- * oder von der Schnelleingabe-Snackbar's "Ändern").
+ * oder von der Schnelleingabe-Snackbar's "Ändern"). Gaben (Medikamente)
+ * öffnen NICHT mehr hier, sondern den eigenen Bildschirm `/alltag/gabe`.
  *
  * Seit 2026-10-09 steht im Bereich Medikamente & Vitamine zuerst der
  * Medikamentenplan (features/medication-plan): feste Mittel mit Rhythmus,
@@ -58,7 +59,6 @@ export default function MehrScreen() {
     params.editId && params.editToken ? { id: params.editId, token: Number(params.editToken) } : null;
   const feedingEdit = params.editKind === 'feed' ? requestedEdit : null;
   const diaperEdit = params.editKind === 'diaper' ? requestedEdit : null;
-  const medicationEdit = params.editKind === 'medication' ? requestedEdit : null;
 
   return (
     <ThemedView style={styles.container}>
@@ -89,7 +89,6 @@ export default function MehrScreen() {
           session={session}
           tz={tz}
           selectedLocalDate={selectedLocalDate}
-          requestedEdit={medicationEdit}
         />
       </KeyboardSafeScreen>
     </ThemedView>

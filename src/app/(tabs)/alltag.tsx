@@ -124,10 +124,8 @@ export default function AlltagScreen() {
     } else if (kind === 'diaper') {
       router.push({ pathname: '/alltag/mehr', params: { selectedLocalDate, editKind: 'diaper', editId: id, editToken } });
     } else if (kind === 'medication') {
-      router.push({
-        pathname: '/alltag/mehr',
-        params: { selectedLocalDate, editKind: 'medication', editId: id, editToken },
-      });
+      // Own screen since 2026-10-09 (was a panel far down /alltag/mehr).
+      router.push({ pathname: '/alltag/gabe', params: { id, selectedLocalDate } });
     } else if (kind === 'sleep') {
       router.push({ pathname: '/alltag/schlafen', params: { selectedLocalDate, editId: id, editToken } });
     }
@@ -210,6 +208,7 @@ export default function AlltagScreen() {
             selectedLocalDate={selectedLocalDate}
             todayLocalDate={todayLocalDate}
             onLogged={setPlanTick}
+            onEditGabe={(id) => openEdit('medication', id)}
           />
 
           <TimerRow childId={child?.childId} tickingNow={tickingNow} />
@@ -232,7 +231,7 @@ export default function AlltagScreen() {
         todayLocalDate={todayLocalDate}
         onRequestEdit={openEdit}
         externalSnackbar={planTick}
-        onOpenPlan={() => router.push({ pathname: '/alltag/mehr', params: { selectedLocalDate } })}
+        onOpenPlan={() => router.push('/alltag/medikamentenplan')}
       />
     </ThemedView>
   );

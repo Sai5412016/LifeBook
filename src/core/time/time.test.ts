@@ -13,6 +13,7 @@ import {
   formatDayMonthLabel,
   formatDuration,
   formatShortDayLabel,
+  formatShortNumericDate,
   formatTimeLabel,
   isoWeekdayOfLocalDate,
   localDateToPickerDate,
@@ -458,5 +459,17 @@ describe('utcIsoToEpochMillis', () => {
 
   it('throws on garbage instead of returning NaN', () => {
     expect(() => utcIsoToEpochMillis('morgen')).toThrow();
+  });
+});
+
+describe('formatShortNumericDate', () => {
+  it('is day.month. without leading zeros', () => {
+    expect(formatShortNumericDate('2026-10-09T07:12:00.000Z', BERLIN)).toBe('9.10.');
+    expect(formatShortNumericDate('2026-12-24T12:00:00.000Z', BERLIN)).toBe('24.12.');
+  });
+
+  it("reads the day in the given zone (23:30 UTC is already the next day in Berlin)", () => {
+    expect(formatShortNumericDate('2026-01-05T23:30:00.000Z', BERLIN)).toBe('6.1.');
+    expect(formatShortNumericDate('2026-01-05T23:30:00.000Z', 'UTC')).toBe('5.1.');
   });
 });

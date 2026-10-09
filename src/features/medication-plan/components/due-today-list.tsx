@@ -16,22 +16,20 @@
  * What it deliberately never does: offer to catch up a missed day (a day
  * without a dose is just visible in the calendar dots), show a medicine on a
  * day it is not due, suggest a different or larger dose, or log without a
- * tap. A medicine already entered that day shows ✓; tapping it again goes
- * through the existing double-dose confirmation
- * (medication/logic.ts#formatDuplicateDoseWarning), never straight through.
+ * tap. A medicine already entered that day shows ✓; tapping it opens that
+ * dose's edit screen (/alltag/gabe: change or delete — task 2026-10-09).
  */
 
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
 import { useCallback, useRef } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { formatDayMonthLabel, formatTimeLabel, nowUtcIso } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
-import { formatDuplicateDoseWarning } from '@/features/medication/logic';
 import { useGabenDesTages } from '@/features/medication/repository';
 import { formatSnackbarLabel, isDoubleTap } from '@/features/schnelleingabe/logic';
 import { schnellMedikament } from '@/features/schnelleingabe/repository';
@@ -52,9 +50,11 @@ export type DueTodayListProps = {
   selectedLocalDate: string;
   todayLocalDate: string;
   onLogged: (result: PlanTickResult) => void;
+  /** Tap on an already-ticked (✓) row — opens that dose's edit screen. */
+  onEditGabe: (medicationId: string) => void;
 };
 
-export function DueTodayList({ child, session, tz, selectedLocalDate, todayLocalDate, onLogged }: DueTodayListProps) {
+export function DueTodayList({ child, session, tz, selectedLocalDate, todayLocalDate, onLogged, onEditGabe }: DueTodayListProps) {
   const db = usePowerSync();
   const { green } = useUiColors();
   const { plans } = useMedicationPlans(child?.childId, tz);
@@ -112,23 +112,15 @@ export function DueTodayList({ child, session, tz, selectedLocalDate, todayLocal
         return;
       }
 
-      // Already entered that day: the existing double-dose confirmation, never a silent second dose.
-      Alert.alert(
-        'Schon gegeben',
-        formatDuplicateDoseWarning(given.occurred_at, tz, isViewingToday, formatDayMonthLabel(selectedLocalDate)),
-        [
-          { text: 'Abbrechen', style: 'cancel' },
-          {
-            text: 'Trotzdem eintragen',
-            onPress: () => {
-              lastTapRef.current[plan.id] = nowUtcIso();
-              void log(plan);
-            },
-          },
-        ],
-      );
+      // Task 2026-10-09: a ✓ row now OPENS THE ENTERED DOSE for correction or
+      // deletion (a wrongly entered dose must be fixable from here — it used
+      // to open a "log another one?" confirmation instead, which made the ✓
+      // row a dead end for exactly the case that mattered). A deliberate
+      // second dose is still possible, with its double-dose confirmation, via
+      // the quick-entry bar and the list under "Mehr …".
+      onEditGabe(given.id);
     },
-    [gaben, selectedLocalDate, tz, isViewingToday, log],
+    [gaben, selectedLocalDate, log, onEditGabe],
   );
 
   if (due.length === 0) {

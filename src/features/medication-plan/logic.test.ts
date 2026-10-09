@@ -4,8 +4,11 @@ import type { MedicationFavorite } from '@/features/medication/logic';
 
 import {
   buildPlanRowValues,
+  describePlanListLine,
   describePlanSchedule,
+  describePlanStatus,
   describeRhythm,
+  describeRhythmButton,
   duePlansOn,
   formatPlanTitle,
   gabeFuerPlan,
@@ -639,5 +642,36 @@ describe('describePlanSchedule', () => {
       'jeden Tag · Erinnerung 08:00 · ab 12. Oktober',
     );
     expect(describePlanSchedule(plan({ startLocalDate: '2026-10-09' }), '2026-10-09')).not.toMatch(/ab /);
+  });
+});
+
+describe('Rhythmus in der Darstellung (task 2026-10-09)', () => {
+  it('the two buttons read "Jeden Tag" / "Jeden 2. Tag"', () => {
+    expect(describeRhythmButton(1)).toBe('Jeden Tag');
+    expect(describeRhythmButton(2)).toBe('Jeden 2. Tag');
+  });
+
+  it('the list line carries the chosen rhythm and the reminder time', () => {
+    const daily = { name: 'Vitamin D3', doseAmount: 1, doseUnit: 'drops' as const, intervalDays: 1, remind: true, remindTime: '08:00' };
+    expect(describePlanListLine(daily)).toBe('Vitamin D3 · 1 Tropfen · jeden Tag · 08:00');
+    expect(describePlanListLine({ ...daily, intervalDays: 2 })).toBe('Vitamin D3 · 1 Tropfen · jeden 2. Tag · 08:00');
+  });
+
+  it('leaves the time out when no reminder is wanted', () => {
+    expect(
+      describePlanListLine({ name: 'Vitamin K', doseAmount: 2, doseUnit: 'mg', intervalDays: 2, remind: false, remindTime: '08:00' }),
+    ).toBe('Vitamin K · 2 mg · jeden 2. Tag');
+  });
+
+  it('the status line only adds what changes whether the medicine shows up', () => {
+    expect(describePlanStatus({ enabled: true, startLocalDate: '2026-10-01' }, '2026-10-09')).toBeNull();
+    expect(describePlanStatus({ enabled: false, startLocalDate: '2026-10-01' }, '2026-10-09')).toBe('Pausiert');
+    expect(describePlanStatus({ enabled: true, startLocalDate: '2026-10-12' }, '2026-10-09')).toContain('ab ');
+  });
+
+  it('the rhythm shown is the rhythm stored (round trip through the row values)', () => {
+    for (const intervalDays of [1, 2]) {
+      expect(parseRepeatRule(repeatRuleForInterval(intervalDays))).toBe(intervalDays);
+    }
   });
 });

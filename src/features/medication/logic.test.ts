@@ -6,7 +6,9 @@ import {
   favoritenAusVerlauf,
   firstNameOf,
   formatDoseLabel,
+  formatDeleteGabeQuestion,
   formatDuplicateDoseWarning,
+  formatGabeDeletedLabel,
   formatGivenTodayLabel,
   letzteGabeHeute,
   resolveGabeOccurredAt,
@@ -259,5 +261,29 @@ describe('resolveGabeOccurredAt', () => {
 
   it('returns null for a malformed date/time', () => {
     expect(resolveGabeOccurredAt('not-a-date', '21:30', 'Europe/Berlin')).toBeNull();
+  });
+});
+
+describe('formatDeleteGabeQuestion', () => {
+  it('names the day and the time of the dose, read in the dose\'s own zone', () => {
+    // 07:12Z is 09:12 in Berlin (CEST)
+    expect(formatDeleteGabeQuestion('2026-10-09T07:12:00.000Z', 'Europe/Berlin')).toBe(
+      'Gabe vom 9.10. um 09:12 wirklich löschen?',
+    );
+  });
+
+  it('uses the stored zone, so a dose just after local midnight keeps its local day', () => {
+    // 22:15Z on the 8th is 00:15 on the 9th in Berlin
+    expect(formatDeleteGabeQuestion('2026-10-08T22:15:00.000Z', 'Europe/Berlin')).toBe(
+      'Gabe vom 9.10. um 00:15 wirklich löschen?',
+    );
+  });
+});
+
+describe('formatGabeDeletedLabel', () => {
+  it('says what was deleted, with the time', () => {
+    expect(formatGabeDeletedLabel('Vitamin D3', '2026-10-09T07:12:00.000Z', 'Europe/Berlin')).toBe(
+      'Gelöscht: Vitamin D3 · 09:12',
+    );
   });
 });
