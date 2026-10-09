@@ -439,7 +439,11 @@ export function permissionStepForSave(remind: boolean, status: PushPermissionSta
 export const PERMISSION_REASON =
   'Damit LifeBook dich zur eingestellten Uhrzeit erinnern kann, braucht es die Erlaubnis, dir Benachrichtigungen zu schicken.';
 
-/** Shown after saving when reminders cannot ring on this phone yet. */
+/** Shown after saving when the person declined our own "Nicht jetzt" — nothing is decided yet, the system will still be asked. */
+export const PERMISSION_LATER_HINT =
+  'Gespeichert. Erinnerungen kommen erst an, wenn du Benachrichtigungen erlaubst — das fragt LifeBook beim nächsten Speichern mit Erinnerung wieder.';
+
+/** Shown after saving when the system itself has refused (it will not ask again). */
 export const PERMISSION_DENIED_HINT =
   'Gespeichert. Benachrichtigungen sind für LifeBook ausgeschaltet — Erinnerungen kommen erst an, wenn du sie in den Android-Einstellungen erlaubst.';
 

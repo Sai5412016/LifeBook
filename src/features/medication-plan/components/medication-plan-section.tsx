@@ -35,6 +35,7 @@ import { Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
 import {
   DEFAULT_REMIND_TIME,
   PERMISSION_DENIED_HINT,
+  PERMISSION_LATER_HINT,
   PERMISSION_REASON,
   PLAN_INTERVAL_OPTIONS,
   describePlanSchedule,
@@ -66,15 +67,17 @@ export type MedicationPlanSectionProps = {
 
 /**
  * Explains the permission in one sentence and asks — only when the system has
- * never been asked. Resolves to whether reminders can ring on this phone.
+ * never been asked. 'ok' = reminders can ring on this phone; 'later' = the
+ * person said "Nicht jetzt" to OUR explanation (nothing decided, the system
+ * was not asked); 'denied' = the system refused (now or earlier).
  */
-async function ensureReminderPermission(wantsReminder: boolean): Promise<boolean> {
+async function ensureReminderPermission(wantsReminder: boolean): Promise<'ok' | 'later' | 'denied'> {
   const step = permissionStepForSave(wantsReminder, await getReminderPermission());
   if (step === 'none') {
-    return true;
+    return 'ok';
   }
   if (step === 'denied') {
-    return false;
+    return 'denied';
   }
   const proceed = await new Promise<boolean>((resolve) => {
     Alert.alert(
@@ -88,9 +91,9 @@ async function ensureReminderPermission(wantsReminder: boolean): Promise<boolean
     );
   });
   if (!proceed) {
-    return false;
+    return 'later';
   }
-  return (await requestReminderPermission()) === 'granted';
+  return (await requestReminderPermission()) === 'granted' ? 'ok' : 'denied';
 }
 
 export function MedicationPlanSection({ child, session, tz }: MedicationPlanSectionProps) {
@@ -128,13 +131,15 @@ export function MedicationPlanSection({ child, session, tz }: MedicationPlanSect
     async (values: PlanFormValues, write: () => Promise<boolean>) => {
       setBusy(true);
       try {
-        const canRing = await ensureReminderPermission(values.remind && remindersOn);
+        const permission = await ensureReminderPermission(values.remind && remindersOn);
         const saved = await write();
         if (!saved) {
           showMessage('Das ließ sich nicht speichern. Bitte Angaben prüfen.', 4000);
           return false;
         }
-        if (values.remind && remindersOn && !canRing) {
+        if (permission === 'later') {
+          showMessage(PERMISSION_LATER_HINT, 8000);
+        } else if (permission === 'denied') {
           showMessage(PERMISSION_DENIED_HINT, 8000);
         } else {
           showMessage('Gespeichert.');

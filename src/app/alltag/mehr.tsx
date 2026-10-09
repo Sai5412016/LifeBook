@@ -9,6 +9,11 @@
  * Stillen" mehr. `editKind`/`editId`/`editToken` kommen optional als
  * Navigationsparameter (vom Tagesverlauf-Tipp auf eine Mahlzeit/Windel/Gabe,
  * oder von der Schnelleingabe-Snackbar's "Ändern").
+ *
+ * Seit 2026-10-09 steht im Bereich Medikamente & Vitamine zuerst der
+ * Medikamentenplan (features/medication-plan): feste Mittel mit Rhythmus,
+ * "Heute fällig" im Alltag-Tab und Erinnerungen — die Einzelgaben darunter
+ * bleiben unverändert.
  */
 
 import { useLocalSearchParams } from 'expo-router';
