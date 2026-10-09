@@ -10,7 +10,13 @@
  * under Vitest; the device- and database-touching side lives in ./repository.
  */
 
-import { combineLocalDateAndTime, formatTimeLabel, secondsBetween, toLocalDate } from '@/core/time';
+import {
+  combineLocalDateAndTime,
+  formatShortNumericDate,
+  formatTimeLabel,
+  secondsBetween,
+  toLocalDate,
+} from '@/core/time';
 
 import type { MedicationDoseUnit, MedicationRoute } from './types';
 
@@ -249,4 +255,20 @@ export function resolveGabeOccurredAt(localDate: string, time: string, tz: strin
     return null;
   }
   return { occurredAtUtcIso, localDate: toLocalDate(occurredAtUtcIso, tz) };
+}
+
+/**
+ * "Gabe vom 9.10. um 09:12 wirklich löschen?" — the confirmation before a
+ * dose is deleted (task 2026-10-09). Names the dose by WHEN it was given, in
+ * the entry's own zone, so the person can tell which one they are about to
+ * remove when several look alike (the day a dose was accidentally given four
+ * times is the reason this has to be correctable).
+ */
+export function formatDeleteGabeQuestion(occurredAtUtcIso: string, tz: string): string {
+  return `Gabe vom ${formatShortNumericDate(occurredAtUtcIso, tz)} um ${formatTimeLabel(occurredAtUtcIso, tz)} wirklich löschen?`;
+}
+
+/** "Gelöscht: Vitamin D3 · 09:12" — the snackbar text after a dose was deleted. */
+export function formatGabeDeletedLabel(name: string, occurredAtUtcIso: string, tz: string): string {
+  return `Gelöscht: ${name} · ${formatTimeLabel(occurredAtUtcIso, tz)}`;
 }

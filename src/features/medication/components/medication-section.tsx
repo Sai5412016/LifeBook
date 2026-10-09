@@ -12,34 +12,22 @@
  * supports a single line of text and this one needs up to three.
  */
 
-import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import {
-  formatDayMonthLabel,
-  formatTimeLabel,
-  localDateToPickerDate,
-  localTimeToPickerDate,
-  nowUtcIso,
-  pickerDateToLocalDate,
-  pickerDateToLocalTime,
-  toLocalDate,
-} from '@/core/time';
+import { formatDayMonthLabel, formatTimeLabel, nowUtcIso, toLocalDate } from '@/core/time';
 import { defaultLogTime } from '@/core/tracking/day-selection';
-import { formatShortGermanDate } from '@/features/events/logic';
 import type { ActiveChild } from '@/features/household/repository';
 import { useHouseholdMemberNames } from '@/features/household/repository';
-import { Chip, TextField, useHydrateOnce, useUiColors } from '@/ui';
+import { useUiColors } from '@/ui';
 
 import {
-  describeDoseUnit,
-  describeMedicationRoute,
   favoritenAusVerlauf,
   firstNameOf,
   formatDoseLabel,
@@ -48,22 +36,10 @@ import {
   letzteGabeHeute,
 } from '../logic';
 import type { MedicationFavorite } from '../logic';
-import { gabeAendern, gabeEintragen, gabeLoeschen, useGabenDesTages, useGabenHistorie } from '../repository';
-import type { GabeAendernInput } from '../repository';
-import type { MedicationDoseUnit, MedicationRoute, MedicationRow } from '../types';
-
-const DOSE_UNIT_OPTIONS: readonly MedicationDoseUnit[] = ['ie', 'drops', 'ml', 'mg', 'spoon', 'piece'];
-const ROUTE_OPTIONS: readonly MedicationRoute[] = ['oral', 'bottle', 'other'];
-
-/** Ignores a decimal comma, same forgiving parse as everywhere a German user types a number. */
-function parseDoseAmount(text: string): number | null | 'invalid' {
-  const trimmed = text.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-  const parsed = Number(trimmed.replace(',', '.'));
-  return Number.isFinite(parsed) ? parsed : 'invalid';
-}
+import { gabeEintragen, useGabenDesTages, useGabenHistorie } from '../repository';
+import type { MedicationRow } from '../types';
+import { MedicationFormPanel } from './medication-form-panel';
+import type { MedicationFormSubmitInput } from './medication-form-panel';
 
 export type MedicationSectionProps = {
   child: ActiveChild | null;
@@ -71,13 +47,6 @@ export type MedicationSectionProps = {
   tz: string;
   /** The Alltag day selector's currently viewed day — task 2026-09-24. */
   selectedLocalDate: string;
-  /**
-   * "Ändern" tapped on a schnelleingabe snackbar for a Medikament entry —
-   * opens this section's own edit panel for that id. `token` changes on
-   * every request so the SAME entry can be requested again after closing
-   * the panel (task 2026-09-23, schnelleingabe/components/schnell-leiste.tsx).
-   */
-  requestedEdit?: { id: string; token: number } | null;
 };
 
 export function MedicationSection({
@@ -85,9 +54,9 @@ export function MedicationSection({
   session,
   tz,
   selectedLocalDate,
-  requestedEdit,
 }: MedicationSectionProps) {
   const db = usePowerSync();
+  const router = useRouter();
   const { accent } = useUiColors();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
   const isViewingToday = selectedLocalDate === todayLocalDate;
@@ -99,15 +68,7 @@ export function MedicationSection({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [editId, setEditId] = useState<string | null>(null);
   const messageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (requestedEdit) {
-      setEditId(requestedEdit.id);
-      setCreating(false);
-    }
-  }, [requestedEdit?.id, requestedEdit?.token]);
 
   const showMessage = useCallback((text: string) => {
     if (messageTimeoutRef.current) {
@@ -198,39 +159,6 @@ export function MedicationSection({
     [child, session?.user.id, db, tz, showMessage],
   );
 
-  const handleEditSubmit = useCallback(
-    async (medicationId: string, input: GabeAendernInput) => {
-      setBusy(true);
-      try {
-        await gabeAendern(db, medicationId, input);
-        setEditId(null);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [db],
-  );
-
-  const handleRequestDelete = useCallback(
-    (medication: MedicationRow) => {
-      const time = formatTimeLabel(medication.occurred_at, medication.tz);
-      Alert.alert('Eintrag löschen?', `${medication.name}, ${time} wirklich löschen?`, [
-        { text: 'Abbrechen', style: 'cancel' },
-        {
-          text: 'Löschen',
-          style: 'destructive',
-          onPress: async () => {
-            await gabeLoeschen(db, medication.id);
-            setEditId(null);
-          },
-        },
-      ]);
-    },
-    [db],
-  );
-
-  const editTarget = editId ? selectedDayGaben.find((gabe) => gabe.id === editId) : undefined;
-
   return (
     <View style={styles.section}>
       {favorites.length > 0 ? (
@@ -276,28 +204,16 @@ export function MedicationSection({
 
       {creating ? (
         <MedicationFormPanel
-          mode={{ kind: 'create' }}
+          mode={{
+            kind: 'create',
+            defaultLocalDate: selectedLocalDate,
+            defaultTime: defaultLogTime(selectedLocalDate, todayLocalDate, formatTimeLabel(nowUtcIso(), tz)),
+          }}
           favorites={favorites}
           tz={tz}
           busy={busy}
-          defaultLocalDate={selectedLocalDate}
-          defaultTime={defaultLogTime(selectedLocalDate, todayLocalDate, formatTimeLabel(nowUtcIso(), tz))}
           onSubmit={handleCreateSubmit}
           onCancel={() => setCreating(false)}
-        />
-      ) : null}
-
-      {editTarget ? (
-        <MedicationFormPanel
-          mode={{ kind: 'edit', medication: editTarget }}
-          favorites={favorites}
-          tz={tz}
-          busy={busy}
-          defaultLocalDate={selectedLocalDate}
-          defaultTime={defaultLogTime(selectedLocalDate, todayLocalDate, formatTimeLabel(nowUtcIso(), tz))}
-          onSubmit={(input) => handleEditSubmit(editTarget.id, input)}
-          onCancel={() => setEditId(null)}
-          onDelete={() => handleRequestDelete(editTarget)}
         />
       ) : null}
 
@@ -312,7 +228,7 @@ export function MedicationSection({
               key={gabe.id}
               gabe={gabe}
               firstName={firstNameOf(memberNames.get(gabe.created_by) ?? '')}
-              onPress={() => setEditId(gabe.id)}
+              onPress={() => router.push({ pathname: '/alltag/gabe', params: { id: gabe.id, selectedLocalDate } })}
             />
           ))}
         </View>
@@ -399,246 +315,6 @@ function MedicationRowItem({
   );
 }
 
-export type MedicationFormSubmitInput = {
-  name: string;
-  doseAmount: number | null;
-  doseUnit: MedicationDoseUnit | null;
-  route: MedicationRoute | null;
-  localDate: string;
-  time: string;
-  note: string | null;
-};
-
-export type MedicationFormMode = { kind: 'create' } | { kind: 'edit'; medication: MedicationRow };
-
-/** Shared add/edit form, same shape as diaper-section.tsx's DiaperEditPanel plus a date/time picker (EventForm's pattern). */
-function MedicationFormPanel({
-  mode,
-  favorites,
-  tz,
-  busy,
-  defaultLocalDate,
-  defaultTime,
-  onSubmit,
-  onCancel,
-  onDelete,
-}: {
-  mode: MedicationFormMode;
-  favorites: readonly MedicationFavorite[];
-  tz: string;
-  busy: boolean;
-  /** Anlegen startet hierauf — der Alltag-Tageswahl (2026-09-24), nicht mehr fest auf "heute, jetzt". */
-  defaultLocalDate: string;
-  defaultTime: string;
-  onSubmit: (input: MedicationFormSubmitInput) => void;
-  onCancel: () => void;
-  onDelete?: () => void;
-}) {
-  const { dangerText } = useUiColors();
-
-  const [name, setName] = useState('');
-  const [doseAmountText, setDoseAmountText] = useState('');
-  const [doseUnit, setDoseUnit] = useState<MedicationDoseUnit | null>(null);
-  const [route, setRoute] = useState<MedicationRoute | null>(null);
-  // Anlegen startet auf dem gewählten Tag (Vorgabe "jetzt" nur, solange der
-  // heute gewählt ist) — Nachtragen bleibt zusätzlich möglich, es ändert nur
-  // diesen Startwert (task requirement). Bearbeiten überschreibt das gleich
-  // wieder über useHydrateOnce, sobald der echte Datensatz da ist.
-  const [localDate, setLocalDate] = useState(() => (mode.kind === 'create' ? defaultLocalDate : ''));
-  const [time, setTime] = useState(() => (mode.kind === 'create' ? defaultTime : ''));
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [timePickerOpen, setTimePickerOpen] = useState(false);
-
-  const hydrate = useCallback((loaded: MedicationRow) => {
-    setName(loaded.name);
-    setDoseAmountText(loaded.dose_amount !== null ? String(loaded.dose_amount) : '');
-    setDoseUnit(loaded.dose_unit);
-    setRoute(loaded.route);
-    setLocalDate(loaded.local_date);
-    setTime(formatTimeLabel(loaded.occurred_at, loaded.tz));
-    setNote(loaded.note ?? '');
-    setError(null);
-  }, []);
-  const editRecord = mode.kind === 'edit' ? mode.medication : null;
-  // Architekturregel 9, gleicher Grund wie DiaperEditPanel: der Datensatz
-  // kann wechseln, während dieselbe Panel-Instanz stehen bleibt.
-  useHydrateOnce(editRecord, editRecord?.id, hydrate);
-
-  const applyFavorite = (favorite: MedicationFavorite) => {
-    setName(favorite.name);
-    setDoseAmountText(favorite.doseAmount !== null ? String(favorite.doseAmount) : '');
-    setDoseUnit(favorite.doseUnit);
-  };
-
-  const handleSubmit = () => {
-    if (name.trim().length === 0) {
-      setError('Bitte einen Namen eingeben.');
-      return;
-    }
-    const doseAmount = parseDoseAmount(doseAmountText);
-    if (doseAmount === 'invalid') {
-      setError('Bitte eine gültige Zahl für die Dosis eingeben.');
-      return;
-    }
-    if (!localDate || !time) {
-      setError('Bitte Datum und Uhrzeit wählen.');
-      return;
-    }
-    setError(null);
-    onSubmit({
-      name: name.trim(),
-      doseAmount,
-      doseUnit,
-      route,
-      localDate,
-      time,
-      note: note.trim().length > 0 ? note.trim() : null,
-    });
-  };
-
-  return (
-    <ThemedView type="backgroundElement" style={styles.panel}>
-      <ThemedText type="smallBold">{mode.kind === 'create' ? 'Neue Gabe' : 'Gabe bearbeiten'}</ThemedText>
-
-      <TextField label="Name" value={name} onChangeText={setName} autoCapitalize="words" />
-
-      {favorites.length > 0 ? (
-        <View style={styles.chipRow}>
-          {favorites.map((favorite) => (
-            <Chip
-              key={`${favorite.name.toLowerCase()}|${favorite.doseAmount ?? ''}|${favorite.doseUnit ?? ''}`}
-              label={favorite.name}
-              selected={false}
-              onPress={() => applyFavorite(favorite)}
-            />
-          ))}
-        </View>
-      ) : null}
-
-      <TextField
-        label="Dosis"
-        value={doseAmountText}
-        onChangeText={setDoseAmountText}
-        keyboardType="decimal-pad"
-      />
-
-      <ThemedText type="small" themeColor="textSecondary">
-        Einheit
-      </ThemedText>
-      <View style={styles.chipRow}>
-        {DOSE_UNIT_OPTIONS.slice(0, 3).map((option) => (
-          <Chip
-            key={option}
-            label={describeDoseUnit(option)}
-            selected={doseUnit === option}
-            onPress={() => setDoseUnit(doseUnit === option ? null : option)}
-          />
-        ))}
-      </View>
-      <View style={styles.chipRow}>
-        {DOSE_UNIT_OPTIONS.slice(3, 6).map((option) => (
-          <Chip
-            key={option}
-            label={describeDoseUnit(option)}
-            selected={doseUnit === option}
-            onPress={() => setDoseUnit(doseUnit === option ? null : option)}
-          />
-        ))}
-      </View>
-
-      <ThemedText type="small" themeColor="textSecondary">
-        Gabeart
-      </ThemedText>
-      <View style={styles.chipRow}>
-        {ROUTE_OPTIONS.map((option) => (
-          <Chip
-            key={option}
-            label={describeMedicationRoute(option)}
-            selected={route === option}
-            onPress={() => setRoute(route === option ? null : option)}
-          />
-        ))}
-      </View>
-
-      <View style={styles.pickerRow}>
-        <View style={styles.rowField}>
-          <ThemedText type="small" themeColor="textSecondary">
-            Datum
-          </ThemedText>
-          <Pressable onPress={() => setDatePickerOpen(true)} disabled={busy}>
-            <ThemedView type="backgroundElement" style={styles.dateValueButton}>
-              <ThemedText>{localDate ? formatShortGermanDate(localDate) : 'Datum wählen'}</ThemedText>
-            </ThemedView>
-          </Pressable>
-          {datePickerOpen ? (
-            <DateTimePicker
-              mode="date"
-              presentation="dialog"
-              value={localDateToPickerDate(localDate || toLocalDate(nowUtcIso(), tz))}
-              onValueChange={(_event, date) => {
-                setDatePickerOpen(false);
-                setLocalDate(pickerDateToLocalDate(date));
-              }}
-              onDismiss={() => setDatePickerOpen(false)}
-            />
-          ) : null}
-        </View>
-
-        <View style={styles.rowField}>
-          <ThemedText type="small" themeColor="textSecondary">
-            Uhrzeit
-          </ThemedText>
-          <Pressable onPress={() => setTimePickerOpen(true)} disabled={busy}>
-            <ThemedView type="backgroundElement" style={styles.dateValueButton}>
-              <ThemedText>{time || 'Uhrzeit wählen'}</ThemedText>
-            </ThemedView>
-          </Pressable>
-          {timePickerOpen ? (
-            <DateTimePicker
-              mode="time"
-              presentation="dialog"
-              is24Hour
-              value={localTimeToPickerDate(time || formatTimeLabel(nowUtcIso(), tz))}
-              onValueChange={(_event, date) => {
-                setTimePickerOpen(false);
-                setTime(pickerDateToLocalTime(date));
-              }}
-              onDismiss={() => setTimePickerOpen(false)}
-            />
-          ) : null}
-        </View>
-      </View>
-
-      <TextField label="Notiz (optional)" value={note} onChangeText={setNote} multiline numberOfLines={3} />
-
-      {error ? (
-        <ThemedText type="small" style={{ color: dangerText }}>
-          {error}
-        </ThemedText>
-      ) : null}
-
-      <View style={styles.panelActions}>
-        <Pressable onPress={onCancel} hitSlop={8} disabled={busy}>
-          <ThemedText type="link" themeColor="textSecondary">
-            Abbrechen
-          </ThemedText>
-        </Pressable>
-        {onDelete ? (
-          <Pressable onPress={onDelete} hitSlop={8} disabled={busy}>
-            <ThemedText type="link" style={{ color: dangerText }}>
-              Löschen
-            </ThemedText>
-          </Pressable>
-        ) : null}
-        <Pressable onPress={handleSubmit} hitSlop={8} disabled={busy}>
-          <ThemedText type="linkPrimary">Speichern</ThemedText>
-        </Pressable>
-      </View>
-    </ThemedView>
-  );
-}
 
 const styles = StyleSheet.create({
   section: { gap: Spacing.three },
@@ -664,17 +340,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     borderRadius: Spacing.three,
   },
-  panel: { gap: Spacing.two, padding: Spacing.three, borderRadius: Spacing.three },
-  panelActions: { flexDirection: 'row', gap: Spacing.four, paddingTop: Spacing.one },
-  chipRow: { flexDirection: 'row', gap: Spacing.two },
-  pickerRow: { flexDirection: 'row', gap: Spacing.two },
-  rowField: { flex: 1, gap: Spacing.one },
-  dateValueButton: {
-    height: 52,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-    borderRadius: Spacing.three,
-  },
+
   list: { gap: Spacing.two },
   row: {
     flexDirection: 'row',

@@ -183,6 +183,12 @@ export function describeRhythm(intervalDays: number): string {
   return intervalDays === 1 ? 'jeden Tag' : `jeden ${intervalDays}. Tag`;
 }
 
+/** The same wording as a button label: "Jeden Tag" / "Jeden 2. Tag". */
+export function describeRhythmButton(intervalDays: number): string {
+  const text = describeRhythm(intervalDays);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /**
  * A `reminders` row as a medication plan, or `null` when it is not one (see
  * parsePlanNote / parseRepeatRule), is soft-deleted, has no name, or has a
@@ -448,6 +454,22 @@ export const PERMISSION_DENIED_HINT =
   'Gespeichert. Benachrichtigungen sind für LifeBook ausgeschaltet — Erinnerungen kommen erst an, wenn du sie in den Android-Einstellungen erlaubst.';
 
 /**
+ * The plan's one-line summary for the list: everything the person set, in the
+ * order they set it — "Vitamin D3 · 1 Tropfen · jeden Tag · 08:00" (without
+ * the time when no reminder is wanted). Task 2026-10-09: the chosen Rhythmus
+ * must be readable at a glance in the entry itself.
+ */
+export function describePlanListLine(
+  plan: Pick<MedicationPlan, 'name' | 'doseAmount' | 'doseUnit' | 'intervalDays' | 'remind' | 'remindTime'>,
+): string {
+  const parts = [formatPlanTitle(plan), describeRhythm(plan.intervalDays)];
+  if (plan.remind) {
+    parts.push(plan.remindTime);
+  }
+  return parts.join(' · ');
+}
+
+/**
  * Second line of a plan row: "jeden Tag · Erinnerung 08:00",
  * "jeden 2. Tag · ohne Erinnerung", "Pausiert · jeden Tag · …", and
  * "· ab 12. Oktober" while the start day is still ahead.
@@ -461,4 +483,23 @@ export function describePlanSchedule(plan: MedicationPlan, todayLocalDate: strin
     parts.unshift('Pausiert');
   }
   return parts.join(' · ');
+}
+
+/**
+ * What the list adds under describePlanListLine: only the states that change
+ * whether the medicine shows up — "Pausiert", "ab 12. Oktober". `null` when
+ * there is nothing to add (the line above already says everything).
+ */
+export function describePlanStatus(
+  plan: Pick<MedicationPlan, 'enabled' | 'startLocalDate'>,
+  todayLocalDate: string,
+): string | null {
+  const parts: string[] = [];
+  if (!plan.enabled) {
+    parts.push('Pausiert');
+  }
+  if (plan.startLocalDate > todayLocalDate) {
+    parts.push(`ab ${formatDayMonthLabel(plan.startLocalDate)}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
 }
