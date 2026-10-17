@@ -11,8 +11,8 @@
  *  - the reminder for TODAY disappears once the medicine is already entered
  *    today (also when the other phone entered it, as soon as that has synced);
  *  - nothing for a moment that already passed;
- *  - the text never names a dose to give beyond the plan's own dose and never
- *    suggests catching up: it only asks "schon gegeben?".
+ *  - the text names the plan's own medicine and dose ("Vitamin D3 – 4 Tropfen")
+ *    and nothing else, never suggests catching up: it only asks "schon gegeben?".
  */
 
 import { addDaysToLocalDate, combineLocalDateAndTime, secondsBetween } from '@/core/time';
@@ -44,16 +44,22 @@ export function isPlanNotificationId(identifier: string): boolean {
   return identifier.startsWith(NOTIFICATION_ID_PREFIX);
 }
 
-/** "1 Tropfen fällig - schon gegeben? Antippen zum Abhaken." / "Fällig - schon …" without a dose. */
-export function formatReminderBody(plan: Pick<MedicationPlan, 'doseAmount' | 'doseUnit'>): string {
+/**
+ * Title: what to give, straight from the plan — "Vitamin D3 – 4 Tropfen"
+ * (just the name when the plan carries no dose). Task 2026-10-17: name, dose
+ * and unit come ONLY from the plan row; nothing here may fill in, round or
+ * guess a value.
+ */
+export function formatReminderTitle(plan: Pick<MedicationPlan, 'name' | 'doseAmount' | 'doseUnit'>): string {
   const dose = formatPlanDose(plan);
-  return `${dose ? `${dose} fällig` : 'Fällig'} - schon gegeben? Antippen zum Abhaken.`;
+  return dose ? `${plan.name} – ${dose}` : plan.name;
 }
 
-/** "Marina: Vitamin D3" (just the medicine name when the child's name is unknown). */
-export function formatReminderTitle(childFirstName: string, planName: string): string {
+/** Body: "Marina: fällig – schon gegeben? Antippen zum Abhaken." (without the name when it is unknown). */
+export function formatReminderBody(childFirstName: string): string {
   const child = childFirstName.trim();
-  return child ? `${child}: ${planName}` : planName;
+  const text = 'fällig – schon gegeben? Antippen zum Abhaken.';
+  return child ? `${child}: ${text}` : `F${text.slice(1)}`;
 }
 
 /**
@@ -62,12 +68,18 @@ export function formatReminderTitle(childFirstName: string, planName: string): s
  */
 export function givenPlanIds(
   plans: readonly MedicationPlan[],
-  entries: readonly MedicationTodayEntry[],
+  entries: readonly (MedicationTodayEntry & { child_id?: string })[],
   localDate: string,
 ): Set<string> {
   const given = new Set<string>();
   for (const plan of plans) {
-    if (gabeFuerPlan(entries, plan.name, localDate)) {
+    // Entries that say which child they belong to only count for that child's
+    // plan (household-wide reconcile, 2026-10-17); entries without the column
+    // (older callers, tests) count as before.
+    const forChild = entries.filter(
+      (entry) => entry.child_id === undefined || plan.childId === null || entry.child_id === plan.childId,
+    );
+    if (gabeFuerPlan(forChild, plan.name, localDate)) {
       given.add(plan.id);
     }
   }
@@ -76,7 +88,10 @@ export function givenPlanIds(
 
 export type ReminderScheduleInput = {
   plans: readonly MedicationPlan[];
+  /** Used when `childNames` has no entry for a plan's child. */
   childFirstName: string;
+  /** First name per child id — the household-wide reconcile covers every child, not only the one on screen. */
+  childNames?: ReadonlyMap<string, string>;
   /** "Today" in the DEVICE's zone. */
   todayLocalDate: string;
   nowUtcIso: string;
@@ -119,8 +134,8 @@ export function planReminders(input: ReminderScheduleInput): PlannedReminder[] {
         planId: plan.id,
         localDate,
         fireAtUtcIso,
-        title: formatReminderTitle(input.childFirstName, plan.name),
-        body: formatReminderBody(plan),
+        title: formatReminderTitle(plan),
+        body: formatReminderBody((plan.childId ? input.childNames?.get(plan.childId) : undefined) ?? input.childFirstName),
       });
     }
   }

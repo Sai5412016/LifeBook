@@ -18,7 +18,7 @@ import { usePowerSync } from '@powersync/react-native';
 import type { Session } from '@supabase/supabase-js';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -27,7 +27,14 @@ import { nowUtcIso, toLocalDate } from '@/core/time';
 import type { ActiveChild } from '@/features/household/repository';
 import { useUiColors } from '@/ui';
 
-import { describePlanListLine, describePlanStatus } from '../logic';
+import {
+  PERMISSION_MISSING_HINT,
+  describePlanListLine,
+  describePlanStatus,
+  describeReminderStatusLine,
+} from '../logic';
+import { getReminderPermissionDetail, requestReminderPermission } from '../notifications';
+import { useReminderStatusStore } from '../reminder-status';
 import { useMedicationRemindersSetting } from '../reminders-setting';
 import { setMedicationPlanEnabled, useMedicationPlans } from '../repository';
 import type { MedicationPlan } from '../types';
@@ -45,6 +52,23 @@ export function MedicationPlanSection({ child, tz }: MedicationPlanSectionProps)
   const { plans } = useMedicationPlans(child?.childId, tz);
   const { enabled: remindersOn, setEnabled: setRemindersOn } = useMedicationRemindersSetting();
   const todayLocalDate = toLocalDate(nowUtcIso(), tz);
+  const reminderStatus = useReminderStatusStore();
+  const anyPlanWantsReminder = plans.some((plan) => plan.enabled && plan.remind);
+  // Task 2026-10-17: a refused permission is shown here, quietly, instead of
+  // asking again and again — this phone simply cannot ring without it.
+  const permissionMissing =
+    remindersOn && anyPlanWantsReminder && reminderStatus.permission !== null && reminderStatus.permission.status !== 'granted';
+  const statusLine = remindersOn ? describeReminderStatusLine(reminderStatus.scheduledCount, reminderStatus.nextFireAtUtcIso, tz) : null;
+
+  const handleAllow = useCallback(async () => {
+    if (reminderStatus.permission?.canAskAgain) {
+      await requestReminderPermission();
+    } else {
+      await Linking.openSettings().catch(() => undefined);
+    }
+    // The reconciler re-runs on this change (plan-reminders-effect.tsx).
+    useReminderStatusStore.getState().set({ permission: await getReminderPermissionDetail() });
+  }, [reminderStatus.permission?.canAskAgain]);
 
   const [message, setMessage] = useState<string | null>(null);
   const messageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,6 +108,23 @@ export function MedicationPlanSection({ child, tz }: MedicationPlanSectionProps)
         </ThemedText>
         <Switch value={remindersOn} onValueChange={setRemindersOn} trackColor={{ true: green }} />
       </View>
+
+      {permissionMissing ? (
+        <View style={styles.hint}>
+          <ThemedText type="small" themeColor="textSecondary">
+            {PERMISSION_MISSING_HINT}
+          </ThemedText>
+          <Pressable onPress={() => void handleAllow()} hitSlop={8}>
+            <ThemedText type="linkPrimary">
+              {reminderStatus.permission?.canAskAgain ? 'Benachrichtigungen erlauben' : 'Android-Einstellungen öffnen'}
+            </ThemedText>
+          </Pressable>
+        </View>
+      ) : statusLine && anyPlanWantsReminder ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {statusLine}
+        </ThemedText>
+      ) : null}
 
       {plans.length === 0 ? (
         <ThemedText type="small" themeColor="textSecondary">
@@ -142,5 +183,6 @@ const styles = StyleSheet.create({
   planRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   planRowPaused: { opacity: 0.55 },
   planInfo: { flex: 1, gap: 2, paddingVertical: Spacing.one },
+  hint: { gap: Spacing.one },
   addRow: { alignItems: 'center', paddingVertical: Spacing.two, borderRadius: Spacing.three },
 });

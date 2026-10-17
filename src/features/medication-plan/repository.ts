@@ -70,6 +70,23 @@ export function useMedicationPlans(
   return { plans, isLoading };
 }
 
+/**
+ * Reactive: EVERY plan row on this device, for every child of the household,
+ * raw — the input of the reminder reconciler (./reconcile.ts). Deliberately
+ * not scoped to the child on screen: a reminder must not depend on which
+ * child a phone happens to show. PowerSync's live query re-emits on every
+ * change of `reminders`, including rows that just arrived from the OTHER
+ * phone — which is exactly the trigger the reconciler needs.
+ */
+export function useAllMedicationPlanRows(): ReminderRow[] {
+  const { data } = useQuery<ReminderRow>(
+    `SELECT ${REMINDER_COLUMNS} FROM reminders
+      WHERE deleted_at IS NULL AND note LIKE '%medication_plan%'
+      ORDER BY created_at ASC, id ASC`,
+  );
+  return data ?? [];
+}
+
 /** The row, only if it exists, is alive AND is a medication plan. */
 async function loadPlanRow(
   db: AbstractPowerSyncDatabase,

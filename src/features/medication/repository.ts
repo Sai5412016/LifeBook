@@ -216,6 +216,19 @@ export function useGabenDesTages(
 }
 
 /**
+ * Reactive: the doses of ALL children on `localDate` — the household-wide
+ * reminder reconcile needs to know which plan was already given today, for
+ * every child, not only the one on screen (task 2026-10-17).
+ */
+export function useGabenAllerKinderAmTag(localDate: string): MedicationRow[] {
+  const { data } = useQuery<MedicationRow>(
+    `SELECT ${MEDICATION_COLUMNS} FROM medications WHERE local_date = ? AND deleted_at IS NULL`,
+    [localDate],
+  );
+  return data ?? [];
+}
+
+/**
  * Reactive: a child's full medication history, newest first — feeds
  * `favoritenAusVerlauf` (logic.ts). Deliberately includes soft-deleted rows:
  * `favoritenAusVerlauf` does its OWN deleted_at filtering (task requirement,

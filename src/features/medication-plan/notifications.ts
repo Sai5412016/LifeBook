@@ -28,6 +28,10 @@ import { utcIsoToEpochMillis } from '@/core/time';
 import { getPushPermissionStatus } from '@/core/notifications';
 import type { PushPermissionStatus } from '@/core/notifications';
 
+import { reconcileReminders, reminderSignature } from './reconcile';
+import type { ScheduledSnapshot } from './reconcile';
+import { useReminderStatusStore } from './reminder-status';
+import type { ReminderPermission } from './reminder-status';
 import { isPlanNotificationId } from './schedule';
 import type { PlannedReminder } from './schedule';
 
@@ -67,30 +71,46 @@ export async function requestReminderPermission(): Promise<PushPermissionStatus>
   }
 }
 
-async function cancelOurs(): Promise<void> {
-  const existing = await Notifications.getAllScheduledNotificationsAsync();
-  for (const request of existing) {
-    if (isPlanNotificationId(request.identifier)) {
-      await Notifications.cancelScheduledNotificationAsync(request.identifier);
-    }
+/** Permission plus whether Android would still show its dialog. Never throws. */
+export async function getReminderPermissionDetail(): Promise<ReminderPermission> {
+  try {
+    const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+    return { status, canAskAgain };
+  } catch (error) {
+    console.error('[LifeBook] Benachrichtigungs-Erlaubnis konnte nicht gelesen werden', error);
+    return { status: 'undetermined', canAskAgain: false };
   }
 }
 
+/** Our scheduled notifications with the signature they were scheduled with (see ./reconcile.ts). */
+async function readScheduled(): Promise<ScheduledSnapshot[]> {
+  const existing = await Notifications.getAllScheduledNotificationsAsync();
+  return existing
+    .filter((request) => isPlanNotificationId(request.identifier))
+    .map((request) => {
+      const signature = request.content.data?.signature;
+      return { identifier: request.identifier, signature: typeof signature === 'string' ? signature : null };
+    });
+}
+
 async function applyPlanned(planned: readonly PlannedReminder[]): Promise<void> {
+  const setStatus = useReminderStatusStore.getState().set;
   try {
-    // Only ours: every other scheduled notification of the app is left alone.
-    await cancelOurs();
-    if (planned.length === 0) {
-      return;
+    const permission = await getReminderPermissionDetail();
+    setStatus({ permission });
+
+    // Without the permission nothing can ring; scheduled leftovers are removed
+    // so the count shown on the plan screen tells the truth.
+    const wanted = permission.status === 'granted' ? planned : [];
+    if (wanted.length > 0) {
+      await ensureChannel();
     }
 
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') {
-      return;
+    const { cancel, schedule } = reconcileReminders(await readScheduled(), wanted);
+    for (const identifier of cancel) {
+      await Notifications.cancelScheduledNotificationAsync(identifier);
     }
-    await ensureChannel();
-
-    for (const reminder of planned) {
+    for (const reminder of schedule) {
       try {
         await Notifications.scheduleNotificationAsync({
           identifier: reminder.identifier,
@@ -98,7 +118,12 @@ async function applyPlanned(planned: readonly PlannedReminder[]): Promise<void> 
             title: reminder.title,
             body: reminder.body,
             sound: true,
-            data: { type: REMINDER_DATA_TYPE, localDate: reminder.localDate, planId: reminder.planId },
+            data: {
+              type: REMINDER_DATA_TYPE,
+              localDate: reminder.localDate,
+              planId: reminder.planId,
+              signature: reminderSignature(reminder),
+            },
           },
           trigger: {
             type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -111,8 +136,18 @@ async function applyPlanned(planned: readonly PlannedReminder[]): Promise<void> 
         console.error('[LifeBook] Erinnerung konnte nicht geplant werden', reminder.identifier, error);
       }
     }
+
+    // Read back what the phone really holds now, not what we meant to do.
+    const after = await readScheduled();
+    const wantedById = new Map(wanted.map((reminder) => [reminder.identifier, reminder]));
+    const fireTimes = after
+      .map((entry) => wantedById.get(entry.identifier)?.fireAtUtcIso)
+      .filter((value): value is string => typeof value === 'string')
+      .sort();
+    setStatus({ scheduledCount: after.length, nextFireAtUtcIso: fireTimes[0] ?? null, lastError: null });
   } catch (error) {
     console.error('[LifeBook] Erinnerungen konnten nicht abgeglichen werden', error);
+    setStatus({ lastError: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -122,9 +157,10 @@ let chain: Promise<void> = Promise.resolve();
 let latestRequest = 0;
 
 /**
- * Makes the scheduled plan reminders on this phone exactly `planned` — all
- * of this feature's notifications are replaced, nothing else is touched.
- * An empty list removes them all.
+ * Makes the scheduled plan reminders on this phone exactly `planned`: only
+ * the difference is cancelled/scheduled (./reconcile.ts), so calling it again
+ * with the same list changes nothing. Nothing outside this feature is
+ * touched. An empty list removes all of ours.
  */
 export function syncPlanReminders(planned: readonly PlannedReminder[]): Promise<void> {
   latestRequest += 1;

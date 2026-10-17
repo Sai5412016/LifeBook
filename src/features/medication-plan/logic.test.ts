@@ -9,6 +9,7 @@ import {
   describePlanStatus,
   describeRhythm,
   describeRhythmButton,
+  describeReminderStatusLine,
   duePlansOn,
   formatPlanTitle,
   gabeFuerPlan,
@@ -673,5 +674,21 @@ describe('Rhythmus in der Darstellung (task 2026-10-09)', () => {
     for (const intervalDays of [1, 2]) {
       expect(parseRepeatRule(repeatRuleForInterval(intervalDays))).toBe(intervalDays);
     }
+  });
+});
+
+describe('describeReminderStatusLine (what this phone has scheduled)', () => {
+  it('is empty before the first reconcile of this app session', () => {
+    expect(describeReminderStatusLine(null, null, BERLIN)).toBeNull();
+  });
+
+  it('says plainly when nothing is scheduled', () => {
+    expect(describeReminderStatusLine(0, null, BERLIN)).toBe('Auf diesem Handy ist gerade keine Erinnerung geplant.');
+  });
+
+  it('counts and names the next one in the phone\'s zone', () => {
+    const line = describeReminderStatusLine(21, '2026-10-18T06:00:00.000Z', BERLIN);
+    expect(line).toMatch(/^Auf diesem Handy geplant: 21 Erinnerungen · nächste: .+, 08:00$/);
+    expect(describeReminderStatusLine(1, null, BERLIN)).toBe('Auf diesem Handy geplant: 1 Erinnerung');
   });
 });
