@@ -147,6 +147,18 @@ export function useActiveChild(): { child: ActiveChild | null; isLoading: boolea
   };
 }
 
+/**
+ * Reactive: first name per child id, for every (non-deleted) child on this
+ * device — the plan reminders name the child each plan belongs to, not just
+ * the one currently on screen (task 2026-10-17).
+ */
+export function useChildFirstNames(): Map<string, string> {
+  const { data } = useQuery<{ id: string; first_name: string }>(
+    'SELECT id, first_name FROM children WHERE deleted_at IS NULL',
+  );
+  return useMemo(() => new Map((data ?? []).map((row) => [row.id, row.first_name])), [data]);
+}
+
 async function loadChildById(
   db: AbstractPowerSyncDatabase,
   childId: string,

@@ -42,22 +42,22 @@ const base = {
 };
 
 describe('texts', () => {
-  it('title: "Marina: Vitamin D3"', () => {
-    expect(formatReminderTitle('Marina', 'Vitamin D3')).toBe('Marina: Vitamin D3');
-    expect(formatReminderTitle('  ', 'Vitamin D3')).toBe('Vitamin D3');
+  it('title: name, dose and unit straight from the plan — "Vitamin D3 – 1 Tropfen"', () => {
+    expect(formatReminderTitle({ name: 'Vitamin D3', doseAmount: 1, doseUnit: 'drops' })).toBe('Vitamin D3 – 1 Tropfen');
+    expect(formatReminderTitle({ name: 'Eisen', doseAmount: 2, doseUnit: 'drops' })).toBe('Eisen – 2 Tropfen');
   });
 
-  it('body: exactly the specified sentence', () => {
-    expect(formatReminderBody({ doseAmount: 1, doseUnit: 'drops' })).toBe(
-      '1 Tropfen fällig - schon gegeben? Antippen zum Abhaken.',
-    );
-    expect(formatReminderBody({ doseAmount: null, doseUnit: null })).toBe(
-      'Fällig - schon gegeben? Antippen zum Abhaken.',
-    );
+  it('title: just the name when the plan has no dose — nothing is filled in', () => {
+    expect(formatReminderTitle({ name: 'Vitamin D3', doseAmount: null, doseUnit: null })).toBe('Vitamin D3');
   });
 
-  it('never suggests catching up or a bigger dose', () => {
-    const text = `${formatReminderTitle('Marina', 'Vitamin D3')} ${formatReminderBody({ doseAmount: 1, doseUnit: 'drops' })}`;
+  it('body: names the child and only asks', () => {
+    expect(formatReminderBody('Marina')).toBe('Marina: fällig – schon gegeben? Antippen zum Abhaken.');
+    expect(formatReminderBody('  ')).toBe('Fällig – schon gegeben? Antippen zum Abhaken.');
+  });
+
+  it('never tells anyone to catch up or give more', () => {
+    const text = `${formatReminderTitle({ name: 'Vitamin D3', doseAmount: 1, doseUnit: 'drops' })} ${formatReminderBody('Marina')}`;
     expect(text).not.toMatch(/nachhol|doppel|zusätzlich|extra|noch einmal|verpasst/i);
   });
 });
@@ -201,8 +201,8 @@ describe('planReminders — shape', () => {
 
   it('carries title and body of the plan', () => {
     const [first] = planReminders({ ...base, plans: [plan()], horizonDays: 1 });
-    expect(first.title).toBe('Marina: Vitamin D3');
-    expect(first.body).toBe('1 Tropfen fällig - schon gegeben? Antippen zum Abhaken.');
+    expect(first.title).toBe('Vitamin D3 – 1 Tropfen');
+    expect(first.body).toBe('Marina: fällig – schon gegeben? Antippen zum Abhaken.');
   });
 
   it('is empty for no plans', () => {

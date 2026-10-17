@@ -503,3 +503,31 @@ export function describePlanStatus(
   }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
+
+/** Shown on the plan screen when THIS phone may not ring (task 2026-10-17, Punkt 4). */
+export const PERMISSION_MISSING_HINT =
+  'Auf diesem Handy sind Benachrichtigungen für LifeBook nicht erlaubt – die Erinnerungen zum Medikamentenplan kommen hier deshalb nicht an.';
+
+/**
+ * "Auf diesem Handy geplant: 12 Erinnerungen · nächste: 18. Oktober, 08:00" —
+ * what the last reconcile found on this phone, so a device test can see it.
+ * `null` before the first reconcile of this app session.
+ */
+export function describeReminderStatusLine(
+  scheduledCount: number | null,
+  nextFireAtUtcIso: string | null,
+  deviceTz: string,
+): string | null {
+  if (scheduledCount === null) {
+    return null;
+  }
+  if (scheduledCount === 0) {
+    return 'Auf diesem Handy ist gerade keine Erinnerung geplant.';
+  }
+  const count = scheduledCount === 1 ? '1 Erinnerung' : `${scheduledCount} Erinnerungen`;
+  if (!nextFireAtUtcIso) {
+    return `Auf diesem Handy geplant: ${count}`;
+  }
+  const next = `${formatDayMonthLabel(toLocalDate(nextFireAtUtcIso, deviceTz))}, ${formatTimeLabel(nextFireAtUtcIso, deviceTz)}`;
+  return `Auf diesem Handy geplant: ${count} · nächste: ${next}`;
+}
