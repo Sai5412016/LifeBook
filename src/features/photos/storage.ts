@@ -55,6 +55,14 @@ import {
   type PhotoBackupCandidatePhoto,
 } from './repository';
 import { setTrashCleanupDiagnostics } from './trashDiagnostics';
+import {
+  createSingleFlight,
+  decidePendingPhoto,
+  plannedUploadSteps,
+  recordUploadFailure,
+  type UploadRetryState,
+} from './upload-retry';
+import { loadUploadRetryStates, saveUploadRetryStates } from './upload-retry-store';
 import type { PhotoRow } from './types';
 
 /** How long a display URL stays valid. Long enough to scroll, short enough to leak little. */
@@ -89,9 +97,20 @@ export type UploadRunResult = {
   failed: number;
   /** Originals deliberately left for later because there is no Wi-Fi. */
   deferred: number;
+  /** Photos skipped this run because their retry pause is still running (./upload-retry.ts). */
+  waiting: number;
+  /** Photos whose local source file no longer exists on this phone. */
+  sourceMissing: number;
 };
 
-let inFlight: Promise<UploadRunResult> | null = null;
+export type UploadQueueOptions = {
+  /** Originals only on Wi-Fi (default true). */
+  wifiOnly?: boolean;
+  /** Manual "Jetzt erneut versuchen": ignore retry pauses and the attempt limit. */
+  force?: boolean;
+};
+
+const uploadRun = createSingleFlight(executeUploadQueue);
 
 /**
  * Push everything that still needs pushing.
@@ -101,46 +120,93 @@ let inFlight: Promise<UploadRunResult> | null = null;
  * photo appear on the other parent's phone within seconds. The multi-megabyte
  * original waits for Wi-Fi unless the caller says otherwise.
  *
- * Concurrent calls share one run — the screen, a manual retry and an app-resume
- * hook can all fire at once, and uploading the same photo twice wastes the
- * user's data plan.
+ * Concurrent calls share one run — import, app start, foreground, network
+ * change and the buttons can all fire at once, and uploading the same photo
+ * twice wastes the user's data plan. A FORCED call that arrives while a normal
+ * run is going waits for it and then runs itself, so the manual retry really
+ * retries instead of returning a run that skipped the photos in their pause.
+ *
+ * 2026-11-09: called automatically now (components/upload-queue-effect.tsx).
+ * Before, only an import and the Chronik button ever started it, so one
+ * failed step stayed pending until the next import — see ./upload-retry.ts.
  */
 export function runUploadQueue(
   db: AbstractPowerSyncDatabase,
-  options: { wifiOnly?: boolean } = {},
+  options: UploadQueueOptions = {},
 ): Promise<UploadRunResult> {
-  if (inFlight) {
-    return inFlight;
+  const running = uploadRun.current();
+  if (running && options.force) {
+    return running.catch(() => undefined).then(() => uploadRun.run(db, options));
   }
-  inFlight = executeUploadQueue(db, options).finally(() => {
-    inFlight = null;
-  });
-  return inFlight;
+  return uploadRun.run(db, options);
+}
+
+function fileExists(uri: string): boolean {
+  try {
+    return new File(uri).info().exists === true;
+  } catch {
+    return false;
+  }
 }
 
 async function executeUploadQueue(
   db: AbstractPowerSyncDatabase,
-  options: { wifiOnly?: boolean },
+  options: UploadQueueOptions,
 ): Promise<UploadRunResult> {
-  const wifiOnly = options.wifiOnly ?? true;
-  const allowOriginals = wifiOnly ? await isOnWifi() : true;
-  const pending = await loadPendingUploads(db);
-
   const result: UploadRunResult = {
     thumbnails: 0,
     mediums: 0,
     originals: 0,
     failed: 0,
     deferred: 0,
+    waiting: 0,
+    sourceMissing: 0,
   };
+
+  // `local_uri` is a synced column, so the other parent's phone sees this
+  // device's staging paths too. Only the person who imported a photo can
+  // hold its file — everyone else would just fail on a path that does not
+  // exist on their phone.
+  const { data } = await supabase.auth.getSession();
+  const userId = data.session?.user.id;
+  if (!userId) {
+    return result;
+  }
+
+  const wifiOnly = options.wifiOnly ?? true;
+  const force = options.force ?? false;
+  const allowOriginals = wifiOnly ? await isOnWifi() : true;
+  const pending = (await loadPendingUploads(db)).filter((photo) => photo.created_by === userId);
+
+  const previous = await loadUploadRetryStates();
+  const states: Record<string, UploadRetryState> = {};
+  const missingSourceIds: string[] = [];
+  const now = nowUtcIso();
 
   for (const photo of pending) {
     if (!photo.local_uri) {
       continue;
     }
+    const prior = previous[photo.id];
 
+    // A vanished source file is reported, never retried silently: there is
+    // nothing on this phone left to upload.
+    const decision = decidePendingPhoto(fileExists(photo.local_uri), prior, now, force);
+    if (decision === 'source_missing') {
+      missingSourceIds.push(photo.id);
+      result.sourceMissing += 1;
+      if (prior) states[photo.id] = prior;
+      continue;
+    }
+    if (decision === 'waiting' && prior) {
+      states[photo.id] = prior;
+      result.waiting += 1;
+      continue;
+    }
+
+    const steps = plannedUploadSteps(photo, allowOriginals);
     try {
-      if (!photo.thumb_uploaded_at && photo.thumb_key) {
+      if (steps.includes('thumb') && photo.thumb_key) {
         // Regenerated from the staged original rather than cached from import:
         // the import-time preview lives in the OS cache and may be long gone.
         const thumbUri = await createThumbnail(photo.local_uri);
@@ -159,7 +225,7 @@ async function executeUploadQueue(
       // medium has actually landed, so the fullscreen viewer's fallback
       // chain (identity.ts#resolveFullscreenUri) never needs to reach past
       // a local file into a medium object that doesn't exist yet.
-      if (!photo.medium_uploaded_at && photo.medium_key) {
+      if (steps.includes('medium') && photo.medium_key) {
         const mediumUri = await createMediumImage(
           photo.local_uri,
           photo.width && photo.height ? { width: photo.width, height: photo.height } : null,
@@ -174,7 +240,8 @@ async function executeUploadQueue(
       }
 
       if (!photo.original_uploaded_at && photo.original_key) {
-        if (!allowOriginals) {
+        if (!steps.includes('original')) {
+          // No Wi-Fi: not a failure, and it keeps no retry pause either.
           result.deferred += 1;
           continue;
         }
@@ -189,18 +256,24 @@ async function executeUploadQueue(
         deleteQuietly(photo.local_uri);
         result.originals += 1;
       }
+      // Fully uploaded: no retry record kept.
     } catch (error) {
       result.failed += 1;
-      // Loud but non-fatal: one unreadable file must not stop the queue. The row
-      // keeps its NULL timestamps and is retried on the next run.
+      const message = error instanceof Error ? error.message : String(error);
+      // Loud but non-fatal: one unreadable file must not stop the queue. The
+      // row keeps its NULL timestamps; the retry record decides when the
+      // queue tries again on its own (growing pauses, then only manually).
+      states[photo.id] = recordUploadFailure(prior, nowUtcIso(), message);
       console.error('[LifeBook] Foto-Upload fehlgeschlagen', {
         photoId: photo.id,
         key: photo.original_key,
-        message: error instanceof Error ? error.message : String(error),
+        attempts: states[photo.id].attempts,
+        message,
       });
     }
   }
 
+  await saveUploadRetryStates(states, missingSourceIds);
   return result;
 }
 
