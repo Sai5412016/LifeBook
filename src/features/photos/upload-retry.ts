@@ -220,3 +220,40 @@ export function decidePendingPhoto(
   if (!sourceExists) return 'source_missing';
   return isUploadDue(state, nowUtcIso, force) ? 'attempt' : 'waiting';
 }
+
+/* ── Safety of the staged copy in photos-pending (2026-11-11) ──
+ * For photo 01a18883… the staged copy in photos-pending is the ONLY copy left
+ * (it was deleted from the gallery). These two guards are the one place that
+ * decides whether a staged file may ever be removed. */
+
+type StagedCopyRow = {
+  local_uri: string | null;
+  medium_key: string | null;
+  medium_uploaded_at: string | null;
+  original_uploaded_at: string | null;
+};
+
+/**
+ * The staged original may be deleted only once BOTH the medium and the
+ * original are confirmed on the server (their timestamps set). A row without
+ * a medium key keeps its file too: "nothing to upload" must never read as
+ * "uploaded".
+ */
+export function isSafeToDeleteStagedCopy(row: StagedCopyRow): boolean {
+  return !!row.local_uri && !!row.original_uploaded_at && !!row.medium_key && !!row.medium_uploaded_at;
+}
+
+/**
+ * Whether the AUTOMATIC 30-day trash sweep may purge this photo. Never one
+ * whose original never reached the server while a staged copy exists: that
+ * would silently destroy the only copy. (A person emptying the trash by hand
+ * still decides for themselves.)
+ */
+export function isSafeForAutomaticPurge(row: { local_uri: string | null; original_uploaded_at: string | null }): boolean {
+  return !(row.local_uri && !row.original_uploaded_at);
+}
+
+/** Size check after an upload: the stored object must have exactly the local file's size. */
+export function storedSizeMatches(localBytes: number | null, storedBytes: number | null): boolean {
+  return localBytes !== null && storedBytes !== null && localBytes > 0 && localBytes === storedBytes;
+}

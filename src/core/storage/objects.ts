@@ -111,6 +111,25 @@ export async function uploadToPhotosBucket(
 }
 
 /**
+ * Size of a stored object in the `photos` bucket as Storage reports it, or
+ * `null` when it is not there (or the lookup failed). Used to confirm an
+ * upload really landed before the only local copy may be dropped
+ * (features/photos/storage.ts, 2026-11-11).
+ */
+export async function getStoredObjectSize(key: string): Promise<number | null> {
+  const slash = key.lastIndexOf('/');
+  const folder = slash >= 0 ? key.slice(0, slash) : '';
+  const name = slash >= 0 ? key.slice(slash + 1) : key;
+  const { data, error } = await supabase.storage.from(PHOTOS_BUCKET).list(folder, { search: name, limit: 10 });
+  if (error || !data) {
+    return null;
+  }
+  const hit = data.find((entry) => entry.name === name);
+  const size = Number((hit?.metadata as Record<string, unknown> | null | undefined)?.size);
+  return hit && Number.isFinite(size) ? size : null;
+}
+
+/**
  * Remove every given key from the `photos` bucket.
  *
  * THROWS on failure — its callers rely on that: features/photos/storage.ts

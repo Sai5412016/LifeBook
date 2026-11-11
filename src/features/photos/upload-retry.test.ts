@@ -7,11 +7,14 @@ import {
   decidePendingPhoto,
   formatPendingUploadLines,
   formatUploadRunMessage,
+  isSafeForAutomaticPurge,
+  isSafeToDeleteStagedCopy,
   isUploadDue,
   needsUpload,
   plannedUploadSteps,
   recordUploadFailure,
   retryDelaySeconds,
+  storedSizeMatches,
   summarizePendingUploads,
 } from './upload-retry';
 
@@ -157,5 +160,38 @@ describe('formatUploadRunMessage', () => {
     expect(formatUploadRunMessage({ originals: 0, mediums: 0, thumbnails: 0, failed: 0, sourceMissing: 0 })).toBe(
       'Nichts zu übertragen.',
     );
+  });
+});
+
+describe('the staged copy in photos-pending is never deleted too early', () => {
+  const staged = 'file:///data/user/0/com.lifebook.app/files/photos-pending/01a18883.jpg';
+  const base = { local_uri: staged, medium_key: 'h/p/medium.jpg', medium_uploaded_at: null, original_uploaded_at: null };
+
+  it('not while medium or original is missing — exactly the stuck photo', () => {
+    expect(isSafeToDeleteStagedCopy(base)).toBe(false);
+    expect(isSafeToDeleteStagedCopy({ ...base, medium_uploaded_at: T0 })).toBe(false);
+    expect(isSafeToDeleteStagedCopy({ ...base, original_uploaded_at: T0 })).toBe(false);
+  });
+
+  it('only once BOTH are confirmed', () => {
+    expect(isSafeToDeleteStagedCopy({ ...base, medium_uploaded_at: T0, original_uploaded_at: T0 })).toBe(true);
+  });
+
+  it('a row without a medium key keeps its file ("nothing to upload" is not "uploaded")', () => {
+    expect(isSafeToDeleteStagedCopy({ ...base, medium_key: null, original_uploaded_at: T0 })).toBe(false);
+  });
+
+  it('the upload counts only when the server holds exactly the local size', () => {
+    expect(storedSizeMatches(7116470, 7116470)).toBe(true);
+    expect(storedSizeMatches(7116470, 7000000)).toBe(false); // truncated
+    expect(storedSizeMatches(7116470, null)).toBe(false); // not found / lookup failed
+    expect(storedSizeMatches(null, 7116470)).toBe(false); // local file unreadable
+    expect(storedSizeMatches(0, 0)).toBe(false);
+  });
+
+  it('the automatic trash sweep never purges an original that never reached the server', () => {
+    expect(isSafeForAutomaticPurge({ local_uri: staged, original_uploaded_at: null })).toBe(false);
+    expect(isSafeForAutomaticPurge({ local_uri: staged, original_uploaded_at: T0 })).toBe(true);
+    expect(isSafeForAutomaticPurge({ local_uri: null, original_uploaded_at: T0 })).toBe(true);
   });
 });

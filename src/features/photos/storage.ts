@@ -19,7 +19,7 @@ import * as Network from 'expo-network';
 
 import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
-import { PHOTOS_BUCKET, removeStoredObjects, uploadToPhotosBucket } from '@/core/storage/objects';
+import { PHOTOS_BUCKET, getStoredObjectSize, removeStoredObjects, uploadToPhotosBucket } from '@/core/storage/objects';
 import { removePhotoFromAllEvents } from '@/features/events/repository';
 import { removePhotoFromAllShares } from '@/features/shares/repository';
 import { removePhotoFromAllRelatives } from '@/features/tree/repository';
@@ -48,6 +48,7 @@ import {
   hardDeletePhoto,
   loadAllDeletedPhotos,
   loadPendingUploads,
+  loadUploadMarkers,
   markMediumUploaded,
   markOriginalUploaded,
   markPhotoBackedUp,
@@ -58,6 +59,9 @@ import { setTrashCleanupDiagnostics } from './trashDiagnostics';
 import {
   createSingleFlight,
   decidePendingPhoto,
+  isSafeForAutomaticPurge,
+  isSafeToDeleteStagedCopy,
+  storedSizeMatches,
   plannedUploadSteps,
   recordUploadFailure,
   type UploadRetryState,
@@ -139,6 +143,15 @@ export function runUploadQueue(
     return running.catch(() => undefined).then(() => uploadRun.run(db, options));
   }
   return uploadRun.run(db, options);
+}
+
+function localFileSize(uri: string): number | null {
+  try {
+    const info = new File(uri).info();
+    return info.exists && typeof info.size === 'number' ? info.size : null;
+  } catch {
+    return null;
+  }
 }
 
 function fileExists(uri: string): boolean {
@@ -251,9 +264,26 @@ async function executeUploadQueue(
           photo.mime ?? 'image/jpeg',
           IMMUTABLE_CACHE_CONTROL_SECONDS,
         );
+        // 2026-11-11: confirmed on the server BEFORE it counts as uploaded.
+        // The staged file may be the only copy left (photo 01a18883… was
+        // deleted from the gallery), so "the request returned 2xx" is not
+        // enough — the stored object must have exactly the local size.
+        // A mismatch or a failed lookup throws: the photo stays pending and
+        // is retried, and its staged file is kept.
+        const localBytes = localFileSize(photo.local_uri);
+        const storedBytes = await getStoredObjectSize(photo.original_key);
+        if (!storedSizeMatches(localBytes, storedBytes)) {
+          throw new Error(
+            `Original nicht bestätigt (lokal ${localBytes ?? '?'} Bytes, Server ${storedBytes ?? 'nicht gefunden'})`,
+          );
+        }
         await markOriginalUploaded(db, photo.id);
-        // Only now is it safe to drop the staged copy: the bytes exist elsewhere.
-        deleteQuietly(photo.local_uri);
+        // Only now may the staged copy go — and only if the row, read back
+        // fresh, says medium AND original are both on the server.
+        const fresh = await loadUploadMarkers(db, photo.id);
+        if (fresh && isSafeToDeleteStagedCopy(fresh)) {
+          deleteQuietly(photo.local_uri);
+        }
         result.originals += 1;
       }
       // Fully uploaded: no retry record kept.
@@ -818,7 +848,12 @@ export async function emptyTrash(
 export async function runTrashCleanupSweep(db: AbstractPowerSyncDatabase): Promise<TrashSweepResult> {
   const now = nowUtcIso();
   const deletedPhotos = await loadAllDeletedPhotos(db);
-  const due = deletedPhotos.filter((photo) => isPhotoDueForCleanup(photo.deleted_at, now));
+  // 2026-11-11: never automatically purge a photo whose original never
+  // reached the server while its staged copy still exists — that copy may be
+  // the only one left. It stays in the trash; emptying it by hand still works.
+  const due = deletedPhotos.filter(
+    (photo) => isPhotoDueForCleanup(photo.deleted_at, now) && isSafeForAutomaticPurge(photo),
+  );
   return deletePhotosPermanently(db, due);
 }
 

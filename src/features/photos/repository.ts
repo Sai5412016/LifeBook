@@ -175,6 +175,18 @@ export async function loadPendingUploads(
   );
 }
 
+/** The upload markers of one photo, read fresh — the staged-copy delete guard needs the current state, not the queue's snapshot. */
+export async function loadUploadMarkers(
+  db: AbstractPowerSyncDatabase,
+  photoId: string,
+): Promise<Pick<PhotoRow, 'local_uri' | 'medium_key' | 'medium_uploaded_at' | 'original_uploaded_at'> | null> {
+  const rows = await db.getAll<Pick<PhotoRow, 'local_uri' | 'medium_key' | 'medium_uploaded_at' | 'original_uploaded_at'>>(
+    'SELECT local_uri, medium_key, medium_uploaded_at, original_uploaded_at FROM photos WHERE id = ?',
+    [photoId],
+  );
+  return rows[0] ?? null;
+}
+
 /** Mark the preview as stored. */
 export async function markThumbUploaded(
   db: AbstractPowerSyncDatabase,
