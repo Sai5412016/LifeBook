@@ -53,6 +53,7 @@ import {
 } from '@/features/photos/selection';
 import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { runUploadQueue } from '@/features/photos/storage';
+import { formatUploadRunMessage } from '@/features/photos/upload-retry';
 import type { PhotoRow } from '@/features/photos/types';
 import { BigButton, Button, useUiColors, withAlpha } from '@/ui';
 
@@ -64,7 +65,7 @@ export default function ChronikScreen() {
   const { session } = useAuth();
   const { child, isLoading: childLoading } = useActiveChild();
   const { sections, isLoading: photosLoading } = usePhotoSections(child?.childId);
-  const pendingCount = usePendingUploadCount();
+  const pendingCount = usePendingUploadCount(session?.user.id);
   const { width } = useWindowDimensions();
   const { progress: shareProgress, share, cancel: cancelShare } = useSharePhotos();
   const { accent, dangerText } = useUiColors();
@@ -307,12 +308,9 @@ export default function ChronikScreen() {
     setBusy(true);
     setMessage(null);
     try {
-      const result = await runUploadQueue(db, { wifiOnly: false });
-      setMessage(
-        result.originals > 0
-          ? `${result.originals} Foto${result.originals === 1 ? '' : 's'} hochgeladen.`
-          : 'Nichts zu übertragen.',
-      );
+      // force: a manual tap also retries photos still in their retry pause.
+      const result = await runUploadQueue(db, { wifiOnly: false, force: true });
+      setMessage(formatUploadRunMessage(result));
     } finally {
       setBusy(false);
     }
@@ -379,9 +377,12 @@ export default function ChronikScreen() {
             {pendingCount > 0 ? (
               <ThemedView type="backgroundElement" style={styles.pendingRow}>
                 <ThemedText type="small" themeColor="textSecondary">
+                  {/* 2026-11-09: was "wartet auf WLAN" — also shown on WLAN for a
+                      photo whose upload had failed, which is exactly how the
+                      stuck photo of 29.10. went unnoticed. */}
                   {pendingCount === 1
-                    ? '1 Foto wartet auf WLAN'
-                    : `${pendingCount} Fotos warten auf WLAN`}
+                    ? '1 Foto noch nicht hochgeladen'
+                    : `${pendingCount} Fotos noch nicht hochgeladen`}
                 </ThemedText>
                 <Pressable onPress={handleForceUpload} disabled={busy} hitSlop={8}>
                   <ThemedText type="linkPrimary">Jetzt übertragen</ThemedText>

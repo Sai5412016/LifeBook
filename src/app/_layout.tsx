@@ -20,6 +20,7 @@ import { registerForPushNotifications } from '@/core/notifications';
 import { useHasHousehold } from '@/features/household/repository';
 import { GabeUndoSnackbar } from '@/features/medication/components/gabe-undo-snackbar';
 import { MedicationPlanRemindersEffect } from '@/features/medication-plan/components/plan-reminders-effect';
+import { UploadQueueEffect } from '@/features/photos/components/upload-queue-effect';
 import { runStartupTrashCleanup } from '@/features/photos/storage';
 
 // As early as this module can manage it — before anything else in the app
@@ -115,6 +116,7 @@ function DbAndAuthGate({ children }: { children: ReactNode }) {
       <PushRegistrationEffect />
       <MedicationPlanRemindersEffect />
       <TrashCleanupEffect db={db} />
+      <UploadQueueEffect />
       {children}
       <GabeUndoSnackbar />
     </PowerSyncContext.Provider>

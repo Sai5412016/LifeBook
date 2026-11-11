@@ -175,6 +175,18 @@ export async function loadPendingUploads(
   );
 }
 
+/** The upload markers of one photo, read fresh — the staged-copy delete guard needs the current state, not the queue's snapshot. */
+export async function loadUploadMarkers(
+  db: AbstractPowerSyncDatabase,
+  photoId: string,
+): Promise<Pick<PhotoRow, 'local_uri' | 'medium_key' | 'medium_uploaded_at' | 'original_uploaded_at'> | null> {
+  const rows = await db.getAll<Pick<PhotoRow, 'local_uri' | 'medium_key' | 'medium_uploaded_at' | 'original_uploaded_at'>>(
+    'SELECT local_uri, medium_key, medium_uploaded_at, original_uploaded_at FROM photos WHERE id = ?',
+    [photoId],
+  );
+  return rows[0] ?? null;
+}
+
 /** Mark the preview as stored. */
 export async function markThumbUploaded(
   db: AbstractPowerSyncDatabase,
@@ -415,13 +427,28 @@ export function usePhotosOfChild(childId: string | undefined): {
   return { photos: data ?? [], isLoading };
 }
 
-/** Reactive count of photos still waiting to be uploaded. */
-export function usePendingUploadCount(): number {
-  const { data } = useQuery<{ n: number }>(
-    `SELECT COUNT(*) AS n FROM photos
-      WHERE deleted_at IS NULL AND local_uri IS NOT NULL AND original_uploaded_at IS NULL`,
+/**
+ * Reactive: this person's photos still missing any of the three uploads.
+ * 2026-11-09: scoped to `created_by` (`local_uri` is synced, so the other
+ * parent's phone used to count — and show "wartet auf WLAN" for — photos only
+ * the importing phone can upload) and counting medium/thumb gaps too, not just
+ * the original: the stuck photo of 29.10. had its original AND its medium
+ * missing.
+ */
+export function usePendingUploads(userId: string | undefined): { id: string }[] {
+  const { data } = useQuery<{ id: string }>(
+    `SELECT id FROM photos
+      WHERE deleted_at IS NULL AND local_uri IS NOT NULL AND created_by = ?
+        AND (thumb_uploaded_at IS NULL OR medium_uploaded_at IS NULL OR original_uploaded_at IS NULL)
+      ORDER BY created_at ASC`,
+    [userId ?? ''],
   );
-  return data?.[0]?.n ?? 0;
+  return data ?? [];
+}
+
+/** Count of `usePendingUploads`. */
+export function usePendingUploadCount(userId: string | undefined): number {
+  return usePendingUploads(userId).length;
 }
 
 /**

@@ -31,7 +31,7 @@
 import { usePowerSync, useStatus } from '@powersync/react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Linking, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -77,7 +77,7 @@ import {
   useLastPhotoBackupAt,
   useMediumBackfillCandidatePhotos,
   useMediumBackfillProgress,
-  usePendingUploadCount,
+  usePendingUploads,
   usePhotoBackupCandidatePhotos,
 } from '@/features/photos/repository';
 import {
@@ -86,7 +86,14 @@ import {
   cancelPhotoBackupRun,
   runMediumBackfill,
   runPhotoBackup,
+  runUploadQueue,
 } from '@/features/photos/storage';
+import {
+  formatPendingUploadLines,
+  formatUploadRunMessage,
+  summarizePendingUploads,
+} from '@/features/photos/upload-retry';
+import { useUploadRetryStore } from '@/features/photos/upload-retry-store';
 import { useTrashCleanupDiagnostics } from '@/features/photos/trashDiagnostics';
 
 function SyncStatusRow() {
@@ -136,6 +143,60 @@ function SyncStatusRow() {
 }
 
 /**
+ * "Ausstehende Uploads: N" plus "Jetzt erneut versuchen" (task 2026-11-09).
+ * The counts come from this phone's retry records (features/photos/
+ * upload-retry-store.ts), which the queue writes on every run; the button
+ * forces a run that ignores retry pauses and the attempt limit. It uses
+ * mobile data for originals too, like the Chronik's "Jetzt übertragen" — the
+ * person asked for it explicitly.
+ */
+function PendingUploadsPanel({ photos }: { photos: { id: string }[] }) {
+  const db = usePowerSync();
+  const retryStates = useUploadRetryStore((state) => state.states);
+  const missingSourceIds = useUploadRetryStore((state) => state.missingSourceIds);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const summary = summarizePendingUploads(photos, retryStates, new Set(missingSourceIds));
+  if (summary.pending === 0 && !message) {
+    return null;
+  }
+
+  const handleRetry = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      setMessage(formatUploadRunMessage(await runUploadQueue(db, { wifiOnly: false, force: true })));
+    } catch (error) {
+      setMessage('Erneuter Versuch fehlgeschlagen. Details stehen im Protokoll.');
+      console.error('[LifeBook] Manueller Upload-Versuch fehlgeschlagen', error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.pendingUploads}>
+      {formatPendingUploadLines(summary).map((line) => (
+        <ThemedText key={line} type="small" themeColor="textSecondary">
+          {line}
+        </ThemedText>
+      ))}
+      {summary.pending > 0 ? (
+        <Pressable onPress={handleRetry} disabled={busy} hitSlop={8}>
+          <ThemedText type="linkPrimary">{busy ? 'Wird übertragen …' : 'Jetzt erneut versuchen'}</ThemedText>
+        </Pressable>
+      ) : null}
+      {message ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {message}
+        </ThemedText>
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * The "Alle Fotos vorbereiten" batch run, plus the WLAN gating, confirmation
  * dialog, live progress, cancel button, and end-of-run failure summary
  * around it. The actual queue/step/stop DECISIONS all live in
@@ -144,7 +205,9 @@ function SyncStatusRow() {
  */
 function PhotoStatusRow() {
   const db = usePowerSync();
-  const pending = usePendingUploadCount();
+  const { session } = useAuth();
+  const pendingUploads = usePendingUploads(session?.user.id);
+  const pending = pendingUploads.length;
   const backfillLabel = formatMediumBackfillLabel(useMediumBackfillProgress());
   const candidates = useMediumBackfillCandidatePhotos();
   const onWifi = useIsOnWifi();
@@ -299,6 +362,7 @@ function PhotoStatusRow() {
       <ThemedText type="small" themeColor="textSecondary">
         Originale werden standardmäßig nur im WLAN übertragen.
       </ThemedText>
+      <PendingUploadsPanel photos={pendingUploads} />
       {backfillLabel ? (
         <>
           <ThemedText type="small" themeColor="textSecondary">
@@ -636,6 +700,7 @@ const styles = StyleSheet.create({
     // exactly like kind/bearbeiten.tsx and menschen/* already do.
     paddingBottom: Spacing.five,
   },
+  pendingUploads: { gap: 4, paddingTop: 4 },
   card: {
     gap: Spacing.one,
     paddingHorizontal: Spacing.three,
