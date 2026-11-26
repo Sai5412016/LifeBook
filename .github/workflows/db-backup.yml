@@ -13,16 +13,20 @@
 # GitHub-Artefakt gespeichert: die Daten verlassen den Runner nur verschlüsselt
 # und nur Richtung R2.
 #
-# Noch NICHT aktiv: Der Zeitplan ist auskommentiert. Erst nach einem
-# erfolgreichen Testlauf von Hand (Actions → "DB-Backup" → Run workflow) die
-# beiden Zeilen unter "schedule" einkommentieren (siehe docs/backup.md).
+# Aktiv seit 26.11.2026: erster Lauf von Hand und Wiederherstellungstest
+# erfolgreich (siehe docs/backup.md). Läuft sonntags 03:17 UTC; von Hand
+# weiterhin über Actions → "DB-Backup" → Run workflow.
+#
+# Schlägt ein Schritt fehl, endet der Lauf rot und GitHub schickt dem
+# Repo-Besitzer automatisch eine E-Mail. Deshalb bricht jeder Schritt beim
+# ersten Fehler ab (shell: bash = "bash -eo pipefail", siehe defaults unten).
 
 name: DB-Backup
 
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '17 3 * * 0'   # sonntags 03:17 UTC
+  schedule:
+    - cron: '17 3 * * 0'   # sonntags 03:17 UTC
 
 permissions:
   contents: read
@@ -35,6 +39,11 @@ jobs:
   backup:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    defaults:
+      run:
+        # Explizit, damit JEDER Schritt mit -eo pipefail läuft: ein Fehler,
+        # auch mitten in einer Pipe, beendet den Lauf rot.
+        shell: bash
     env:
       BACKUP_DB_URL: ${{ secrets.BACKUP_DB_URL }}
       AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
