@@ -6,3 +6,10 @@
 # einen Fehler zeigen.
 [functions.album]
 verify_jwt = false
+
+# media-sign (2026-11-26): stellt signierte R2-Adressen für Original-Fotos aus.
+# Nur mit Anmeldung — die Function prüft das Token zusätzlich selbst und
+# entscheidet anhand der Haushaltsrolle. Ausdrücklich eingetragen, damit niemand
+# es beim Vorbild "album" (ohne Anmeldung) versehentlich abschaltet.
+[functions.media-sign]
+verify_jwt = true

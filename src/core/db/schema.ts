@@ -317,6 +317,15 @@ function buildAppSchema() {
       medium_uploaded_at: column.text,
       original_key: column.text, // {household_id}/{photo_id}/orig.{ext}
       original_uploaded_at: column.text, // NULL = upload still pending
+      // 2026-11-26: where the original lives — 'supabase' (bucket `photos`)
+      // or 'r2' (Cloudflare bucket `lifebook-originals`, signed by the Edge
+      // Function `media-sign`). Postgres: NOT NULL DEFAULT 'supabase'
+      // (supabase/migrations/20261126120000_photos_original_store.sql). A
+      // row inserted on this phone reads NULL here until the server copy
+      // syncs back — callers must treat NULL as 'supabase'. The migration
+      // MUST be applied before an app version with this line ships, or
+      // uploads of the new column are rejected.
+      original_store: column.text,
       availability: column.text, // available | missing
       tags: column.text, // JSON array, generated on-device
       ocr_text: column.text, // V2
