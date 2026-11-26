@@ -9,10 +9,11 @@
 import Share from 'react-native-share';
 
 import { formatShareDiagnostic, resolveShareMimeType } from './sharing';
+import type { ShareVariant } from './original-store';
 import {
   cleanupSharedFiles,
   prepareShareBatch,
-  type ShareableOriginal,
+  type ShareablePhoto,
   type ShareBatchProgress,
 } from './storage';
 
@@ -45,9 +46,10 @@ export type SharePhotosResult = {
 };
 
 /**
- * Loads every original in `photos` (reusing a still-staged local file where
- * possible, downloading the rest) and opens the share sheet once with all of
- * them. Cache files this call downloaded are deleted again once the share
+ * Loads every photo in `photos` and opens the share sheet once with all of
+ * them. PR 2 (2026-11-26): by default the MEDIUM (1600 px, checked free of
+ * location data, see storage.ts#resolveMediumForSharing); the original only
+ * when `variant: 'original'` — the explicit "Original senden" choice. Cache files this call downloaded are deleted again once the share
  * sheet has them — see `cleanupSharedFiles`; a still-pending upload's staged
  * file is never touched.
  *
@@ -56,8 +58,8 @@ export type SharePhotosResult = {
  * result is how the caller reports that afterwards.
  */
 export async function sharePhotos(
-  photos: readonly ShareableOriginal[],
-  options: { signal?: AbortSignal; onProgress?: (progress: ShareBatchProgress) => void } = {},
+  photos: readonly ShareablePhoto[],
+  options: { signal?: AbortSignal; onProgress?: (progress: ShareBatchProgress) => void; variant?: ShareVariant } = {},
 ): Promise<SharePhotosResult> {
   const { files, failedCount, cancelled } = await prepareShareBatch(photos, options);
 
@@ -75,7 +77,10 @@ export async function sharePhotos(
       urls: files.map((file) => file.uri),
       // Explicit rather than left for react-native-share to sniff from each
       // file's extension — see sharing.ts#resolveShareMimeType.
-      type: resolveShareMimeType(photos.map((photo) => photo.mime)),
+      // A medium is always a JPEG, whatever the original was.
+      type: resolveShareMimeType(
+        options.variant === 'original' ? photos.map((photo) => photo.mime) : photos.map(() => 'image/jpeg'),
+      ),
       // A cancelled share sheet (the user just closed it) is a normal outcome
       // here, not an error to report — only a failed LOAD is.
       failOnCancel: false,

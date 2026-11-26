@@ -38,7 +38,7 @@ const PHOTO_COLUMNS = `
   created_at, updated_at, deleted_at, source, local_uri, content_hash,
   captured_at, occurred_at_source, age_days, width, height, mime, bytes,
   thumb_key, thumb_uploaded_at, medium_key, medium_uploaded_at,
-  original_key, original_uploaded_at, availability, note
+  original_key, original_uploaded_at, original_store, availability, note
 `;
 
 /**
@@ -226,12 +226,30 @@ export async function markMediumUploaded(
  * only: the file is no longer held locally, and every reader — including this
  * phone — now fetches it from object storage. Deleting the staged bytes is what
  * keeps the app from doubling the user's photo storage.
+ *
+ * PR 2 (2026-11-26): for an original confirmed in R2, `original_store = 'r2'`
+ * is set in THIS SAME statement — one local UPDATE, so one PATCH to Postgres
+ * that carries both columns: no phone can ever see "uploaded" without the
+ * store, or 'r2' before the upload was confirmed. For 'supabase' the column
+ * is NOT written at all: the row keeps whatever it has (NULL locally →
+ * 'supabase' on the server via the migration's trigger). Always an UPDATE
+ * (a PATCH), never an INSERT OR REPLACE — see docs/r2.md, "nie per Upsert".
  */
 export async function markOriginalUploaded(
   db: AbstractPowerSyncDatabase,
   photoId: string,
+  store: 'supabase' | 'r2' = 'supabase',
 ): Promise<void> {
   const now = nowUtcIso();
+  if (store === 'r2') {
+    await db.execute(
+      `UPDATE photos
+          SET original_uploaded_at = ?, original_store = 'r2', local_uri = NULL, availability = 'missing', updated_at = ?
+        WHERE id = ?`,
+      [now, now, photoId],
+    );
+    return;
+  }
   await db.execute(
     `UPDATE photos
         SET original_uploaded_at = ?, local_uri = NULL, availability = 'missing', updated_at = ?
@@ -472,7 +490,7 @@ export function useMediumBackfillProgress(): MediumBackfillProgress {
 /** Every field storage.ts#healMissingMedium and identity.ts#selectMediumBackfillCandidates need for one photo. */
 export type MediumBackfillCandidatePhoto = Pick<
   PhotoRow,
-  'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height' | 'bytes'
+  'id' | 'household_id' | 'local_uri' | 'original_key' | 'original_store' | 'medium_key' | 'mime' | 'width' | 'height' | 'bytes'
 >;
 
 /**
@@ -484,7 +502,7 @@ export type MediumBackfillCandidatePhoto = Pick<
  */
 export function useMediumBackfillCandidatePhotos(): MediumBackfillCandidatePhoto[] {
   const { data } = useQuery<MediumBackfillCandidatePhoto>(
-    `SELECT id, household_id, local_uri, original_key, medium_key, mime, width, height, bytes
+    `SELECT id, household_id, local_uri, original_key, original_store, medium_key, mime, width, height, bytes
        FROM photos
       WHERE deleted_at IS NULL AND medium_key IS NULL
       ORDER BY created_at ASC`,
@@ -495,7 +513,7 @@ export function useMediumBackfillCandidatePhotos(): MediumBackfillCandidatePhoto
 /* ────────────────────────────── "Alle Fotos sichern" (Original-Backup aufs Gerät, 2026-08-16) ────────────────────────────── */
 
 /** Every field storage.ts#runPhotoBackup and identity.ts#selectPhotoBackupCandidates need for one photo. */
-export type PhotoBackupCandidatePhoto = Pick<PhotoRow, 'id' | 'local_uri' | 'original_key' | 'mime' | 'bytes'>;
+export type PhotoBackupCandidatePhoto = Pick<PhotoRow, 'id' | 'local_uri' | 'original_key' | 'original_store' | 'mime' | 'bytes'>;
 
 /**
  * Reactive: every photo not yet backed up to THIS device's gallery, oldest
@@ -510,7 +528,7 @@ export type PhotoBackupCandidatePhoto = Pick<PhotoRow, 'id' | 'local_uri' | 'ori
  */
 export function usePhotoBackupCandidatePhotos(): PhotoBackupCandidatePhoto[] {
   const { data } = useQuery<PhotoBackupCandidatePhoto>(
-    `SELECT p.id, p.local_uri, p.original_key, p.mime, p.bytes
+    `SELECT p.id, p.local_uri, p.original_key, p.original_store, p.mime, p.bytes
        FROM photos p
        LEFT JOIN photo_backups b ON b.id = p.id
       WHERE p.deleted_at IS NULL AND b.id IS NULL
@@ -546,4 +564,30 @@ export function useLastPhotoBackupAt(): string | null {
 export async function markPhotoBackedUp(db: AbstractPowerSyncDatabase, photoId: string): Promise<void> {
   const now = nowUtcIso();
   await db.execute('INSERT OR REPLACE INTO photo_backups (id, backed_up_at) VALUES (?, ?)', [photoId, now]);
+}
+
+/* ────────────────────────────── R2 self-test (PR 2, 2026-11-26) ────────────────────────────── */
+
+/**
+ * The two photos the "R2-Verbindung prüfen" check needs: one whose original
+ * is in Supabase (so R2 must answer 404 NoSuchKey for it), and the newest one
+ * whose original is in R2 (its stored size must equal the row's `bytes`).
+ * Either may be null.
+ */
+export async function loadR2SelfTestPhotos(db: AbstractPowerSyncDatabase): Promise<{
+  oldPhoto: Pick<PhotoRow, 'id'> | null;
+  newPhoto: Pick<PhotoRow, 'id' | 'bytes'> | null;
+}> {
+  const old = await db.getAll<Pick<PhotoRow, 'id'>>(
+    `SELECT id FROM photos
+      WHERE deleted_at IS NULL AND original_uploaded_at IS NOT NULL
+        AND (original_store IS NULL OR original_store = 'supabase')
+      ORDER BY created_at ASC LIMIT 1`,
+  );
+  const fresh = await db.getAll<Pick<PhotoRow, 'id' | 'bytes'>>(
+    `SELECT id, bytes FROM photos
+      WHERE deleted_at IS NULL AND original_store = 'r2'
+      ORDER BY original_uploaded_at DESC LIMIT 1`,
+  );
+  return { oldPhoto: old[0] ?? null, newPhoto: fresh[0] ?? null };
 }

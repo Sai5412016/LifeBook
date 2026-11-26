@@ -109,6 +109,12 @@ export type PhotoRow = {
   medium_uploaded_at: string | null;
   original_key: string | null;
   original_uploaded_at: string | null;
+  /**
+   * PR 2 (2026-11-26): where the original lives — 'supabase' or 'r2'. NULL
+   * for a row inserted on this phone until the server copy syncs back;
+   * always read through original-store.ts#originalStoreOf (NULL → 'supabase').
+   */
+  original_store: 'supabase' | 'r2' | null;
   availability: PhotoAvailability;
   /** User-entered caption, shown under the photo in the fullscreen viewer — see identity.ts#normalizePhotoNote. NULL for no caption, never an empty string. */
   note: string | null;

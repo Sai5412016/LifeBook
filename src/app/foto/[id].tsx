@@ -60,7 +60,8 @@ import {
   usePhotosOfChild,
 } from '@/features/photos/repository';
 import { formatDeleteConfirmationMessage } from '@/features/photos/selection';
-import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
+import { fullscreenKeysToSign, type ShareVariant } from '@/features/photos/original-store';
+import { SHARE_CHOICE, formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { healMissingMedium } from '@/features/photos/storage';
 import type { PhotoRow } from '@/features/photos/types';
 import {
@@ -157,11 +158,12 @@ export default function FotoVollbildScreen() {
     }
     return windowIndices(currentIndex, photos.length, SIGNED_URL_WINDOW_RADIUS)
       .map((index) => photos[index])
-      .filter((entry): entry is PhotoRow => !!entry && !entry.local_uri)
-      // Both keys, not just original: resolveFullscreenUri prefers medium
-      // once it has a signed URL for it, so that has to be in the batch too.
-      .flatMap((entry) => [entry.medium_key, entry.original_key])
-      .filter((key): key is string => Boolean(key));
+      .filter((entry): entry is PhotoRow => !!entry)
+      // PR 2 (2026-11-26): only what can actually be shown — the medium,
+      // and the original only for a legacy photo without one. Signing the
+      // original "just in case" handed out a URL nobody loaded
+      // (original-store.ts#fullscreenKeysToSign).
+      .flatMap((entry) => fullscreenKeysToSign(entry));
   }, [currentIndex, photos]);
   const signedUrls = useSignedUrls(windowKeys);
 
@@ -204,11 +206,11 @@ export default function FotoVollbildScreen() {
     }
   }, [currentIndex, photos, signedUrls]);
 
-  const handleShare = useCallback(async () => {
+  const runShare = useCallback(async (variant: ShareVariant) => {
     if (!currentPhoto) {
       return;
     }
-    const outcome = await share([currentPhoto]);
+    const outcome = await share([currentPhoto], variant);
     if (outcome.status === 'error') {
       Alert.alert('Teilen fehlgeschlagen', outcome.message);
       return;
@@ -220,6 +222,19 @@ export default function FotoVollbildScreen() {
       );
     }
   }, [currentPhoto, share]);
+
+  // PR 2 (2026-11-26): "Teilen" sends the medium without location data; the
+  // original only through the explicit second button (sharing.ts#SHARE_CHOICE).
+  const handleShare = useCallback(() => {
+    if (!currentPhoto) {
+      return;
+    }
+    Alert.alert(SHARE_CHOICE.title(1), SHARE_CHOICE.message, [
+      { text: SHARE_CHOICE.cancel, style: 'cancel' },
+      { text: SHARE_CHOICE.original, onPress: () => void runShare('original') },
+      { text: SHARE_CHOICE.medium, onPress: () => void runShare('medium') },
+    ]);
+  }, [currentPhoto, runShare]);
 
   const handleDelete = useCallback(async () => {
     if (!currentPhoto || currentIndex === null) {

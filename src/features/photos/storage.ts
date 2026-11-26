@@ -20,6 +20,16 @@ import * as Network from 'expo-network';
 import { addSecondsToUtcIso, nowUtcIso } from '@/core/time';
 import { supabase } from '@/core/supabase';
 import { PHOTOS_BUCKET, getStoredObjectSize, removeStoredObjects, uploadToPhotosBucket } from '@/core/storage/objects';
+import {
+  callMediaSign,
+  deleteR2Object,
+  probeR2ObjectSize,
+  probeR2Raw,
+  putFileToR2,
+  requestMediaSign,
+} from '@/core/storage/media-sign';
+import { parseMediaSignResponse } from '@/core/storage/media-sign-protocol';
+import { ORIGINALS_TO_R2 } from '@/core/storage/originals-config';
 import { removePhotoFromAllEvents } from '@/features/events/repository';
 import { removePhotoFromAllShares } from '@/features/shares/repository';
 import { removePhotoFromAllRelatives } from '@/features/tree/repository';
@@ -43,11 +53,29 @@ import {
   type PhotoBackupPermissionState,
   type PhotoBackupRunState,
 } from './identity';
+import { hasStrippableMetadata, inspectJpegMetadata, stripJpegMetadata } from './jpeg-metadata';
 import { createMediumImage, createThumbnail, deleteQuietly } from './media';
+import {
+  mediumShareSource,
+  needsR2Delete,
+  originalReadSource,
+  uploadOriginal,
+  type OriginalUploadDeps,
+  type ShareVariant,
+} from './original-store';
+import {
+  applyR2DeleteRetry,
+  classifyR2DeleteError,
+  dueR2Deletes,
+  recordR2DeleteFailure,
+} from './r2-delete-queue';
+import { loadPendingR2Deletes, savePendingR2Deletes } from './r2-delete-store';
+import { evaluateR2SelfTest, type R2SelfTestInput, type R2SelfTestResult } from './r2-self-test';
 import {
   hardDeletePhoto,
   loadAllDeletedPhotos,
   loadPendingUploads,
+  loadR2SelfTestPhotos,
   loadUploadMarkers,
   markMediumUploaded,
   markOriginalUploaded,
@@ -61,7 +89,6 @@ import {
   decidePendingPhoto,
   isSafeForAutomaticPurge,
   isSafeToDeleteStagedCopy,
-  storedSizeMatches,
   plannedUploadSteps,
   recordUploadFailure,
   type UploadRetryState,
@@ -152,6 +179,24 @@ function localFileSize(uri: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The real network/database calls behind original-store.ts#uploadOriginal —
+ * that module decides, this only connects. `ORIGINALS_TO_R2` is read by the
+ * caller, not here, so a test of the decision never depends on the switch.
+ */
+function originalUploadDeps(db: AbstractPowerSyncDatabase): OriginalUploadDeps {
+  return {
+    localSize: localFileSize,
+    uploadToSupabase: (uri, key, mime) => uploadToPhotosBucket(uri, key, mime, IMMUTABLE_CACHE_CONTROL_SECONDS),
+    supabaseStoredSize: getStoredObjectSize,
+    signPut: (photoId, contentType, bytes) => requestMediaSign(photoId, 'put', { contentType, bytes }),
+    putFile: putFileToR2,
+    signGet: (photoId) => requestMediaSign(photoId, 'get'),
+    probeSize: probeR2ObjectSize,
+    markUploaded: (photoId, store) => markOriginalUploaded(db, photoId, store),
+  };
 }
 
 function fileExists(uri: string): boolean {
@@ -258,26 +303,18 @@ async function executeUploadQueue(
           result.deferred += 1;
           continue;
         }
-        await uploadToPhotosBucket(
-          photo.local_uri,
-          photo.original_key,
-          photo.mime ?? 'image/jpeg',
-          IMMUTABLE_CACHE_CONTROL_SECONDS,
+        // PR 2 (2026-11-26): R2 or Supabase, decided by ORIGINALS_TO_R2 for
+        // NEW uploads only — see original-store.ts#uploadOriginal for the
+        // exact steps. Either way it is confirmed on the server BEFORE it
+        // counts as uploaded (2026-11-11: the staged file may be the only
+        // copy left), and `original_uploaded_at` (+ `original_store = 'r2'`)
+        // is written in one UPDATE only after that. Every failure throws
+        // into the catch below: retry record, staged copy kept.
+        await uploadOriginal(
+          { id: photo.id, local_uri: photo.local_uri, original_key: photo.original_key, mime: photo.mime },
+          ORIGINALS_TO_R2,
+          originalUploadDeps(db),
         );
-        // 2026-11-11: confirmed on the server BEFORE it counts as uploaded.
-        // The staged file may be the only copy left (photo 01a18883… was
-        // deleted from the gallery), so "the request returned 2xx" is not
-        // enough — the stored object must have exactly the local size.
-        // A mismatch or a failed lookup throws: the photo stays pending and
-        // is retried, and its staged file is kept.
-        const localBytes = localFileSize(photo.local_uri);
-        const storedBytes = await getStoredObjectSize(photo.original_key);
-        if (!storedSizeMatches(localBytes, storedBytes)) {
-          throw new Error(
-            `Original nicht bestätigt (lokal ${localBytes ?? '?'} Bytes, Server ${storedBytes ?? 'nicht gefunden'})`,
-          );
-        }
-        await markOriginalUploaded(db, photo.id);
         // Only now may the staged copy go — and only if the row, read back
         // fresh, says medium AND original are both on the server.
         const fresh = await loadUploadMarkers(db, photo.id);
@@ -392,7 +429,17 @@ export type ShareableOriginal = {
   id: string;
   local_uri: string | null;
   original_key: string | null;
+  /** PR 2: 'r2' → read through media-sign; NULL/'supabase' → Supabase as before. Optional so older callers stay valid. */
+  original_store?: string | null;
   mime: string | null;
+};
+
+/** What sharing the MEDIUM needs on top (PR 2: the default when sharing). */
+export type ShareablePhoto = ShareableOriginal & {
+  medium_key: string | null;
+  medium_uploaded_at: string | null;
+  width: number | null;
+  height: number | null;
 };
 
 export type ResolvedShareFile = {
@@ -496,12 +543,22 @@ export async function resolveOriginalForSharing(
     return requireResolvedShareFile(destination.uri, true);
   }
 
-  if (!photo.original_key) {
+  const source = originalReadSource(photo);
+  if (source === 'none' || !photo.original_key) {
     throw new Error(`photos: no original available to share for photo ${photo.id}`);
   }
 
-  const urls = await createSignedUrls([photo.original_key]);
-  const signedUrl = urls.get(photo.original_key);
+  // PR 2 (2026-11-26): the row's own store decides — an R2 original is
+  // signed by `media-sign` (any household member may read), a Supabase one
+  // exactly as before. Never both: a photo whose store says 'r2' has no
+  // original in Supabase.
+  let signedUrl: string | undefined;
+  if (source === 'r2') {
+    signedUrl = (await requestMediaSign(photo.id, 'get')).url;
+  } else {
+    const urls = await createSignedUrls([photo.original_key]);
+    signedUrl = urls.get(photo.original_key);
+  }
   if (!signedUrl) {
     throw new Error(`photos: could not sign the original to share for photo ${photo.id}`);
   }
@@ -512,6 +569,93 @@ export async function resolveOriginalForSharing(
   });
 
   return requireResolvedShareFile(downloaded.uri, true);
+}
+
+/**
+ * Last check before a medium leaves the phone: reads it, and if it carries
+ * ANY EXIF/XMP/IPTC block (expected: never — see jpeg-metadata.ts for why),
+ * rewrites it without. Logs only that it happened, never the content.
+ */
+async function ensureNoLocationMetadata(uri: string): Promise<void> {
+  const file = new File(uri);
+  const bytes = await file.bytes();
+  const report = inspectJpegMetadata(bytes);
+  if (!report.isJpeg) {
+    throw new Error('photos: Medium ist kein lesbares JPEG – Teilen abgebrochen');
+  }
+  if (!hasStrippableMetadata(report)) {
+    return;
+  }
+  console.warn('[LifeBook] Medium trug Metadaten und wurde vor dem Teilen bereinigt', {
+    exif: report.hasExif,
+    gps: report.hasGps,
+    xmp: report.hasXmp,
+    iptc: report.hasIptc,
+  });
+  file.write(stripJpegMetadata(bytes));
+  const again = inspectJpegMetadata(await file.bytes());
+  if (hasStrippableMetadata(again)) {
+    throw new Error('photos: Metadaten konnten nicht entfernt werden – Teilen abgebrochen');
+  }
+}
+
+/**
+ * The medium (longest edge 1600 px, JPEG) of one photo as a fresh file in the
+ * sharing cache, with no location data — what "Teilen" sends by default
+ * since PR 2 (2026-11-26). Source per original-store.ts#mediumShareSource:
+ * rendered from the staged original if this phone still has it, downloaded
+ * if the medium is on the server, or rendered from the original (either
+ * store) for a legacy photo without one.
+ */
+export async function resolveMediumForSharing(
+  photo: ShareablePhoto,
+  options: { signal?: AbortSignal } = {},
+): Promise<ResolvedShareFile> {
+  const directory = getShareCacheDirectory();
+  if (!directory.info().exists) {
+    directory.create({ intermediates: true });
+  }
+  const destination = new File(directory, `${photo.id}-1600.jpg`);
+  if (destination.info().exists) {
+    destination.delete();
+  }
+  const dimensions = photo.width && photo.height ? { width: photo.width, height: photo.height } : null;
+
+  const source = mediumShareSource(photo);
+  if (source === 'none') {
+    throw new Error(`photos: no medium available to share for photo ${photo.id}`);
+  }
+
+  if (source === 'download_medium' && photo.medium_key) {
+    const urls = await createSignedUrls([photo.medium_key]);
+    const signedUrl = urls.get(photo.medium_key);
+    if (!signedUrl) {
+      throw new Error(`photos: could not sign the medium to share for photo ${photo.id}`);
+    }
+    await File.downloadFileAsync(signedUrl, destination, { idempotent: true, signal: options.signal });
+  } else {
+    // Render a medium: from the staged file directly, or from the original
+    // fetched into the sharing cache first (deleted again right after).
+    let original: ResolvedShareFile | null = null;
+    try {
+      const sourceUri =
+        source === 'render_from_local' && photo.local_uri
+          ? photo.local_uri
+          : (original = await resolveOriginalForSharing(photo, options)).uri;
+      const rendered = await createMediumImage(sourceUri, dimensions);
+      try {
+        await new File(rendered).move(destination);
+      } catch (error) {
+        deleteQuietly(rendered);
+        throw error;
+      }
+    } finally {
+      if (original) cleanupSharedFiles([original]);
+    }
+  }
+
+  await ensureNoLocationMetadata(destination.uri);
+  return requireResolvedShareFile(destination.uri, true);
 }
 
 /** Deletes only the files this share operation itself downloaded — never a staged upload. */
@@ -544,9 +688,11 @@ export type ShareBatchResult = {
  * the loop promptly instead of finishing the batch regardless.
  */
 export async function prepareShareBatch(
-  photos: readonly ShareableOriginal[],
-  options: { signal?: AbortSignal; onProgress?: (progress: ShareBatchProgress) => void } = {},
+  photos: readonly ShareablePhoto[],
+  options: { signal?: AbortSignal; onProgress?: (progress: ShareBatchProgress) => void; variant?: ShareVariant } = {},
 ): Promise<ShareBatchResult> {
+  // PR 2: the medium unless the person explicitly chose "Original senden".
+  const resolve = options.variant === 'original' ? resolveOriginalForSharing : resolveMediumForSharing;
   const files: ResolvedShareFile[] = [];
   let failedCount = 0;
 
@@ -558,7 +704,7 @@ export async function prepareShareBatch(
     options.onProgress?.({ current: index + 1, total: photos.length });
 
     try {
-      const file = await resolveOriginalForSharing(photos[index], { signal: options.signal });
+      const file = await resolve(photos[index], { signal: options.signal });
       files.push(file);
     } catch (error) {
       if (options.signal?.aborted) {
@@ -610,7 +756,7 @@ export async function healMissingMedium(
   db: AbstractPowerSyncDatabase,
   photo: Pick<
     PhotoRow,
-    'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height'
+    'id' | 'household_id' | 'local_uri' | 'original_key' | 'original_store' | 'medium_key' | 'mime' | 'width' | 'height'
   >,
 ): Promise<'healed' | 'skipped' | 'failed'> {
   if (photo.medium_key || !photo.original_key || healInFlight) {
@@ -706,7 +852,7 @@ export async function runMediumBackfill(
   db: AbstractPowerSyncDatabase,
   photos: readonly Pick<
     PhotoRow,
-    'id' | 'household_id' | 'local_uri' | 'original_key' | 'medium_key' | 'mime' | 'width' | 'height'
+    'id' | 'household_id' | 'local_uri' | 'original_key' | 'original_store' | 'medium_key' | 'mime' | 'width' | 'height'
   >[],
   onProgress?: (state: MediumBackfillRunState) => void,
 ): Promise<MediumBackfillRunResult> {
@@ -745,7 +891,7 @@ export async function runMediumBackfill(
 export type PermanentlyDeletablePhoto = Pick<
   PhotoRow,
   'id' | 'thumb_key' | 'medium_key' | 'original_key' | 'local_uri'
->;
+> & { original_store?: string | null };
 
 /**
  * Removes one photo for good: task's exact order, and the reasoning for
@@ -778,17 +924,65 @@ export type PermanentlyDeletablePhoto = Pick<
  *    features/tree/repository.ts#removePhotoFromAllRelatives). Wired in
  *    ahead of that feature's Stufe 2 (nothing writes a `relative_photos`
  *    row yet), so this step is currently always a no-op in practice.
+ *
+ * PR 2 (2026-11-26): for an original in R2, step 1b deletes it there via
+ * `media-sign delete` — BEFORE the row goes, because the function builds
+ * the key from the row and refuses once it is gone. Unlike step 1, a
+ * failure here does NOT stop the delete (task rule: the person wanted the
+ * photo gone from both phones); it is remembered per device
+ * (./r2-delete-queue.ts) and retried at the next app start. The Supabase
+ * removal in step 1 still includes `original_key` for an R2 photo — after
+ * PR 3's copy an old original may sit in both stores, and removing a key
+ * that is not there is a no-op in Supabase.
  */
 export async function permanentlyDeletePhoto(
   db: AbstractPowerSyncDatabase,
   photo: PermanentlyDeletablePhoto,
 ): Promise<void> {
   await removeStoredObjects(photo.thumb_key, photo.medium_key, photo.original_key);
+  if (needsR2Delete(photo)) {
+    await deleteOriginalInR2OrRemember(photo);
+  }
   deleteQuietly(photo.local_uri);
   await hardDeletePhoto(db, photo.id);
   await removePhotoFromAllShares(photo.id);
   await removePhotoFromAllEvents(db, photo.id);
   await removePhotoFromAllRelatives(db, photo.id);
+}
+
+/** Never throws: a failed R2 delete is recorded for a retry instead (see permanentlyDeletePhoto). */
+async function deleteOriginalInR2OrRemember(photo: PermanentlyDeletablePhoto): Promise<void> {
+  try {
+    await deleteR2Object(await requestMediaSign(photo.id, 'delete'));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[LifeBook] Original in R2 konnte nicht gelöscht werden, wird später erneut versucht', {
+      photoId: photo.id,
+      message,
+    });
+    const queue = await loadPendingR2Deletes();
+    await savePendingR2Deletes(
+      recordR2DeleteFailure(queue, { photoId: photo.id, key: photo.original_key, error: message, nowUtcIso: nowUtcIso() }),
+    );
+  }
+}
+
+/**
+ * Retries every remembered R2 delete once (app start, before the trash
+ * sweep). Never throws. Returns how many are still open afterwards.
+ */
+export async function retryPendingR2Deletes(): Promise<number> {
+  let queue = await loadPendingR2Deletes();
+  for (const entry of dueR2Deletes(queue)) {
+    try {
+      await deleteR2Object(await requestMediaSign(entry.photoId, 'delete'));
+      queue = applyR2DeleteRetry(queue, entry.photoId, { kind: 'deleted' });
+    } catch (error) {
+      queue = applyR2DeleteRetry(queue, entry.photoId, classifyR2DeleteError(error));
+    }
+  }
+  await savePendingR2Deletes(queue);
+  return queue.length;
 }
 
 export type TrashSweepResult = { removed: number; failed: number };
@@ -870,11 +1064,14 @@ export async function runTrashCleanupSweep(db: AbstractPowerSyncDatabase): Promi
 export async function runStartupTrashCleanup(db: AbstractPowerSyncDatabase): Promise<void> {
   setTrashCleanupDiagnostics({ runStatus: 'running' });
   try {
+    // PR 2: R2 deletes left over from an earlier permanent delete first.
+    const r2DeletesPending = await retryPendingR2Deletes().catch(() => 0);
     const result = await runTrashCleanupSweep(db);
     setTrashCleanupDiagnostics({
       runStatus: 'done',
       removed: result.removed,
       failed: result.failed,
+      r2DeletesPending,
       lastError: null,
       lastRunAtUtcIso: nowUtcIso(),
     });
@@ -1136,4 +1333,50 @@ export async function runPhotoBackup(
   } finally {
     backupAbortController = null;
   }
+}
+
+/* ────────────────────────────── "R2-Verbindung prüfen" (PR 2, 2026-11-26) ────────────────────────────── */
+
+/**
+ * The first acceptance of PR 2 (docs/r2.md), run from Einstellungen with the
+ * signed-in person's own token — reads only, changes nothing:
+ *  1. media-sign with an invalid body → expected 400 invalid_request;
+ *  2. media-sign get for an OLD photo (original in Supabase) → a signed URL;
+ *     one byte from R2 → expected 404 NoSuchKey (proves endpoint, bucket,
+ *     key pair and signature; 403 would mean a wrong secret);
+ *  3. the newest R2 photo: stored size == the row's size.
+ * Never throws; the result lines carry status codes only.
+ */
+export async function runR2SelfTest(db: AbstractPowerSyncDatabase): Promise<R2SelfTestResult> {
+  const input: R2SelfTestInput = { invalid: { status: 0, code: null }, oldPhoto: null, newPhoto: null };
+  const codeOf = (json: unknown): string | null => {
+    const error = (json as { error?: unknown } | null)?.error;
+    return typeof error === 'string' ? error : null;
+  };
+  try {
+    const invalid = await callMediaSign({ photo_id: 'selbsttest', op: 'list' });
+    input.invalid = { status: invalid.status, code: codeOf(invalid.json) };
+
+    const { oldPhoto, newPhoto } = await loadR2SelfTestPhotos(db);
+    if (oldPhoto) {
+      const sign = await callMediaSign({ photo_id: oldPhoto.id, op: 'get' });
+      if (sign.status === 200) {
+        const probe = await probeR2Raw(parseMediaSignResponse(sign.status, sign.json));
+        input.oldPhoto = { signStatus: 200, signCode: null, probeStatus: probe.status, probeCode: probe.code };
+      } else {
+        input.oldPhoto = { signStatus: sign.status, signCode: codeOf(sign.json), probeStatus: null, probeCode: null };
+      }
+    }
+    if (newPhoto) {
+      try {
+        const stored = await probeR2ObjectSize(await requestMediaSign(newPhoto.id, 'get'));
+        input.newPhoto = { rowBytes: newPhoto.bytes, storedBytes: stored, error: null };
+      } catch (error) {
+        input.newPhoto = { rowBytes: newPhoto.bytes, storedBytes: null, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  } catch (error) {
+    return { ok: false, lines: [`Prüfung abgebrochen: ${error instanceof Error ? error.message : String(error)}`] };
+  }
+  return evaluateR2SelfTest(input);
 }

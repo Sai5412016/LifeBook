@@ -12,7 +12,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ShareCancelledError, ShareOpenError, sharePhotos } from './share';
 import { checkShareBatchSize, formatMobileDataWarning, shouldWarnAboutMobileData } from './sharing';
-import { getCachedSignedUrls, isOnWifi, type ShareableOriginal, type ShareBatchProgress } from './storage';
+import type { ShareVariant } from './original-store';
+import { getCachedSignedUrls, isOnWifi, type ShareablePhoto, type ShareBatchProgress } from './storage';
 
 /**
  * Reactive Wi-Fi state — the "Alle Fotos vorbereiten" button's disabled
@@ -105,7 +106,8 @@ export type SharePhotosOutcome =
  */
 export function useSharePhotos(): {
   progress: ShareBatchProgress | null;
-  share: (photos: readonly ShareableOriginal[]) => Promise<SharePhotosOutcome>;
+  /** `variant` defaults to the medium (PR 2); 'original' only on the explicit "Original senden". */
+  share: (photos: readonly ShareablePhoto[], variant?: ShareVariant) => Promise<SharePhotosOutcome>;
   cancel: () => void;
 } {
   const [progress, setProgress] = useState<ShareBatchProgress | null>(null);
@@ -115,13 +117,14 @@ export function useSharePhotos(): {
     controllerRef.current?.abort();
   }, []);
 
-  const share = useCallback(async (photos: readonly ShareableOriginal[]): Promise<SharePhotosOutcome> => {
+  const share = useCallback(async (photos: readonly ShareablePhoto[], variant: ShareVariant = 'medium'): Promise<SharePhotosOutcome> => {
     const check = checkShareBatchSize(photos.length);
     if (!check.ok) {
       return { status: 'rejected', message: check.message };
     }
 
-    const wifiWarning = shouldWarnAboutMobileData(photos.length, await isOnWifi())
+    // The mobile-data warning is about multi-MB originals; a medium is a few hundred KB.
+    const wifiWarning = variant === 'original' && shouldWarnAboutMobileData(photos.length, await isOnWifi())
       ? formatMobileDataWarning(photos.length)
       : null;
 
@@ -133,6 +136,7 @@ export function useSharePhotos(): {
       const result = await sharePhotos(photos, {
         signal: controller.signal,
         onProgress: setProgress,
+        variant,
       });
       return { status: 'done', shared: result.shared, failedCount: result.failedCount, wifiWarning };
     } catch (error) {

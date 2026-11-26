@@ -133,3 +133,16 @@ describe('formatShareDiagnostic', () => {
     expect(formatShareDiagnostic([], 'Activity not found')).toBe('Activity not found');
   });
 });
+
+describe('share choice (PR 2, 2026-11-26)', () => {
+  it('"Teilen" is the medium without location; the original is a separate, explicit option with the hint', async () => {
+    const { SHARE_CHOICE } = await import('./sharing');
+    expect(SHARE_CHOICE.medium).toBe('Teilen');
+    expect(SHARE_CHOICE.original).toBe('Original senden');
+    expect(SHARE_CHOICE.message).toContain('1600 Pixel');
+    expect(SHARE_CHOICE.message).toContain('ohne Aufnahmeort');
+    expect(SHARE_CHOICE.message).toContain('enthält ggf. den Aufnahmeort');
+    expect(SHARE_CHOICE.title(1)).toBe('Foto teilen');
+    expect(SHARE_CHOICE.title(3)).toBe('3 Fotos teilen');
+  });
+});

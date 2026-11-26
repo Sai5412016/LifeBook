@@ -36,6 +36,7 @@ import { usePeopleOfChild } from '@/features/people/repository';
 import type { PersonRow } from '@/features/people/types';
 import { formatDayAndWeekLabel, resolveFullscreenUri } from '@/features/photos/identity';
 import { useSignedUrls } from '@/features/photos/hooks';
+import { fullscreenKeysToSign } from '@/features/photos/original-store';
 import { usePhotosOfChild } from '@/features/photos/repository';
 import type { PhotoRow } from '@/features/photos/types';
 
@@ -55,8 +56,8 @@ export default function StartScreen() {
   const stripPhotos = photos.slice(0, PHOTO_STRIP_COUNT);
 
   const signedUrls = useSignedUrls([
-    avatarPhoto?.medium_key,
-    avatarPhoto?.original_key,
+    // PR 2: the original only for a legacy photo without a medium (original-store.ts#fullscreenKeysToSign).
+    ...(avatarPhoto ? fullscreenKeysToSign(avatarPhoto) : []),
     ...stripPhotos.map((photo) => photo.thumb_key),
     ...people.map((person) => person.photo_key),
   ]);
