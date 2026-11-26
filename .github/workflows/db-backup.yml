@@ -1,0 +1,116 @@
+# Wöchentliche, verschlüsselte Sicherung der LifeBook-Datenbank nach Cloudflare R2.
+#
+# Warum: Im Supabase-Free-Plan gibt es keine automatischen Backups mehr.
+# Dieser Workflow ersetzt sie (Plan vom 08.11.2026, Anleitung: docs/backup.md).
+#
+# Ablauf: pg_dump 17 über den Session-Pooler (GitHub-Runner haben kein IPv6,
+# der direkte Datenbank-Host ist für sie nicht erreichbar) → pg_restore --list
+# als Prüfung → Verschlüsselung mit dem ÖFFENTLICHEN age-Schlüssel (der Runner
+# kann die Sicherung danach selbst nicht mehr lesen) → Upload nach R2.
+# Aufbewahrung: 56 Tage per R2-Lebenszyklusregel, nicht per Skript.
+#
+# Alle Werte kommen ausschließlich aus GitHub-Secrets. Nichts wird als
+# GitHub-Artefakt gespeichert: die Daten verlassen den Runner nur verschlüsselt
+# und nur Richtung R2.
+#
+# Noch NICHT aktiv: Der Zeitplan ist auskommentiert. Erst nach einem
+# erfolgreichen Testlauf von Hand (Actions → "DB-Backup" → Run workflow) die
+# beiden Zeilen unter "schedule" einkommentieren (siehe docs/backup.md).
+
+name: DB-Backup
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '17 3 * * 0'   # sonntags 03:17 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BACKUP_DB_URL: ${{ secrets.BACKUP_DB_URL }}
+      AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      # Neuere aws-cli-Versionen senden zusätzliche Prüfsummen-Header, die R2
+      # nicht in jedem Fall akzeptiert. Nur senden, wenn zwingend nötig.
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+
+    steps:
+      - name: Secrets vorhanden?
+        run: |
+          missing=0
+          for name in BACKUP_DB_URL AGE_PUBLIC_KEY R2_ENDPOINT R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            if [ -z "${!name}" ]; then echo "::error::Secret für $name fehlt"; missing=1; fi
+          done
+          case "$AGE_PUBLIC_KEY" in age1*) ;; *) echo "::error::AGE_PUBLIC_KEY ist kein öffentlicher age-Schlüssel (muss mit age1 beginnen)"; missing=1;; esac
+          exit $missing
+
+      - name: PostgreSQL-17-Werkzeuge und age installieren
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17 age
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Datenbank sichern (pg_dump)
+        run: |
+          set -euo pipefail
+          pg_dump --version
+          stamp="$(date -u +%Y-%m-%d_%H%M)"
+          echo "BACKUP_NAME=lifebook-db-${stamp}.dump" >> "$GITHUB_ENV"
+          # Alle Schemas, auch auth. Custom-Format: komprimiert, mit pg_restore
+          # gezielt wiederherstellbar.
+          pg_dump "$BACKUP_DB_URL" --format=custom --no-owner --no-privileges \
+            --file="lifebook-db-${stamp}.dump"
+          ls -l "lifebook-db-${stamp}.dump"
+
+      - name: Sicherung prüfen (pg_restore --list)
+        run: |
+          set -euo pipefail
+          pg_restore --list "$BACKUP_NAME" > toc.txt
+          echo "Einträge im Inhaltsverzeichnis: $(wc -l < toc.txt)"
+          # Ohne diese Tabellen ist die Sicherung wertlos.
+          for needle in "TABLE DATA public photos" "TABLE DATA public households" "TABLE DATA auth users"; do
+            if ! grep -q "$needle" toc.txt; then echo "::error::Sicherung unvollständig, fehlt: $needle"; exit 1; fi
+          done
+
+      - name: Verschlüsseln (age, öffentlicher Schlüssel)
+        run: |
+          set -euo pipefail
+          age --recipient "$AGE_PUBLIC_KEY" --output "${BACKUP_NAME}.age" "$BACKUP_NAME"
+          shred -u "$BACKUP_NAME" toc.txt
+          test -s "${BACKUP_NAME}.age"
+          ls -l "${BACKUP_NAME}.age"
+
+      - name: Nach R2 hochladen
+        run: |
+          set -euo pipefail
+          aws s3 cp "${BACKUP_NAME}.age" "s3://${R2_BUCKET}/db/${BACKUP_NAME}.age" \
+            --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          remote_size="$(aws s3api head-object --bucket "$R2_BUCKET" --key "db/${BACKUP_NAME}.age" \
+            --endpoint-url "$R2_ENDPOINT" --query ContentLength --output text)"
+          local_size="$(stat -c %s "${BACKUP_NAME}.age")"
+          if [ "$remote_size" != "$local_size" ]; then
+            echo "::error::Größe in R2 ($remote_size) weicht von lokal ($local_size) ab"; exit 1
+          fi
+          {
+            echo "### DB-Backup"
+            echo "- Datei: \`db/${BACKUP_NAME}.age\`"
+            echo "- Größe: ${local_size} Bytes (in R2 bestätigt)"
+            echo "- SHA-256 (verschlüsselt): \`$(sha256sum "${BACKUP_NAME}.age" | cut -d' ' -f1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          shred -u "${BACKUP_NAME}.age"

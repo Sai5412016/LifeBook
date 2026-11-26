@@ -473,6 +473,23 @@ unverändert gespeichert, inklusive eingebetteter Aufnahmedaten.
   unter `viewer/` und läuft bei Vercel (Projekt `lifebook-album`, Team
   `dabbly`) — nicht zurückbauen zu einer HTML-liefernden Funktion.
 
+### Edge Functions: Das Repo ist die Quelle der Wahrheit (seit 2026-11-26)
+
+Am 08.11.2026 festgestellt: `supabase/functions/album/index.ts` im Repo hatte
+237 Zeilen, die laufende Function (v12) 648 — Stammbaum, Vorschläge, Musik und
+Gäste-Upload lebten nur im Deployment. Dasselbe Muster wie Fallstrick 16
+beim Viewer. Am 26.11.2026 wurde der laufende Stand unverändert eingecheckt.
+
+→ **Ab jetzt ist das Repo die Quelle der Wahrheit.** Eine Function wird nur
+aus dem Repo deployt, nie direkt im Dashboard bearbeitet.
+
+→ **Vor JEDEM Deploy einer Edge Function:** den laufenden Stand holen
+(Supabase-MCP `get_edge_function` oder `supabase functions download <name>`)
+und gegen die Repo-Datei vergleichen (`git diff --no-index <geholt> <repo>`).
+Weicht der laufende Stand ab, ohne dass das Repo die Änderung kennt: erst
+klären und einchecken, dann deployen — sonst überschreibt der Deploy Arbeit,
+die nur im Deployment existiert.
+
 ## Befehle
 
 ```bash
