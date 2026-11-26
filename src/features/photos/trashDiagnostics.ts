@@ -31,6 +31,8 @@ export type TrashCleanupDiagnostics = {
   removed: number;
   /** Photos that failed to be removed in the last completed run — they stay in the trash and are retried on the next app start. */
   failed: number;
+  /** PR 2: originals whose delete in R2 failed and is remembered on this phone (./r2-delete-queue.ts). */
+  r2DeletesPending: number;
   /** Set only for a whole-run failure (runStatus 'failed'); null otherwise. */
   lastError: string | null;
   /** ISO-8601 UTC instant the last run (successful or not) finished. */
@@ -41,6 +43,7 @@ const initialDiagnostics: TrashCleanupDiagnostics = {
   runStatus: 'never',
   removed: 0,
   failed: 0,
+  r2DeletesPending: 0,
   lastError: null,
   lastRunAtUtcIso: null,
 };

@@ -86,6 +86,7 @@ import {
   cancelPhotoBackupRun,
   runMediumBackfill,
   runPhotoBackup,
+  runR2SelfTest,
   runUploadQueue,
 } from '@/features/photos/storage';
 import {
@@ -95,6 +96,8 @@ import {
 } from '@/features/photos/upload-retry';
 import { useUploadRetryStore } from '@/features/photos/upload-retry-store';
 import { useTrashCleanupDiagnostics } from '@/features/photos/trashDiagnostics';
+import type { R2SelfTestResult } from '@/features/photos/r2-self-test';
+import { ORIGINALS_TO_R2 } from '@/core/storage/originals-config';
 
 function SyncStatusRow() {
   const status = useStatus();
@@ -460,7 +463,7 @@ function PhotoStatusRow() {
         <ThemedText type="small" themeColor="textSecondary">
           Automatisches Aufräumen zuletzt: {formatTimeLabel(trashDiagnostics.lastRunAtUtcIso, deviceTimeZone())}
           {trashDiagnostics.runStatus === 'done'
-            ? ` · ${trashDiagnostics.removed} entfernt${trashDiagnostics.failed > 0 ? `, ${trashDiagnostics.failed} fehlgeschlagen` : ''}`
+            ? ` · ${trashDiagnostics.removed} entfernt${trashDiagnostics.failed > 0 ? `, ${trashDiagnostics.failed} fehlgeschlagen` : ''}${trashDiagnostics.r2DeletesPending > 0 ? ` · ${trashDiagnostics.r2DeletesPending} Original(e) in R2 noch nicht gelöscht` : ''}`
             : ''}
         </ThemedText>
       ) : null}
@@ -594,6 +597,47 @@ function NotificationStatusRow() {
   );
 }
 
+/**
+ * "R2-Verbindung prüfen" (PR 2, 2026-11-26): the first acceptance of the R2
+ * move from docs/r2.md, runnable on the phone itself — see
+ * features/photos/storage.ts#runR2SelfTest. Reads only, changes nothing,
+ * shows status codes only (never a URL or a key).
+ */
+function R2CheckRow() {
+  const db = usePowerSync();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<R2SelfTestResult | null>(null);
+
+  const handleCheck = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult(await runR2SelfTest(db));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ThemedView type="backgroundElement" style={styles.card}>
+      <ThemedText type="smallBold">Original-Speicher (R2)</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary">
+        Neue Originale: {ORIGINALS_TO_R2 ? 'Cloudflare R2' : 'Supabase'}
+      </ThemedText>
+      <Pressable onPress={handleCheck} disabled={busy} hitSlop={8}>
+        <ThemedText type="linkPrimary">{busy ? 'Wird geprüft …' : 'R2-Verbindung prüfen'}</ThemedText>
+      </Pressable>
+      {result
+        ? result.lines.map((line) => (
+            <ThemedText key={line} type="small" themeColor={result.ok ? 'textSecondary' : 'dangerText'}>
+              {line}
+            </ThemedText>
+          ))
+        : null}
+    </ThemedView>
+  );
+}
+
 function AccountRow() {
   const { session } = useAuth();
   const db = usePowerSync();
@@ -670,6 +714,7 @@ export default function EinstellungenScreen() {
           <PhotoStatusRow />
           <SyncStatusRow />
           <NotificationStatusRow />
+          <R2CheckRow />
 
           <Pressable onPress={() => router.push('/freigaben')} hitSlop={8}>
             <ThemedView type="backgroundElement" style={styles.card}>

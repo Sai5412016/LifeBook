@@ -51,7 +51,8 @@ import {
   formatSelectionCountLabel,
   toggleSelected,
 } from '@/features/photos/selection';
-import { formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
+import type { ShareVariant } from '@/features/photos/original-store';
+import { SHARE_CHOICE, formatShareFailureSummary, formatShareProgressLabel } from '@/features/photos/sharing';
 import { runUploadQueue } from '@/features/photos/storage';
 import { formatUploadRunMessage } from '@/features/photos/upload-retry';
 import type { PhotoRow } from '@/features/photos/types';
@@ -209,13 +210,13 @@ export default function ChronikScreen() {
     [selectionMode],
   );
 
-  const handleShareSelected = useCallback(async () => {
+  const runShare = useCallback(async (variant: ShareVariant) => {
     if (selectedPhotos.length === 0) {
       return;
     }
     setMessage(null);
 
-    const outcome = await share(selectedPhotos);
+    const outcome = await share(selectedPhotos, variant);
     switch (outcome.status) {
       case 'rejected':
         setMessage(outcome.message);
@@ -234,6 +235,19 @@ export default function ChronikScreen() {
       }
     }
   }, [selectedPhotos, share, handleExitSelection]);
+
+  // PR 2 (2026-11-26): "Teilen" sends the medium without location data; the
+  // original only through the explicit second button (sharing.ts#SHARE_CHOICE).
+  const handleShareSelected = useCallback(() => {
+    if (selectedPhotos.length === 0) {
+      return;
+    }
+    Alert.alert(SHARE_CHOICE.title(selectedPhotos.length), SHARE_CHOICE.message, [
+      { text: SHARE_CHOICE.cancel, style: 'cancel' },
+      { text: SHARE_CHOICE.original, onPress: () => void runShare('original') },
+      { text: SHARE_CHOICE.medium, onPress: () => void runShare('medium') },
+    ]);
+  }, [selectedPhotos.length, runShare]);
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedPhotos.length === 0) {

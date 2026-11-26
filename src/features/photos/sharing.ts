@@ -114,3 +114,22 @@ export function formatShareDiagnostic(files: readonly ShareDiagnosticFile[], err
   const fileLines = files.map((file) => `${file.uri} (${file.bytes} Bytes)`).join('\n');
   return `${errorMessage}\n\n${fileLines}`;
 }
+
+/* ── PR 2 (2026-11-26): medium by default, original only on explicit request ── */
+
+/**
+ * Texts of the share choice in the Chronik and the fullscreen viewer. The
+ * default button ("Teilen") sends the medium, 1600 px, checked free of
+ * location data (storage.ts#resolveMediumForSharing). "Original senden" is
+ * the second, explicit option — the original file is sent byte-identical,
+ * EXIF included, so it may carry where the photo was taken.
+ */
+export const SHARE_CHOICE = {
+  title: (count: number): string => (count === 1 ? 'Foto teilen' : `${count} Fotos teilen`),
+  message:
+    'Geteilt wird eine verkleinerte Fassung (1600 Pixel) ohne Aufnahmeort.\n\n' +
+    '„Original senden“ schickt die unveränderte Originaldatei – sie enthält ggf. den Aufnahmeort.',
+  cancel: 'Abbrechen',
+  original: 'Original senden',
+  medium: 'Teilen',
+} as const;
