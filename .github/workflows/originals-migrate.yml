@@ -1,0 +1,91 @@
+# Originale von Supabase Storage nach Cloudflare R2 kopieren — Phase A
+# (PR 3, 2026-11-26). Anleitung und Reihenfolge: docs/r2.md, Abschnitt 6.
+#
+# Warum als GitHub-Workflow: Claudes Sandbox darf *.supabase.co nicht
+# erreichen, GitHub-Runner schon. Nur von Hand startbar (kein Zeitplan).
+#
+# Was er tut, pro Foto (deleted_at IS NULL, original_store = 'supabase',
+# original_uploaded_at gesetzt), ältestes zuerst, höchstens `limit` Fotos:
+#   1. Original aus Supabase laden, SHA-256 und MD5 berechnen, Größe gegen
+#      Content-Length und photos.bytes prüfen.
+#   2. Liegt in R2 schon dasselbe Objekt (gleiche Größe, ETag = MD5):
+#      überspringen. Sonst Upload (ein Stück, mit Content-MD5) und HEAD-Prüfung.
+#   3. Erst danach: UPDATE photos SET original_store = 'r2'
+#      WHERE id = … AND original_store = 'supabase'.
+#   4. Jeder Fehler: Foto bleibt 'supabase', der Lauf geht weiter.
+# Danach, nur lesend: Abgleich R2 ↔ photos (Waisen, 'r2'-Zeilen ohne Objekt).
+#
+# Phase A löscht NICHTS — weder in Supabase Storage noch in R2.
+# dry_run = true (Standard): liest und prüft nur, schreibt nirgends.
+#
+# Ausgabe: nur Anzahlen, Bytes und gekürzte Foto-IDs im Job-Summary — keine
+# Schlüssel, Tokens oder signierten Adressen. Secrets maskiert GitHub ohnehin.
+
+name: Originale nach R2 (Phase A)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Testlauf: nur lesen und prüfen, nichts schreiben'
+        type: boolean
+        default: true
+      limit:
+        description: 'Höchstens so viele Fotos (0 = alle)'
+        type: number
+        default: 20
+
+permissions:
+  contents: read
+
+concurrency:
+  group: originals-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET_ORIGINALS: ${{ secrets.R2_BUCKET_ORIGINALS }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      # Wie beim DB-Backup: keine zusätzlichen Prüfsummen-Header, die R2 nicht
+      # immer akzeptiert. Die Integrität sichert hier Content-MD5.
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+      DRY_RUN: ${{ inputs.dry_run }}
+      LIMIT: ${{ inputs.limit }}
+
+    steps:
+      - name: Secrets vorhanden?
+        run: |
+          missing=0
+          for name in SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY R2_ENDPOINT R2_BUCKET_ORIGINALS AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            if [ -z "${!name}" ]; then echo "::error::Secret für $name fehlt"; missing=1; fi
+          done
+          if [ "$R2_BUCKET_ORIGINALS" != "lifebook-originals" ]; then
+            echo "::error::R2_BUCKET_ORIGINALS muss lifebook-originals sein"; missing=1
+          fi
+          exit $missing
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Werkzeuge
+        run: |
+          node --version
+          aws --version
+
+      - name: Originale kopieren und prüfen
+        run: node scripts/originals-migrate/run.mjs

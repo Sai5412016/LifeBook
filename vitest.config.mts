@@ -21,6 +21,11 @@ export default defineConfig({
   test: {
     environment: 'node',
     // supabase/functions: the PURE parts of Edge Functions (no Deno/npm import), e.g. media-sign's SigV4.
-    include: ['src/**/*.{test,spec}.ts', 'supabase/functions/**/*.{test,spec}.ts'],
+    include: [
+      'src/**/*.{test,spec}.ts',
+      'supabase/functions/**/*.{test,spec}.ts',
+      // scripts: pure parts of repo-run tools (plain .mjs, see scripts/originals-migrate/migrate.mjs).
+      'scripts/**/*.{test,spec}.mjs',
+    ],
   },
 });
