@@ -17,9 +17,19 @@ gelöscht.
 
 Alle Schritte unten sind für Windows. Rechne mit etwa 30 Minuten.
 
+## Stand
+
+| Was | Erledigt am | Ergebnis |
+|---|---|---|
+| Schlüsselpaar erzeugt (Schritt 1) | 26.11.2026 | öffentlicher Schlüssel als Secret, privater Schlüssel gesichert |
+| Secrets eingetragen (Schritt 2) | 26.11.2026 | alle 6 Secrets vorhanden |
+| Erster Lauf von Hand (Schritt 3) | 26.11.2026, 08:04 UTC | `db/lifebook-db-2026-11-26_0804.dump.age`, 844.713 Bytes, in R2 bestätigt |
+| Zeitplan eingeschaltet (Schritt 4) | 26.11.2026 | sonntags 03:17 UTC |
+| Wiederherstellung getestet (Schritt 5) | 26.11.2026 | entschlüsselt (844.321 Bytes), Dateikopf `PGDMP` |
+
 ---
 
-## 1. Schlüsselpaar erzeugen (einmalig)
+## 1. Schlüsselpaar erzeugen (einmalig) — erledigt am 26.11.2026
 
 1. Startmenü → „Terminal“ eingeben → **Terminal** öffnen.
 2. Das Programm `age` installieren:
@@ -52,7 +62,7 @@ Alle Schritte unten sind für Windows. Rechne mit etwa 30 Minuten.
 
 ---
 
-## 2. Secrets bei GitHub eintragen
+## 2. Secrets bei GitHub eintragen — erledigt am 26.11.2026
 
 Ort: GitHub → Repository **Sai5412016/LifeBook** → **Settings** → links
 **Secrets and variables** → **Actions** → Knopf **New repository secret**.
@@ -106,7 +116,7 @@ API-Token. Cloudflare zeigt den Secret Access Key **nur einmal** beim Anlegen.
 
 ---
 
-## 3. Ersten Lauf von Hand starten
+## 3. Ersten Lauf von Hand starten — erledigt am 26.11.2026
 
 1. GitHub → Repository → Reiter **Actions** → links **DB-Backup**.
 2. Rechts **Run workflow** → **Run workflow**.
@@ -120,7 +130,7 @@ die Meldung schicken. Die Meldungen enthalten keine Secrets.
 
 ---
 
-## 4. Wöchentlichen Zeitplan einschalten
+## 4. Wöchentlichen Zeitplan einschalten — erledigt am 26.11.2026
 
 Erst nach einem grünen Testlauf. In `.github/workflows/db-backup.yml` diese
 beiden Zeilen:
@@ -142,7 +152,7 @@ Ab dann läuft die Sicherung jeden Sonntag um 04:17 Uhr (Winterzeit) bzw.
 
 ---
 
-## 5. Wiederherstellung testen (einmal nach dem ersten Lauf, dann alle paar Monate)
+## 5. Wiederherstellung testen (einmal nach dem ersten Lauf, dann alle paar Monate) — zuletzt erfolgreich am 26.11.2026
 
 Eine Sicherung, die nie geöffnet wurde, ist nur eine Vermutung.
 
