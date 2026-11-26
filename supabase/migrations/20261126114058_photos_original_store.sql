@@ -4,7 +4,7 @@
 -- 'r2'       = Cloudflare R2, bucket `lifebook-originals` (signed via the
 --              Edge Function `media-sign`; used from PR 2 on).
 --
--- NOT YET APPLIED. Apply BEFORE the app ships a build/OTA whose
+-- Applied 2026-11-26 as version 20261126114058. Apply BEFORE the app ships a build/OTA whose
 -- src/core/db/schema.ts knows this column: PowerSync uploads every local
 -- column it knows, so an app that sends `original_store` to a database
 -- without it is rejected (PGRST204) and its whole upload queue stalls

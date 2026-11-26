@@ -320,7 +320,7 @@ function buildAppSchema() {
       // 2026-11-26: where the original lives — 'supabase' (bucket `photos`)
       // or 'r2' (Cloudflare bucket `lifebook-originals`, signed by the Edge
       // Function `media-sign`). Postgres: NOT NULL DEFAULT 'supabase'
-      // (supabase/migrations/20261126120000_photos_original_store.sql). A
+      // (supabase/migrations/20261126114058_photos_original_store.sql). A
       // row inserted on this phone reads NULL here until the server copy
       // syncs back — callers must treat NULL as 'supabase'. The migration
       // MUST be applied before an app version with this line ships, or
