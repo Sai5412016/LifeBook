@@ -20,6 +20,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.{test,spec}.ts'],
+    // supabase/functions: the PURE parts of Edge Functions (no Deno/npm import), e.g. media-sign's SigV4.
+    include: ['src/**/*.{test,spec}.ts', 'supabase/functions/**/*.{test,spec}.ts'],
   },
 });
