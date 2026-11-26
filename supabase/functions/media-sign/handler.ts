@@ -19,6 +19,8 @@
  *    (any member) and public.auth_writable_household_ids() (role IN
  *    ('owner','caregiver')), which the `photos` table and the `photos` bucket
  *    policies use (checked against the live database on 2026-11-26).
+ *  - An upload URL is bound to the photo's type AND to the exact byte size
+ *    the caller declared (signed Content-Type and Content-Length).
  *  - Nothing secret leaves this module except the signed URL itself in the
  *    success response; error bodies never contain keys or URLs.
  */
@@ -149,7 +151,15 @@ export async function handleMediaSign(authorization: string | null, body: unknow
 
   const now = deps.now();
   const expiresSeconds = EXPIRES_SECONDS[request.op];
-  const headers: Record<string, string> = request.op === 'put' ? { 'content-type': request.contentType as string } : {};
+  // PUT binds BOTH type and exact size into the signature (2026-11-26): R2
+  // recomputes the signature from the request's own Content-Type and
+  // Content-Length, so an upload of any other size or type is refused with
+  // 403 — the 50 MB check above is then enforced by R2 itself, not just
+  // believed from the phone. The client must send exactly these headers.
+  const headers: Record<string, string> =
+    request.op === 'put'
+      ? { 'content-type': request.contentType as string, 'content-length': String(request.bytes) }
+      : {};
   const url = await presignUrl({
     method: METHOD[request.op],
     url: objectUrl(deps.config.endpoint, deps.config.bucket, key),

@@ -176,14 +176,30 @@ describe('expiry and binding of the signed URLs', () => {
     expect(EXPIRES_SECONDS).toEqual({ get: 3600, put: 900, delete: 900 });
   });
 
-  it('PUT is bound to the content type; GET and DELETE sign only the host', async () => {
+  it('PUT is bound to content type and length; GET and DELETE sign only the host', async () => {
     const p = await handleMediaSign(AUTH, put, deps());
-    expect(new URL(String(p.body.url)).searchParams.get('X-Amz-SignedHeaders')).toBe('content-type;host');
-    expect(p.body.headers).toEqual({ 'content-type': 'image/jpeg' });
+    expect(new URL(String(p.body.url)).searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host');
+    expect(p.body.headers).toEqual({ 'content-type': 'image/jpeg', 'content-length': '7116470' });
     expect(p.body.method).toBe('PUT');
     const g = await handleMediaSign(AUTH, get, deps());
     expect(new URL(String(g.body.url)).searchParams.get('X-Amz-SignedHeaders')).toBe('host');
     expect((await handleMediaSign(AUTH, del, deps())).body.method).toBe('DELETE');
+  });
+
+  it('a different length gives a different signature — R2 accepts only exactly this size', async () => {
+    const signature = async (bytes: number) =>
+      new URL(String((await handleMediaSign(AUTH, { ...put, bytes }, deps())).body.url)).searchParams.get('X-Amz-Signature');
+    const a = await signature(7116470);
+    const b = await signature(7116471);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(b).not.toBe(a);
+    expect(await signature(7116470)).toBe(a); // deterministic for the same input
+  });
+
+  it('put without bytes is refused with 400 (the length is mandatory)', async () => {
+    const { bytes: _omit, ...withoutBytes } = put;
+    expect((await handleMediaSign(AUTH, withoutBytes, deps()))).toEqual({ status: 400, body: { error: 'invalid_request' } });
+    expect((await handleMediaSign(AUTH, { ...put, bytes: '7116470' }, deps())).status).toBe(400); // string, not a number
   });
 
   it('signs for region auto against the configured EU endpoint', async () => {
